@@ -53,3 +53,6 @@ out/
 # Temporary files
 *.tmp
 *.temp
+
+# TanStack Router generated files
+src/routeTree.gen.ts
