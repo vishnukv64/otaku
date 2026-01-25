@@ -1,14 +1,18 @@
 // Module declarations
-mod extensions;
+mod cache;
+mod commands;
 mod database;
+mod downloads;
+mod extensions;
 mod media;
 mod trackers;
-mod cache;
-mod downloads;
+
+use commands::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .manage(AppState::new())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -19,6 +23,13 @@ pub fn run() {
       }
       Ok(())
     })
+    .invoke_handler(tauri::generate_handler![
+      commands::load_extension,
+      commands::search_anime,
+      commands::get_anime_details,
+      commands::get_video_sources,
+      commands::list_extensions,
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

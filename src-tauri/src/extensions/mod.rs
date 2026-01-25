@@ -6,5 +6,12 @@
 // - Domain whitelisting and URL validation
 // - Extension API interface
 
-// Submodules
+pub mod extension;
+pub mod runtime;
 pub mod sandbox;
+pub mod types;
+
+// Re-export commonly used types
+pub use extension::Extension;
+pub use runtime::ExtensionRuntime;
+pub use types::*;
