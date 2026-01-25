@@ -4,25 +4,23 @@ import { Loader2, AlertCircle } from 'lucide-react'
 import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
-import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
 
-export const Route = createFileRoute('/')({
+export const Route = createFileRoute('/home')({
   component: HomeScreen,
 })
 
 // Content categories for the home page
-// sortType: 'view'/'update' = daily popular (dateRange: 1), 'score' = monthly popular (dateRange: 30)
 const CATEGORIES = [
-  { id: 'trending', title: 'Trending Now', sortType: 'view', page: 1 },
-  { id: 'recently-updated', title: 'Recently Updated', sortType: 'update', page: 1 },
-  { id: 'top-rated', title: 'Top Rated All Time', sortType: 'score', page: 1 },
-  { id: 'hot-today', title: 'Hot Today', sortType: 'view', page: 2 },
-  { id: 'new-episodes', title: 'New Episodes', sortType: 'update', page: 2 },
-  { id: 'all-time-classics', title: 'All-Time Classics', sortType: 'score', page: 2 },
-  { id: 'popular-series', title: 'Popular Series', sortType: 'view', page: 3 },
-  { id: 'must-watch', title: 'Must Watch', sortType: 'score', page: 3 },
+  { id: 'trending', title: 'Trending Now', sortType: 'view', genres: [] },
+  { id: 'top-rated', title: 'Top Rated Anime', sortType: 'score', genres: [] },
+  { id: 'recently-updated', title: 'Recently Updated', sortType: 'update', genres: [] },
+  { id: 'action', title: 'Action & Adventure', sortType: 'score', genres: ['Action'] },
+  { id: 'romance', title: 'Romance', sortType: 'score', genres: ['Romance'] },
+  { id: 'comedy', title: 'Comedy', sortType: 'score', genres: ['Comedy'] },
+  { id: 'thriller', title: 'Thriller & Mystery', sortType: 'score', genres: ['Thriller', 'Mystery'] },
+  { id: 'fantasy', title: 'Fantasy & Magic', sortType: 'score', genres: ['Fantasy'] },
 ]
 
 interface CategoryContent {
@@ -38,11 +36,7 @@ function HomeScreen() {
   const [error, setError] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
-  const [featuredIndex, setFeaturedIndex] = useState(0)
   const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
-
-  const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
 
   // Load extension on mount
   useEffect(() => {
@@ -75,15 +69,12 @@ function HomeScreen() {
       // Load each category
       for (const category of CATEGORIES) {
         try {
-          console.log(`Loading category: ${category.id}`, category)
           const results = await discoverAnime(
             extensionId,
-            category.page,
+            1,
             category.sortType,
-            []
+            category.genres
           )
-
-          console.log(`Category ${category.id} results:`, results)
 
           setCategories(prev => ({
             ...prev,
@@ -95,12 +86,11 @@ function HomeScreen() {
             },
           }))
 
-          // Set initial featured anime from trending
+          // Use first result from trending as featured
           if (category.id === 'trending' && results.results.length > 0 && !featuredAnime) {
             setFeaturedAnime(results.results[0])
           }
         } catch (err) {
-          console.error(`Category ${category.id} error:`, err)
           setCategories(prev => ({
             ...prev,
             [category.id]: {
@@ -117,59 +107,19 @@ function HomeScreen() {
     loadCategories()
   }, [extensionId])
 
-  // Auto-rotate hero section every 10 seconds
-  useEffect(() => {
-    const trendingContent = categories['trending']
-    if (!trendingContent || trendingContent.items.length === 0) return
-
-    const interval = setInterval(() => {
-      setFeaturedIndex(prevIndex => {
-        const nextIndex = (prevIndex + 1) % trendingContent.items.length
-        setFeaturedAnime(trendingContent.items[nextIndex])
-        return nextIndex
-      })
-    }, 10000) // 10 seconds
-
-    return () => clearInterval(interval)
-  }, [categories])
-
-  // Update featured anime when index changes
-  const handleFeaturedIndexChange = (index: number) => {
-    const trendingContent = categories['trending']
-    if (trendingContent && trendingContent.items[index]) {
-      setFeaturedIndex(index)
-      setFeaturedAnime(trendingContent.items[index])
-    }
-  }
-
   const handleWatch = () => {
-    // TODO: Navigate to watch screen with first episode
-    if (featuredAnime) {
-      handleMediaClick(featuredAnime)
-    }
+    // TODO: Navigate to watch screen or show details
+    console.log('Watch clicked')
   }
 
   const handleMoreInfo = () => {
-    if (featuredAnime) {
-      setSelectedMedia(featuredAnime)
-      setIsModalOpen(true)
-    }
+    // TODO: Show details modal or navigate to details page
+    console.log('More info clicked')
   }
 
   const handleMediaClick = (item: SearchResult) => {
-    setSelectedMedia(item)
-    setIsModalOpen(true)
-  }
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false)
-    setSelectedMedia(null)
-  }
-
-  const handleWatchEpisode = (episodeId: string) => {
-    // TODO: Navigate to video player
-    console.log('Watch episode:', episodeId)
-    handleCloseModal()
+    // TODO: Navigate to details page
+    console.log('Media clicked:', item.title)
   }
 
   if (loading) {
@@ -201,9 +151,6 @@ function HomeScreen() {
             media={featuredAnime}
             onWatch={handleWatch}
             onMoreInfo={handleMoreInfo}
-            totalItems={categories['trending']?.items.length || 1}
-            currentIndex={featuredIndex}
-            onIndexChange={handleFeaturedIndexChange}
           />
         )}
 
@@ -225,17 +172,6 @@ function HomeScreen() {
           })}
         </div>
       </div>
-
-      {/* Media Detail Modal */}
-      {selectedMedia && extensionId && (
-        <MediaDetailModal
-          media={selectedMedia}
-          extensionId={extensionId}
-          isOpen={isModalOpen}
-          onClose={handleCloseModal}
-          onWatch={handleWatchEpisode}
-        />
-      )}
     </div>
   )
 }

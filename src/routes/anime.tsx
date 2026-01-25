@@ -3,70 +3,15 @@ import { useEffect, useState } from 'react'
 import { Search, Loader2, AlertCircle } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import { loadExtension } from '@/utils/tauri-commands'
-import { MediaCarousel } from '@/components/media/MediaCarousel'
+import { MediaCard } from '@/components/media/MediaCard'
+import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 
 export const Route = createFileRoute('/anime')({
   component: AnimeScreen,
 })
 
-// Example extension code
-const EXAMPLE_EXTENSION_CODE = `
-const extensionObject = {
-  id: "com.example.anime",
-  name: "Example Anime Source",
-  version: "1.0.0",
-  type: "anime",
-  language: "en",
-  baseUrl: "https://example.com",
-
-  search: async (query, page) => {
-    const results = Array.from({ length: 12 }, (_, i) => ({
-      id: \`anime-\${page}-\${i + 1}\`,
-      title: \`\${query} - Result \${(page - 1) * 12 + i + 1}\`,
-      coverUrl: "https://via.placeholder.com/300x400/1a1a1a/e50914?text=Anime",
-      description: "An exciting anime about adventures and friendships.",
-      year: 2024,
-      status: i % 3 === 0 ? "Ongoing" : "Completed"
-    }));
-
-    return {
-      results: results,
-      hasNextPage: page < 5
-    };
-  },
-
-  getDetails: async (id) => {
-    return {
-      id: id,
-      title: "Example Anime Title",
-      coverUrl: "https://via.placeholder.com/300x400/1a1a1a/e50914?text=Anime",
-      description: "This is a detailed description of the anime.",
-      genres: ["Action", "Adventure", "Fantasy"],
-      status: "Ongoing",
-      year: 2024,
-      rating: 8.5,
-      episodes: Array.from({ length: 12 }, (_, i) => ({
-        id: \`ep-\${i + 1}\`,
-        number: i + 1,
-        title: \`Episode \${i + 1}\`,
-        thumbnail: "https://via.placeholder.com/320x180/1a1a1a/e50914"
-      }))
-    };
-  },
-
-  getSources: async (episodeId) => {
-    return {
-      sources: [
-        { url: "https://example.com/1080p.m3u8", quality: "1080p", type: "hls" },
-        { url: "https://example.com/720p.m3u8", quality: "720p", type: "hls" }
-      ],
-      subtitles: [
-        { url: "https://example.com/en.vtt", language: "en", label: "English" }
-      ]
-    };
-  }
-};
-`
+// Use real AllAnime extension
+const EXTENSION_CODE = ALLANIME_EXTENSION
 
 function AnimeScreen() {
   const [extensionId, setExtensionId] = useState<string | null>(null)
@@ -83,11 +28,11 @@ function AnimeScreen() {
     selectMedia,
   } = useMediaStore()
 
-  // Load example extension on mount
+  // Load AllAnime extension on mount
   useEffect(() => {
     const initExtension = async () => {
       try {
-        const metadata = await loadExtension(EXAMPLE_EXTENSION_CODE)
+        const metadata = await loadExtension(EXTENSION_CODE)
         setExtensionId(metadata.id)
         setLoading(false)
       } catch (err) {
@@ -158,13 +103,35 @@ function AnimeScreen() {
       {/* Search Results */}
       {searchQuery && (
         <div>
-          <MediaCarousel
-            title={`Search Results for "${searchQuery}"`}
-            items={searchResults}
-            loading={searchLoading}
-            onItemClick={(item) => extensionId && selectMedia(extensionId, item.id)}
-          />
+          {/* Loading State */}
+          {searchLoading && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)] mb-4" />
+              <p className="text-lg text-[var(--color-text-secondary)]">
+                Searching for "{searchQuery}"...
+              </p>
+            </div>
+          )}
 
+          {/* Results */}
+          {!searchLoading && searchResults.length > 0 && (
+            <div>
+              <h2 className="text-xl font-semibold mb-4">
+                Search Results for "{searchQuery}" ({searchResults.length} results)
+              </h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {searchResults.map((item) => (
+                  <MediaCard
+                    key={item.id}
+                    media={item}
+                    onClick={() => extensionId && selectMedia(extensionId, item.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error State */}
           {searchError && (
             <div className="text-center py-8">
               <AlertCircle className="w-12 h-12 text-[var(--color-accent-primary)] mx-auto mb-3" />
@@ -172,6 +139,7 @@ function AnimeScreen() {
             </div>
           )}
 
+          {/* No Results */}
           {!searchLoading && searchResults.length === 0 && !searchError && (
             <div className="text-center py-12">
               <p className="text-lg text-[var(--color-text-secondary)]">
@@ -188,11 +156,10 @@ function AnimeScreen() {
           <div className="text-6xl mb-6">🔍</div>
           <h2 className="text-2xl font-semibold mb-3">Start Searching</h2>
           <p className="text-[var(--color-text-secondary)] max-w-md mx-auto">
-            Use the search bar above to find anime. Try searching for anything - the example
-            extension will return mock results!
+            Use the search bar above to find anime. Try searching for "Demon Slayer", "Naruto", or any other anime title!
           </p>
           <p className="mt-4 text-sm text-[var(--color-text-muted)]">
-            Using: Example Anime Source (Demo)
+            Using: AllAnime (Real Data)
           </p>
         </div>
       )}

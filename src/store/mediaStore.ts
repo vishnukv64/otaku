@@ -48,7 +48,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   search: async (extensionId, query, page = 1) => {
-    set({ searchLoading: true, searchError: null })
+    set({ searchLoading: true, searchError: null, searchQuery: query })
 
     try {
       const results = await tauri.searchAnime(extensionId, query, page)

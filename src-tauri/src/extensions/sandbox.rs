@@ -7,7 +7,6 @@
 // - Response type validation
 
 use anyhow::{anyhow, Result};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -29,7 +28,6 @@ pub struct FetchResponse {
 
 /// Safe HTTP fetch implementation
 pub struct SafeFetch {
-    client: Client,
     allowed_domains: Vec<String>,
 }
 
@@ -37,11 +35,6 @@ impl SafeFetch {
     /// Create a new SafeFetch instance
     pub fn new(allowed_domains: Vec<String>) -> Self {
         Self {
-            client: Client::builder()
-                .user_agent("Otaku/1.0")
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap(),
             allowed_domains,
         }
     }
@@ -69,8 +62,10 @@ impl SafeFetch {
         })
     }
 
-    /// Perform a safe HTTP fetch
-    pub async fn fetch(&self, url: &str, options: Option<FetchOptions>) -> Result<FetchResponse> {
+    /// Perform a safe HTTP fetch (using ureq)
+    pub fn fetch(&self, url: &str, options: Option<FetchOptions>) -> Result<FetchResponse> {
+        use std::io::Read;
+
         // Validate URL
         if !self.is_url_allowed(url) {
             return Err(anyhow!("URL not in allowed domains: {}", url));
@@ -85,39 +80,40 @@ impl SafeFetch {
         // Build request
         let method = options.method.as_deref().unwrap_or("GET");
         let mut request = match method.to_uppercase().as_str() {
-            "GET" => self.client.get(url),
-            "POST" => self.client.post(url),
-            "PUT" => self.client.put(url),
-            "DELETE" => self.client.delete(url),
+            "GET" => ureq::get(url),
+            "POST" => ureq::post(url),
+            "PUT" => ureq::put(url),
+            "DELETE" => ureq::delete(url),
             _ => return Err(anyhow!("Unsupported HTTP method: {}", method)),
         };
 
         // Add headers
         if let Some(headers) = options.headers {
             for (key, value) in headers {
-                request = request.header(&key, &value);
+                request = request.set(&key, &value);
             }
         }
 
-        // Add body
-        if let Some(body) = options.body {
-            request = request.body(body);
-        }
-
         // Execute request
-        let response = request.send().await?;
-        let status = response.status().as_u16();
+        let response = if let Some(body) = options.body {
+            request.send_string(&body)?
+        } else {
+            request.call()?
+        };
+
+        let status = response.status();
 
         // Extract headers
         let mut headers = HashMap::new();
-        for (key, value) in response.headers() {
-            if let Ok(value_str) = value.to_str() {
-                headers.insert(key.to_string(), value_str.to_string());
+        for header_name in response.headers_names() {
+            if let Some(value) = response.header(&header_name) {
+                headers.insert(header_name, value.to_string());
             }
         }
 
         // Get body
-        let body = response.text().await?;
+        let mut body = String::new();
+        response.into_reader().take(10_000_000).read_to_string(&mut body)?;
 
         Ok(FetchResponse {
             status,

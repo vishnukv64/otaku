@@ -14,6 +14,7 @@ pub struct ExtensionMetadata {
     #[serde(rename = "type")]
     pub extension_type: ExtensionType,
     pub language: String,
+    #[serde(alias = "baseUrl")]
     pub base_url: String,
 }
 
@@ -30,16 +31,21 @@ pub enum ExtensionType {
 pub struct SearchResult {
     pub id: String,
     pub title: String,
+    #[serde(alias = "coverUrl")]
     pub cover_url: Option<String>,
+    #[serde(alias = "trailerUrl")]
+    pub trailer_url: Option<String>,
     pub description: Option<String>,
     pub year: Option<u32>,
     pub status: Option<String>,
+    pub rating: Option<f32>,
 }
 
 /// Paginated search results
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResults {
     pub results: Vec<SearchResult>,
+    #[serde(alias = "hasNextPage")]
     pub has_next_page: bool,
 }
 
@@ -57,7 +63,10 @@ pub struct Episode {
 pub struct MediaDetails {
     pub id: String,
     pub title: String,
+    #[serde(alias = "coverUrl")]
     pub cover_url: Option<String>,
+    #[serde(alias = "trailerUrl")]
+    pub trailer_url: Option<String>,
     pub description: Option<String>,
     pub genres: Vec<String>,
     pub status: Option<String>,

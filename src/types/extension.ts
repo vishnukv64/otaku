@@ -20,9 +20,11 @@ export interface SearchResult {
   id: string
   title: string
   cover_url?: string
+  trailer_url?: string
   description?: string
   year?: number
   status?: string
+  rating?: number
 }
 
 export interface SearchResults {
@@ -41,6 +43,7 @@ export interface MediaDetails {
   id: string
   title: string
   cover_url?: string
+  trailer_url?: string
   description?: string
   genres: string[]
   status?: string

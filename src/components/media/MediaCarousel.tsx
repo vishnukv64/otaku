@@ -57,22 +57,26 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
 
       {/* Carousel Container */}
       <div className="relative">
-        {/* Previous Button */}
+        {/* Previous Button - Always visible on hover */}
         <button
           onClick={scrollPrev}
-          className="absolute left-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-r from-black/80 to-transparent opacity-0 group-hover/carousel:opacity-100 transition-opacity flex items-center justify-center hover:from-black/90"
+          className="absolute left-0 top-0 bottom-0 z-10 w-16 bg-gradient-to-r from-black via-black/80 to-transparent opacity-0 group-hover/carousel:opacity-100 transition-all flex items-center justify-start pl-2 hover:w-20"
           aria-label="Previous"
         >
-          <ChevronLeft size={32} />
+          <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 hover:scale-110 transition-all">
+            <ChevronLeft size={28} />
+          </div>
         </button>
 
-        {/* Next Button */}
+        {/* Next Button - Always visible on hover */}
         <button
           onClick={scrollNext}
-          className="absolute right-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-l from-black/80 to-transparent opacity-0 group-hover/carousel:opacity-100 transition-opacity flex items-center justify-center hover:from-black/90"
+          className="absolute right-0 top-0 bottom-0 z-10 w-16 bg-gradient-to-l from-black via-black/80 to-transparent opacity-0 group-hover/carousel:opacity-100 transition-all flex items-center justify-end pr-2 hover:w-20"
           aria-label="Next"
         >
-          <ChevronRight size={32} />
+          <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 hover:scale-110 transition-all">
+            <ChevronRight size={28} />
+          </div>
         </button>
 
         {/* Embla Viewport */}

@@ -67,14 +67,64 @@ impl ExtensionRuntime {
             "#,
             )?;
 
-            // Inject the __fetch wrapper (will be implemented next)
-            ctx.eval::<(), _>(
-                r#"
-                // Placeholder for __fetch - will be replaced with actual implementation
-                globalThis.__fetch = async function(url, options) {
-                    throw new Error("__fetch not yet implemented");
+            // Register __fetch as a Rust function using ureq (pure sync, no tokio)
+            let fetch_fn = rquickjs::Function::new(ctx.clone(), |url: String, options: rquickjs::Object| {
+                use std::io::Read;
+
+                log::info!("__fetch called: {}", &url[..url.len().min(100)]);
+
+                // Parse options
+                let method = options.get::<_, Option<String>>("method")
+                    .unwrap_or(None)
+                    .unwrap_or_else(|| "GET".to_string());
+
+                // Build request using ureq
+                let mut request = match method.as_str() {
+                    "POST" => ureq::post(&url),
+                    _ => ureq::get(&url),
                 };
 
+                // Add headers if provided
+                if let Ok(Some(headers)) = options.get::<_, Option<rquickjs::Object>>("headers") {
+                    for key in headers.keys::<String>() {
+                        if let Ok(k) = key {
+                            if let Ok(value) = headers.get::<_, String>(&k) {
+                                request = request.set(&k, &value);
+                            }
+                        }
+                    }
+                }
+
+                // Execute request
+                match request.call() {
+                    Ok(response) => {
+                        let status = response.status();
+                        let mut body = String::new();
+                        let read_result = response.into_reader()
+                            .take(10_000_000)
+                            .read_to_string(&mut body);
+
+                        log::info!("__fetch response: status={}, body_len={}, read_ok={}",
+                            status, body.len(), read_result.is_ok());
+
+                        // Return response object
+                        Ok(serde_json::json!({
+                            "status": status,
+                            "body": body
+                        }).to_string())
+                    },
+                    Err(e) => {
+                        log::error!("__fetch error: {:?}", e);
+                        Err(rquickjs::Error::Exception)
+                    },
+                }
+            })?;
+
+            ctx.globals().set("__fetch", fetch_fn)?;
+
+            // Add __log placeholder
+            ctx.eval::<(), _>(
+                r#"
                 globalThis.__log = function(message) {
                     // Placeholder for logging
                 };
@@ -106,6 +156,50 @@ impl ExtensionRuntime {
                 .to_string()?;
 
             let search_results: SearchResults = serde_json::from_str(&json_str)?;
+
+            Ok(search_results)
+        })
+    }
+
+    /// Call extension's discover method with filters
+    pub fn discover(&self, page: u32, sort_type: Option<String>, genres: Vec<String>) -> Result<SearchResults> {
+        log::info!("Discover called: page={}, sort_type={:?}, genres={:?}", page, sort_type, genres);
+
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+
+            // Check if discover method exists, fallback to search if not
+            let discover_fn: Option<rquickjs::Function> = ext_obj.get("discover").ok();
+
+            let result: rquickjs::Value = if let Some(fn_obj) = discover_fn {
+                log::info!("Calling discover method");
+                // Call discover with sort type and genres
+                let sort = sort_type.unwrap_or_else(|| "score".to_string());
+
+                // Create JavaScript array for genres
+                let genres_js = ctx.eval::<rquickjs::Value, _>("[]")?;
+                let genres_arr = genres_js.as_object().unwrap();
+                for (i, genre) in genres.iter().enumerate() {
+                    genres_arr.set(i as u32, genre.as_str())?;
+                }
+
+                fn_obj.call((page, sort.as_str(), genres_arr.clone()))?
+            } else {
+                log::info!("Discover method not found, using search");
+                // Fallback to search with empty query
+                let search_fn: rquickjs::Function = ext_obj.get("search")?;
+                search_fn.call(("", page))?
+            };
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify discover result"))?
+                .to_string()?;
+
+            log::info!("Discover result JSON length: {}", json_str.len());
+            log::debug!("Discover result: {}", &json_str[..json_str.len().min(200)]);
+
+            let search_results: SearchResults = serde_json::from_str(&json_str)?;
+            log::info!("Parsed {} results", search_results.results.len());
 
             Ok(search_results)
         })

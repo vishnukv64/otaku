@@ -26,6 +26,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       commands::load_extension,
       commands::search_anime,
+      commands::discover_anime,
       commands::get_anime_details,
       commands::get_video_sources,
       commands::list_extensions,
