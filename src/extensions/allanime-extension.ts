@@ -178,7 +178,7 @@ const extensionObject = {
   },
 
   getDetails: (id) => {
-    const episodesQuery = \`query ($showId: String!) { show(_id: $showId) { _id name thumbnail description status score season availableEpisodes availableEpisodesDetail } }\`;
+    const episodesQuery = \`query ($showId: String!) { show(_id: $showId) { _id name thumbnail description status score season availableEpisodes availableEpisodesDetail genres tags } }\`;
 
     const variables = { showId: id };
     const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(episodesQuery)}\`;
@@ -223,7 +223,7 @@ const extensionObject = {
         title: show.name,
         coverUrl: coverUrl,
         description: show.description || 'No description available',
-        genres: [],
+        genres: show.genres || [],
         status: show.status || 'Unknown',
         year: show.season?.year || null,
         rating: show.score ? parseFloat(show.score) : null,

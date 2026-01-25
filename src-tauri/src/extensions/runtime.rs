@@ -107,6 +107,23 @@ impl ExtensionRuntime {
                         log::info!("__fetch response: status={}, body_len={}, read_ok={}",
                             status, body.len(), read_result.is_ok());
 
+                        // Detailed logging for AllAnime API responses
+                        if url.contains("api.allanime.day") {
+                            log::info!("=== ALLANIME API REQUEST ===");
+                            log::info!("URL: {}", url);
+                            log::info!("Method: {}", method);
+
+                            // Parse and pretty-print the response body
+                            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&body) {
+                                let pretty_json = serde_json::to_string_pretty(&json_value)
+                                    .unwrap_or_else(|_| body.clone());
+                                log::info!("Response Body (parsed JSON):\n{}", pretty_json);
+                            } else {
+                                log::info!("Response Body (raw): {}", &body[..body.len().min(1000)]);
+                            }
+                            log::info!("============================");
+                        }
+
                         // Return response object
                         Ok(serde_json::json!({
                             "status": status,
