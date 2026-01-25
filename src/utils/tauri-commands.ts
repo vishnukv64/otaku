@@ -1,15 +1,73 @@
 /**
  * Type-safe wrappers for Tauri IPC commands
  *
- * This file will contain all frontend-to-backend communication functions.
+ * This file contains all frontend-to-backend communication functions.
  * Each function corresponds to a Tauri command defined in the Rust backend.
  */
 
-// Placeholder for future Tauri commands
-// Example:
-// import { invoke } from '@tauri-apps/api/core'
-// export async function searchAnime(query: string): Promise<SearchResult[]> {
-//   return await invoke('search_anime', { query })
-// }
+import { invoke } from '@tauri-apps/api/core'
+import type {
+  ExtensionMetadata,
+  SearchResults,
+  MediaDetails,
+  VideoSources,
+} from '@/types/extension'
 
-export default {}
+/**
+ * Load an extension from JavaScript code
+ * @param code - Extension JavaScript code
+ * @returns Extension metadata
+ */
+export async function loadExtension(code: string): Promise<ExtensionMetadata> {
+  return await invoke('load_extension', { code })
+}
+
+/**
+ * Search for anime using a specific extension
+ * @param extensionId - Extension ID
+ * @param query - Search query
+ * @param page - Page number (1-indexed)
+ * @returns Search results with pagination info
+ */
+export async function searchAnime(
+  extensionId: string,
+  query: string,
+  page: number
+): Promise<SearchResults> {
+  return await invoke('search_anime', { extensionId, query, page })
+}
+
+/**
+ * Get detailed information about an anime
+ * @param extensionId - Extension ID
+ * @param animeId - Anime ID from search results
+ * @returns Detailed anime information with episodes
+ */
+export async function getAnimeDetails(
+  extensionId: string,
+  animeId: string
+): Promise<MediaDetails> {
+  return await invoke('get_anime_details', { extensionId, animeId })
+}
+
+/**
+ * Get video sources for an episode
+ * @param extensionId - Extension ID
+ * @param episodeId - Episode ID
+ * @returns Video sources with quality options and subtitles
+ */
+export async function getVideoSources(
+  extensionId: string,
+  episodeId: string
+): Promise<VideoSources> {
+  return await invoke('get_video_sources', { extensionId, episodeId })
+}
+
+/**
+ * List all loaded extensions
+ * @returns Array of extension metadata
+ */
+export async function listExtensions(): Promise<ExtensionMetadata[]> {
+  return await invoke('list_extensions')
+}
+
