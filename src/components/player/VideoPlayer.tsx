@@ -402,11 +402,11 @@ export function VideoPlayer({
           break
         case 'ArrowLeft':
           e.preventDefault()
-          video.currentTime = Math.max(0, video.currentTime - 10)
+          seekToTime(Math.max(0, video.currentTime - 10))
           break
         case 'ArrowRight':
           e.preventDefault()
-          video.currentTime = Math.min(duration, video.currentTime + 10)
+          seekToTime(Math.min(duration, video.currentTime + 10))
           break
         case 'ArrowUp':
           e.preventDefault()
@@ -449,14 +449,52 @@ export function VideoPlayer({
     video.muted = !video.muted
   }
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
     if (!containerRef.current) return
 
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen()
-    } else {
-      document.exitFullscreen()
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current.requestFullscreen()
+      } else {
+        await document.exitFullscreen()
+      }
+    } catch (err) {
+      console.error('Fullscreen error:', err)
+      // Try alternative fullscreen API
+      const elem = containerRef.current as any
+      if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen()
+      } else if (elem.mozRequestFullScreen) {
+        elem.mozRequestFullScreen()
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen()
+      }
     }
+  }
+
+  // Helper function to seek with proper audio sync
+  const seekToTime = (targetTime: number) => {
+    const video = videoRef.current
+    if (!video) return
+
+    // Pause playback during seek to prevent audio desync
+    const wasPlaying = !video.paused
+    if (wasPlaying) {
+      video.pause()
+    }
+
+    // Set the new time
+    video.currentTime = targetTime
+
+    // Wait for seeked event to ensure both audio and video are at the correct position
+    const handleSeeked = () => {
+      if (wasPlaying) {
+        video.play().catch((e) => console.error('Failed to resume after seek:', e))
+      }
+      video.removeEventListener('seeked', handleSeeked)
+    }
+
+    video.addEventListener('seeked', handleSeeked)
   }
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -465,7 +503,9 @@ export function VideoPlayer({
 
     const rect = e.currentTarget.getBoundingClientRect()
     const percent = (e.clientX - rect.left) / rect.width
-    video.currentTime = percent * duration
+    const targetTime = percent * duration
+
+    seekToTime(targetTime)
   }
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {

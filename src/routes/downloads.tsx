@@ -5,7 +5,6 @@
  */
 
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
 import { DownloadManager } from '@/components/player/DownloadManager'
 
 export const Route = createFileRoute('/downloads')({

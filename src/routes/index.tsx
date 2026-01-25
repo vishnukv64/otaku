@@ -166,12 +166,6 @@ function HomeScreen() {
     setSelectedMedia(null)
   }
 
-  const handleWatchEpisode = (episodeId: string) => {
-    // TODO: Navigate to video player
-    console.log('Watch episode:', episodeId)
-    handleCloseModal()
-  }
-
   if (loading) {
     return (
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
@@ -233,7 +227,6 @@ function HomeScreen() {
           extensionId={extensionId}
           isOpen={isModalOpen}
           onClose={handleCloseModal}
-          onWatch={handleWatchEpisode}
         />
       )}
     </div>

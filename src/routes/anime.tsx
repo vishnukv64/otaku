@@ -4,7 +4,9 @@ import { Search, Loader2, AlertCircle } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import { loadExtension } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
+import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import type { SearchResult } from '@/types/extension'
 
 export const Route = createFileRoute('/anime')({
   component: AnimeScreen,
@@ -18,6 +20,7 @@ function AnimeScreen() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
+  const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
 
   const {
     searchQuery,
@@ -25,7 +28,6 @@ function AnimeScreen() {
     searchLoading,
     searchError,
     search,
-    selectMedia,
   } = useMediaStore()
 
   // Load AllAnime extension on mount
@@ -124,7 +126,7 @@ function AnimeScreen() {
                   <MediaCard
                     key={item.id}
                     media={item}
-                    onClick={() => extensionId && selectMedia(extensionId, item.id)}
+                    onClick={() => setSelectedMedia(item)}
                   />
                 ))}
               </div>
@@ -162,6 +164,16 @@ function AnimeScreen() {
             Using: AllAnime (Real Data)
           </p>
         </div>
+      )}
+
+      {/* Media Detail Modal */}
+      {selectedMedia && extensionId && (
+        <MediaDetailModal
+          media={selectedMedia}
+          extensionId={extensionId}
+          isOpen={true}
+          onClose={() => setSelectedMedia(null)}
+        />
       )}
     </div>
   )
