@@ -21,7 +21,7 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    () => ({
+    (): SettingsState => ({
       theme: 'dark',
       defaultQuality: 'auto',
       downloadLocation: '',
