@@ -259,21 +259,77 @@ const extensionObject = {
       const sourceUrls = data?.data?.episode?.sourceUrls || [];
       const sources = [];
 
-      for (const source of sourceUrls) {
-        if (source.sourceUrl) {
-          const decodedUrl = extensionObject.hexDecode(source.sourceUrl);
-          const providerUrl = decodedUrl.includes('--') ? decodedUrl.split('--')[0] + '/clock.json' : decodedUrl + '/clock.json';
-          sources.push({ url: providerUrl, quality: source.sourceName || 'Default', type: 'hls' });
+      // Sort sources by priority (higher priority first)
+      const sortedSources = sourceUrls.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+      for (const source of sortedSources) {
+        if (!source.sourceUrl) continue;
+
+        // Skip download URLs for now - they return HTML player pages, not JSON
+        // We'll rely on the hex-encoded sourceUrls instead
+
+        // Handle hex-encoded sourceUrls (starting with --)
+        if (source.sourceUrl.startsWith('--')) {
+          const hexPart = source.sourceUrl.substring(2);
+          const decodedPath = extensionObject.hexDecode(hexPart);
+
+          console.log('Hex-encoded source:', source.sourceName);
+          console.log('  Decoded path:', decodedPath);
+
+          // Check if decoded path is already a full URL or a relative path
+          let baseUrl;
+          if (decodedPath.startsWith('http://') || decodedPath.startsWith('https://')) {
+            // Already a complete URL - use it directly (keep double slashes intact!)
+            baseUrl = decodedPath;
+          } else {
+            // Relative path - prepend base URL
+            baseUrl = 'https://blog.allanime.day' + (decodedPath.startsWith('/') ? decodedPath : '/' + decodedPath);
+          }
+
+          // Skip /apivtwo/clock URLs - they consistently return 404
+          // Only use direct video URLs (like tools.fast4speed.rsvp)
+          if (baseUrl.includes('/apivtwo/clock')) {
+            console.log('  Skipping clock URL (returns 404)');
+            continue;
+          }
+
+          // The decoded URL is the actual video URL - use it directly
+          // Don't append .m3u8 or /master.m3u8, and keep double slashes intact
+
+          console.log('  Final video URL:', baseUrl);
+
+          sources.push({
+            url: baseUrl,
+            quality: source.sourceName || 'Auto',
+            type: 'hls',
+            server: source.sourceName || 'Server'
+          });
+        }
+        // Handle plain URL sources (already decoded)
+        else if (source.sourceUrl.startsWith('http://') || source.sourceUrl.startsWith('https://')) {
+          // Skip iframe embeds - they're not direct video URLs
+          if (source.type === 'iframe') {
+            console.log('Skipping iframe source:', source.sourceName);
+            continue;
+          }
+
+          // Only include if it's marked as 'player' type
+          sources.push({
+            url: source.sourceUrl,
+            quality: source.sourceName || 'Default',
+            type: 'hls',
+            server: source.sourceName || 'Direct'
+          });
         }
       }
 
       return {
-        sources: sources.length > 0 ? sources : [{ url: 'https://example.com/fallback.m3u8', quality: 'No sources', type: 'hls' }],
+        sources: sources.length > 0 ? sources : [{ url: '', quality: 'No sources', type: 'hls', server: 'None' }],
         subtitles: []
       };
     } catch (error) {
       console.error('Failed to get sources:', error);
-      return { sources: [{ url: 'https://example.com/error.m3u8', quality: 'Error', type: 'hls' }], subtitles: [] };
+      return { sources: [{ url: '', quality: 'Error', type: 'hls', server: 'Error' }], subtitles: [] };
     }
   }
 };

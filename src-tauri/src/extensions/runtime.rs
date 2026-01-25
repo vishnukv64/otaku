@@ -139,14 +139,13 @@ impl ExtensionRuntime {
 
             ctx.globals().set("__fetch", fetch_fn)?;
 
-            // Add __log placeholder
-            ctx.eval::<(), _>(
-                r#"
-                globalThis.__log = function(message) {
-                    // Placeholder for logging
-                };
-            "#,
-            )?;
+            // Add __log function that outputs to Rust logger
+            let log_fn = rquickjs::Function::new(ctx.clone(), |message: String| {
+                log::info!("[Extension Console] {}", message);
+                Ok::<(), rquickjs::Error>(())
+            })?;
+
+            ctx.globals().set("__log", log_fn)?;
 
             // Load the extension code
             ctx.eval::<(), _>(self.extension.code.as_str())?;

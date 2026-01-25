@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Loader2 } from 'lucide-react'
 import type { SearchResult, MediaDetails } from '@/types/extension'
 import { getMediaDetails } from '@/utils/tauri-commands'
@@ -18,7 +19,6 @@ interface MediaDetailModalProps {
   extensionId: string
   isOpen: boolean
   onClose: () => void
-  onWatch?: (episodeId: string) => void
 }
 
 export function MediaDetailModal({
@@ -26,11 +26,22 @@ export function MediaDetailModal({
   extensionId,
   isOpen,
   onClose,
-  onWatch
 }: MediaDetailModalProps) {
+  const navigate = useNavigate()
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const handleWatch = (episodeId: string) => {
+    navigate({
+      to: '/watch',
+      search: {
+        extensionId,
+        animeId: media.id,
+        episodeId,
+      },
+    })
+  }
 
   useEffect(() => {
     if (!isOpen) return
@@ -190,7 +201,7 @@ export function MediaDetailModal({
                       <div className="flex items-center gap-3">
                         {details.episodes.length > 0 && (
                           <button
-                            onClick={() => onWatch?.(details.episodes[0].id)}
+                            onClick={() => handleWatch(details.episodes[0].id)}
                             className="flex items-center gap-2 px-8 py-3.5 bg-[var(--color-accent-primary)] text-white font-bold rounded-lg hover:bg-[var(--color-accent-primary)]/90 transition-all transform hover:scale-105 shadow-lg shadow-[var(--color-accent-primary)]/50"
                           >
                             <Play size={22} fill="currentColor" />
@@ -270,7 +281,7 @@ export function MediaDetailModal({
                       {details.episodes.map((episode) => (
                         <button
                           key={episode.id}
-                          onClick={() => onWatch?.(episode.id)}
+                          onClick={() => handleWatch(episode.id)}
                           className="group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] hover:ring-2 hover:ring-[var(--color-accent-primary)] transition-all hover:scale-105 transform"
                         >
                           {episode.thumbnail ? (

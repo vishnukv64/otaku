@@ -82,6 +82,7 @@ pub struct VideoSource {
     pub quality: String,
     #[serde(rename = "type")]
     pub source_type: String, // "hls", "mp4", "dash"
+    pub server: String, // Server name (e.g., 'Wixmp', 'Default', etc.)
 }
 
 /// Subtitle track

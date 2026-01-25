@@ -21,8 +21,9 @@ tauri-build = { version = "2.5.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.9.5", features = [] }
+tauri = { version = "2.9.5", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
 
 # Extension system
 rquickjs = { version = "0.7", features = ["loader", "classes"] }
@@ -31,3 +32,4 @@ tokio = { version = "1", features = ["full"] }
 url = "2.5"
 regex = "1.11"
 anyhow = "1.0"
+dirs = "5.0"

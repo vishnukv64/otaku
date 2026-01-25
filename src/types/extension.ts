@@ -56,6 +56,7 @@ export interface VideoSource {
   url: string
   quality: string
   type: string // 'hls' | 'mp4' | 'dash'
+  server: string // Server name (e.g., 'Wixmp', 'Default', etc.)
 }
 
 export interface Subtitle {

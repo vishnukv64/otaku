@@ -101,3 +101,77 @@ export async function listExtensions(): Promise<ExtensionMetadata[]> {
   return await invoke('list_extensions')
 }
 
+/**
+ * Proxy a video request to avoid CORS issues
+ * @param url - URL to proxy
+ * @param range - Optional HTTP Range header value (for seeking)
+ * @returns Response body as Uint8Array
+ */
+export async function proxyVideoRequest(
+  url: string,
+  range?: string
+): Promise<Uint8Array> {
+  return await invoke('proxy_video_request', { url, range })
+}
+
+/**
+ * Proxy HLS playlist and rewrite URLs
+ * @param url - URL of the m3u8 playlist
+ * @returns Rewritten playlist content
+ */
+export async function proxyHlsPlaylist(url: string): Promise<string> {
+  return await invoke('proxy_hls_playlist', { url })
+}
+
+/**
+ * Start downloading a video
+ * @param url - Video URL to download
+ * @param filename - Filename for the downloaded video
+ * @param animeTitle - Title of the anime
+ * @param episodeNumber - Episode number
+ * @returns Download ID for tracking progress
+ */
+export async function startDownload(
+  url: string,
+  filename: string,
+  animeTitle: string,
+  episodeNumber: number
+): Promise<string> {
+  return await invoke('start_download', { url, filename, animeTitle, episodeNumber })
+}
+
+/**
+ * Get download progress for a specific download
+ * @param downloadId - Download ID returned from startDownload
+ * @returns Download progress information
+ */
+export async function getDownloadProgress(downloadId: string): Promise<DownloadProgress> {
+  return await invoke('get_download_progress', { downloadId })
+}
+
+/**
+ * List all downloads
+ * @returns Array of all download progress information
+ */
+export async function listDownloads(): Promise<DownloadProgress[]> {
+  return await invoke('list_downloads')
+}
+
+/**
+ * Cancel an ongoing download
+ * @param downloadId - Download ID to cancel
+ */
+export async function cancelDownload(downloadId: string): Promise<void> {
+  return await invoke('cancel_download', { downloadId })
+}
+
+// Download types
+export interface DownloadProgress {
+  id: string
+  filename: string
+  total_bytes: number
+  downloaded_bytes: number
+  percentage: number
+  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled'
+}
+
