@@ -221,6 +221,47 @@ impl ExtensionRuntime {
         })
     }
 
+    /// Call extension's getRecommendations method
+    pub fn get_recommendations(&self) -> Result<SearchResults> {
+        log::info!("Get recommendations called");
+
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+
+            // Check if getRecommendations method exists
+            let recommendations_fn: Option<rquickjs::Function> = ext_obj.get("getRecommendations").ok();
+
+            let result: rquickjs::Value = if let Some(fn_obj) = recommendations_fn {
+                log::info!("Calling getRecommendations method");
+                fn_obj.call(())?
+            } else {
+                log::info!("getRecommendations method not found, using discover as fallback");
+                // Fallback to discover
+                let discover_fn: Option<rquickjs::Function> = ext_obj.get("discover").ok();
+                if let Some(fn_obj) = discover_fn {
+                    let genres_js = ctx.eval::<rquickjs::Value, _>("[]")?;
+                    fn_obj.call((1, "trending", genres_js))?
+                } else {
+                    // Last fallback to search
+                    let search_fn: rquickjs::Function = ext_obj.get("search")?;
+                    search_fn.call(("", 1))?
+                }
+            };
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify recommendations result"))?
+                .to_string()?;
+
+            log::info!("Recommendations result JSON length: {}", json_str.len());
+            log::debug!("Recommendations result: {}", &json_str[..json_str.len().min(200)]);
+
+            let search_results: SearchResults = serde_json::from_str(&json_str)?;
+            log::info!("Parsed {} recommendations", search_results.results.len());
+
+            Ok(search_results)
+        })
+    }
+
     /// Call extension's getDetails method
     pub fn get_details(&self, id: &str) -> Result<MediaDetails> {
         self.context.with(|ctx| {

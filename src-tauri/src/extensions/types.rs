@@ -58,11 +58,30 @@ pub struct Episode {
     pub thumbnail: Option<String>,
 }
 
+/// Season information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Season {
+    pub quarter: Option<String>,
+    pub year: Option<u32>,
+}
+
+/// Aired start date
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiredStart {
+    pub year: u32,
+    pub month: Option<u32>,
+    pub date: Option<u32>,
+}
+
 /// Detailed media information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaDetails {
     pub id: String,
     pub title: String,
+    #[serde(alias = "english_name")]
+    pub english_name: Option<String>,
+    #[serde(alias = "native_name")]
+    pub native_name: Option<String>,
     #[serde(alias = "coverUrl")]
     pub cover_url: Option<String>,
     #[serde(alias = "trailerUrl")]
@@ -73,6 +92,12 @@ pub struct MediaDetails {
     pub year: Option<u32>,
     pub rating: Option<f32>,
     pub episodes: Vec<Episode>,
+    #[serde(rename = "type")]
+    pub media_type: Option<String>,
+    pub season: Option<Season>,
+    pub episode_duration: Option<u64>,
+    pub episode_count: Option<u32>,
+    pub aired_start: Option<AiredStart>,
 }
 
 /// Video quality

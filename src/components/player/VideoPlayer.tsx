@@ -100,13 +100,21 @@ class ProxyLoader extends Hls.DefaultConfig.loader {
   }
 }
 
+interface Episode {
+  id: string
+  number: number
+  title?: string
+}
+
 interface VideoPlayerProps {
   sources: VideoSource[]
   animeTitle?: string
   currentEpisode?: number
   totalEpisodes?: number
+  episodes?: Episode[]
   onNextEpisode?: () => void
   onPreviousEpisode?: () => void
+  onEpisodeSelect?: (episodeId: string) => void
   onProgress?: (time: number) => void
   initialTime?: number
   autoPlay?: boolean
@@ -117,8 +125,10 @@ export function VideoPlayer({
   animeTitle,
   currentEpisode,
   totalEpisodes,
+  episodes,
   onNextEpisode,
   onPreviousEpisode,
+  onEpisodeSelect,
   onProgress,
   initialTime = 0,
   autoPlay = true,
@@ -135,6 +145,7 @@ export function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
+  const [showEpisodes, setShowEpisodes] = useState(false)
   const [loading, setLoading] = useState(true)
   const [buffering, setBuffering] = useState(false)
   const [bufferedPercentage, setBufferedPercentage] = useState(0)
@@ -373,11 +384,28 @@ export function VideoPlayer({
   // Fullscreen handling
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
+      const doc = document as any
+      const isFullscreen = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      )
+      setIsFullscreen(isFullscreen)
     }
 
+    // Listen to all fullscreen change events
     document.addEventListener('fullscreenchange', handleFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange)
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+    }
   }, [])
 
   // Keyboard shortcuts
@@ -449,25 +477,43 @@ export function VideoPlayer({
     video.muted = !video.muted
   }
 
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = () => {
     if (!containerRef.current) return
 
-    try {
-      if (!document.fullscreenElement) {
-        await containerRef.current.requestFullscreen()
-      } else {
-        await document.exitFullscreen()
-      }
-    } catch (err) {
-      console.error('Fullscreen error:', err)
-      // Try alternative fullscreen API
-      const elem = containerRef.current as any
-      if (elem.webkitRequestFullscreen) {
+    const elem = containerRef.current as any
+    const doc = document as any
+
+    // Check if already in fullscreen
+    const isFullscreen = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    )
+
+    if (!isFullscreen) {
+      // Enter fullscreen - try all APIs
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch((err: Error) => console.error('Fullscreen error:', err))
+      } else if (elem.webkitRequestFullscreen) {
         elem.webkitRequestFullscreen()
+      } else if (elem.webkitEnterFullscreen) {
+        elem.webkitEnterFullscreen()
       } else if (elem.mozRequestFullScreen) {
         elem.mozRequestFullScreen()
       } else if (elem.msRequestFullscreen) {
         elem.msRequestFullscreen()
+      }
+    } else {
+      // Exit fullscreen - try all APIs
+      if (doc.exitFullscreen) {
+        doc.exitFullscreen().catch((err: Error) => console.error('Exit fullscreen error:', err))
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen()
+      } else if (doc.mozCancelFullScreen) {
+        doc.mozCancelFullScreen()
+      } else if (doc.msExitFullscreen) {
+        doc.msExitFullscreen()
       }
     }
   }
@@ -623,28 +669,6 @@ export function VideoPlayer({
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
 
-          {/* Previous Episode */}
-          {onPreviousEpisode && currentEpisode && currentEpisode > 1 && (
-            <button
-              onClick={onPreviousEpisode}
-              className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
-              title="Previous Episode (P)"
-            >
-              <SkipBack size={20} />
-            </button>
-          )}
-
-          {/* Next Episode */}
-          {onNextEpisode && currentEpisode && totalEpisodes && currentEpisode < totalEpisodes && (
-            <button
-              onClick={onNextEpisode}
-              className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
-              title="Next Episode (N)"
-            >
-              <SkipForward size={20} />
-            </button>
-          )}
-
           {/* Time */}
           <span className="text-sm font-medium">
             {formatTime(currentTime)} / {formatTime(duration)}
@@ -653,11 +677,62 @@ export function VideoPlayer({
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Episode Info */}
-          {currentEpisode && totalEpisodes && (
-            <span className="text-sm font-medium">
-              Episode {currentEpisode} of {totalEpisodes}
-            </span>
+          {/* Episode Selector Dropdown */}
+          {episodes && episodes.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setShowEpisodes(!showEpisodes)}
+                className="px-3 py-2 flex items-center gap-2 hover:bg-white/20 rounded transition-colors text-sm font-medium"
+                title="Select Episode"
+              >
+                <span>Episode {currentEpisode || 1}</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showEpisodes && (
+                <>
+                  {/* Backdrop to close dropdown */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowEpisodes(false)}
+                  />
+
+                  {/* Episodes Dropdown */}
+                  <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl max-h-[400px] overflow-y-auto z-50 min-w-[250px]">
+                    <div className="p-2">
+                      <h4 className="text-sm font-semibold mb-2 px-2 text-[var(--color-text-muted)]">Episodes</h4>
+                      <div className="space-y-1">
+                        {episodes.map((episode) => (
+                          <button
+                            key={episode.id}
+                            onClick={() => {
+                              onEpisodeSelect?.(episode.id)
+                              setShowEpisodes(false)
+                            }}
+                            className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between ${
+                              currentEpisode === episode.number
+                                ? 'bg-[var(--color-accent-primary)] font-semibold'
+                                : ''
+                            }`}
+                          >
+                            <span>
+                              {episode.number}. {episode.title || `Episode ${episode.number}`}
+                            </span>
+                            {currentEpisode === episode.number && (
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {/* Volume */}

@@ -187,6 +187,29 @@ pub async fn discover_anime(
         .map_err(|e| format!("Discover failed: {}", e))
 }
 
+/// Get anime recommendations (trending/latest)
+#[tauri::command]
+pub async fn get_recommendations(
+    state: State<'_, AppState>,
+    extension_id: String,
+) -> Result<SearchResults, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::new(extension)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    runtime.get_recommendations()
+        .map_err(|e| format!("Get recommendations failed: {}", e))
+}
+
 /// List all loaded extensions
 #[tauri::command]
 pub async fn list_extensions(

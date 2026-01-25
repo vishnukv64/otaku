@@ -178,7 +178,7 @@ const extensionObject = {
   },
 
   getDetails: (id) => {
-    const episodesQuery = \`query ($showId: String!) { show(_id: $showId) { _id name thumbnail description status score season availableEpisodes availableEpisodesDetail genres tags } }\`;
+    const episodesQuery = \`query ($showId: String!) { show(_id: $showId) { _id name englishName nativeName thumbnail description status score season type airedStart episodeDuration episodeCount availableEpisodes availableEpisodesDetail genres tags } }\`;
 
     const variables = { showId: id };
     const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(episodesQuery)}\`;
@@ -221,13 +221,23 @@ const extensionObject = {
       return {
         id: show._id,
         title: show.name,
+        english_name: show.englishName || null,
+        native_name: show.nativeName || null,
         coverUrl: coverUrl,
         description: show.description || 'No description available',
         genres: show.genres || [],
         status: show.status || 'Unknown',
         year: show.season?.year || null,
         rating: show.score ? parseFloat(show.score) : null,
-        episodes: episodes
+        episodes: episodes,
+        type: show.type || null,
+        season: show.season ? {
+          quarter: show.season.quarter || null,
+          year: show.season.year || null
+        } : null,
+        episode_duration: show.episodeDuration ? parseInt(show.episodeDuration) : null,
+        episode_count: show.episodeCount ? parseInt(show.episodeCount) : null,
+        aired_start: show.airedStart || null
       };
     } catch (error) {
       console.error('Failed to get details:', error);
@@ -330,6 +340,76 @@ const extensionObject = {
     } catch (error) {
       console.error('Failed to get sources:', error);
       return { sources: [{ url: '', quality: 'Error', type: 'hls', server: 'Error' }], subtitles: [] };
+    }
+  },
+
+  getRecommendations: () => {
+    const today = new Date();
+    const dateStr = today.getFullYear().toString() +
+                    (today.getMonth()).toString().padStart(2, '0') +
+                    today.getDate().toString().padStart(2, '0');
+
+    const variables = {
+      pageSearch: {
+        type: "anime",
+        allowSameShow: true,
+        page: 1,
+        allowAdult: false,
+        allowUnknown: false,
+        dateAgo: parseInt(dateStr)
+      }
+    };
+
+    const extensions = {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "45167ede14941284b6ffe7c1b8dd81f56a197f600e48c2c92e256c489f1563d5"
+      }
+    };
+
+    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
+
+    try {
+      const responseStr = __fetch(url, {
+        method: 'GET',
+        headers: {
+          'Referer': 'https://allmanga.to',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+        }
+      });
+
+      const response = JSON.parse(responseStr);
+      const data = JSON.parse(response.body);
+      const recommendations = data?.data?.queryLatestPageStatus?.recommendations || [];
+
+      const results = recommendations.map(rec => {
+        const show = rec.anyCard;
+
+        // Handle thumbnail URL
+        let coverUrl = null;
+        if (show.thumbnail) {
+          if (show.thumbnail.startsWith('http://') || show.thumbnail.startsWith('https://')) {
+            coverUrl = show.thumbnail;
+          } else {
+            coverUrl = \`https://wp.youtube-anime.com/aln.youtube-anime.com/\${show.thumbnail}\`;
+          }
+        }
+
+        return {
+          id: show._id,
+          title: show.englishName || show.name,
+          coverUrl: coverUrl,
+          description: '',
+          year: show.airedStart?.year || null,
+          status: null,
+          rating: null
+        };
+      });
+
+      return { results: results.slice(0, 20), hasNextPage: false };
+    } catch (error) {
+      console.error('Failed to get recommendations:', error);
+      return { results: [], hasNextPage: false };
     }
   }
 };

@@ -8,7 +8,6 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
-import { EpisodeList } from '@/components/player/EpisodeList'
 import { getMediaDetails, getVideoSources } from '@/utils/tauri-commands'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 
@@ -159,6 +158,8 @@ function WatchPage() {
               animeTitle={details?.title}
               currentEpisode={currentEpisode?.number}
               totalEpisodes={details?.episodes.length}
+              episodes={details?.episodes}
+              onEpisodeSelect={handleEpisodeSelect}
               onNextEpisode={handleNextEpisode}
               onPreviousEpisode={handlePreviousEpisode}
               autoPlay
@@ -174,17 +175,6 @@ function WatchPage() {
             </div>
           )}
         </div>
-
-        {/* Episode List Sidebar */}
-        {details && (
-          <EpisodeList
-            episodes={details.episodes}
-            currentEpisodeId={currentEpisodeId}
-            onEpisodeSelect={handleEpisodeSelect}
-            animeTitle={details.title}
-            collapsible
-          />
-        )}
       </div>
     </div>
   )

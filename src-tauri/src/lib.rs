@@ -153,6 +153,7 @@ pub fn run() {
       commands::load_extension,
       commands::search_anime,
       commands::discover_anime,
+      commands::get_recommendations,
       commands::get_anime_details,
       commands::get_video_sources,
       commands::list_extensions,

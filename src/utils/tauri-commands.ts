@@ -38,6 +38,17 @@ export async function searchAnime(
 }
 
 /**
+ * Get recommended anime (trending/latest)
+ * @param extensionId - Extension ID
+ * @returns Recommended anime list
+ */
+export async function getRecommendations(
+  extensionId: string
+): Promise<SearchResults> {
+  return await invoke('get_recommendations', { extensionId })
+}
+
+/**
  * Get detailed information about an anime
  * @param extensionId - Extension ID
  * @param animeId - Anime ID from search results

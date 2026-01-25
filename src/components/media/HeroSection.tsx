@@ -30,17 +30,8 @@ export function HeroSection({
 }: HeroSectionProps) {
   return (
     <div className="relative w-full aspect-[16/9] mb-8 rounded-lg overflow-hidden">
-      {/* Background Video or Image */}
-      {media.trailer_url ? (
-        <video
-          src={media.trailer_url}
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-      ) : media.cover_url ? (
+      {/* Background Image */}
+      {media.cover_url ? (
         <img
           src={media.cover_url}
           alt={media.title}

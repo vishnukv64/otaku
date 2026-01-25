@@ -127,8 +127,18 @@ export function MediaDetailModal({
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <h1 className="text-5xl font-black mb-3 drop-shadow-2xl leading-tight tracking-tight">
-                        {details.title}
+                        {details.english_name || details.title}
                       </h1>
+                      {details.english_name && details.title !== details.english_name && (
+                        <h2 className="text-xl text-[var(--color-text-secondary)] mb-2 font-medium">
+                          {details.title}
+                        </h2>
+                      )}
+                      {details.native_name && (
+                        <h3 className="text-base text-[var(--color-text-muted)] mb-3">
+                          {details.native_name}
+                        </h3>
+                      )}
 
                       {/* Metadata Row 1 - Key Info */}
                       <div className="flex items-center gap-3 text-base mb-4 flex-wrap">
@@ -163,24 +173,42 @@ export function MediaDetailModal({
 
                       {/* Metadata Row 2 - Additional Details */}
                       <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)] mb-6 flex-wrap">
-                        <span className="flex items-center gap-2">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                          </svg>
-                          <span>TV Series</span>
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span>24 min/ep</span>
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          <span>Spring 2024</span>
-                        </span>
+                        {details.type && (
+                          <span className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                            </svg>
+                            <span>{details.type}</span>
+                          </span>
+                        )}
+                        {details.episode_duration && (
+                          <span className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span>{Math.round(details.episode_duration / 60000)} min/ep</span>
+                          </span>
+                        )}
+                        {details.season && (
+                          <span className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span>{details.season.quarter} {details.season.year}</span>
+                          </span>
+                        )}
+                        {details.aired_start && (
+                          <span className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                            </svg>
+                            <span>
+                              Aired: {details.aired_start.month && details.aired_start.date
+                                ? `${details.aired_start.month}/${details.aired_start.date}/`
+                                : ''}{details.aired_start.year}
+                            </span>
+                          </span>
+                        )}
                       </div>
 
                       {/* Genres */}
@@ -240,7 +268,12 @@ export function MediaDetailModal({
                   </div>
                   <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
                     <div className="text-[var(--color-text-muted)] text-sm mb-1">Episodes</div>
-                    <div className="text-2xl font-bold">{details.episodes.length}</div>
+                    <div className="text-2xl font-bold">
+                      {details.episodes.length}
+                      {details.episode_count && details.episode_count !== details.episodes.length && (
+                        <span className="text-sm text-[var(--color-text-muted)] ml-1">/ {details.episode_count}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
                     <div className="text-[var(--color-text-muted)] text-sm mb-1">Status</div>

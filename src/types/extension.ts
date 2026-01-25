@@ -42,6 +42,8 @@ export interface Episode {
 export interface MediaDetails {
   id: string
   title: string
+  english_name?: string
+  native_name?: string
   cover_url?: string
   trailer_url?: string
   description?: string
@@ -50,6 +52,18 @@ export interface MediaDetails {
   year?: number
   rating?: number
   episodes: Episode[]
+  type?: string // TV, ONA, OVA, Movie, Special
+  season?: {
+    quarter: string // Spring, Summer, Fall, Winter
+    year: number
+  }
+  episode_duration?: number // in milliseconds
+  episode_count?: number
+  aired_start?: {
+    year: number
+    month?: number
+    date?: number
+  }
 }
 
 export interface VideoSource {

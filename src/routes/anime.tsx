@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Search, Loader2, AlertCircle } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
-import { loadExtension } from '@/utils/tauri-commands'
+import { loadExtension, getRecommendations } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
@@ -21,6 +21,8 @@ function AnimeScreen() {
   const [error, setError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
+  const [recommendations, setRecommendations] = useState<SearchResult[]>([])
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false)
 
   const {
     searchQuery,
@@ -45,6 +47,25 @@ function AnimeScreen() {
 
     initExtension()
   }, [])
+
+  // Load recommendations when extension is ready
+  useEffect(() => {
+    const loadRecommendations = async () => {
+      if (!extensionId) return
+
+      setRecommendationsLoading(true)
+      try {
+        const results = await getRecommendations(extensionId)
+        setRecommendations(results.results)
+      } catch (err) {
+        console.error('Failed to load recommendations:', err)
+      } finally {
+        setRecommendationsLoading(false)
+      }
+    }
+
+    loadRecommendations()
+  }, [extensionId])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -152,17 +173,47 @@ function AnimeScreen() {
         </div>
       )}
 
-      {/* Empty State */}
+      {/* Recommendations / Empty State */}
       {!searchQuery && (
-        <div className="text-center py-20">
-          <div className="text-6xl mb-6">🔍</div>
-          <h2 className="text-2xl font-semibold mb-3">Start Searching</h2>
-          <p className="text-[var(--color-text-secondary)] max-w-md mx-auto">
-            Use the search bar above to find anime. Try searching for "Demon Slayer", "Naruto", or any other anime title!
-          </p>
-          <p className="mt-4 text-sm text-[var(--color-text-muted)]">
-            Using: AllAnime (Real Data)
-          </p>
+        <div>
+          {recommendationsLoading ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)] mb-4" />
+              <p className="text-lg text-[var(--color-text-secondary)]">
+                Loading recommendations...
+              </p>
+            </div>
+          ) : recommendations.length > 0 ? (
+            <div>
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                <svg className="w-7 h-7 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Recommended Anime
+
+              </h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {recommendations.map((item) => (
+                  <MediaCard
+                    key={item.id}
+                    media={item}
+                    onClick={() => setSelectedMedia(item)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-20">
+              <div className="text-6xl mb-6">🔍</div>
+              <h2 className="text-2xl font-semibold mb-3">Start Searching</h2>
+              <p className="text-[var(--color-text-secondary)] max-w-md mx-auto">
+                Use the search bar above to find anime. Try searching for "Demon Slayer", "Naruto", or any other anime title!
+              </p>
+              <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+                Using: AllAnime (Real Data)
+              </p>
+            </div>
+          )}
         </div>
       )}
 
