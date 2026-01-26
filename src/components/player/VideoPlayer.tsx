@@ -20,9 +20,10 @@ import {
   SkipForward,
   Loader2,
   AlertCircle,
+  X,
 } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
-import { proxyHlsPlaylist, proxyVideoRequest } from '@/utils/tauri-commands'
+import { proxyHlsPlaylist, proxyVideoRequest, saveWatchProgress } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
 
 // Custom HLS loader that proxies all requests through Rust backend
@@ -108,13 +109,17 @@ interface Episode {
 
 interface VideoPlayerProps {
   sources: VideoSource[]
+  mediaId?: string
+  episodeId?: string
   animeTitle?: string
+  episodeTitle?: string
   currentEpisode?: number
   totalEpisodes?: number
   episodes?: Episode[]
   onNextEpisode?: () => void
   onPreviousEpisode?: () => void
   onEpisodeSelect?: (episodeId: string) => void
+  onGoBack?: () => void
   onProgress?: (time: number) => void
   initialTime?: number
   autoPlay?: boolean
@@ -122,13 +127,17 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({
   sources,
+  mediaId,
+  episodeId,
   animeTitle,
+  episodeTitle,
   currentEpisode,
   totalEpisodes,
   episodes,
   onNextEpisode,
   onPreviousEpisode,
   onEpisodeSelect,
+  onGoBack,
   onProgress,
   initialTime = 0,
   autoPlay = true,
@@ -143,6 +152,7 @@ export function VideoPlayer({
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isPiP, setIsPiP] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [showEpisodes, setShowEpisodes] = useState(false)
@@ -150,6 +160,15 @@ export function VideoPlayer({
   const [buffering, setBuffering] = useState(false)
   const [bufferedPercentage, setBufferedPercentage] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [showNextEpisodeOverlay, setShowNextEpisodeOverlay] = useState(false)
+  const [countdown, setCountdown] = useState(3)
+
+  // Performance: Throttle time updates to prevent frame drops
+  const lastTimeUpdateRef = useRef(0)
+  const lastBufferUpdateRef = useRef(0)
+
+  // Auto-hide controls timer for fullscreen mode
+  const hideControlsTimerRef = useRef<number | null>(null)
 
   const [selectedServer, setSelectedServer] = useState(0)
   const [selectedQuality, setSelectedQuality] = useState('Auto')
@@ -185,7 +204,7 @@ export function VideoPlayer({
       setError(null)
 
       try {
-        console.log('Loading video from:', currentSource.url)
+        // Loading video source
 
         if (currentSource.type === 'hls' && Hls.isSupported()) {
           // Try HLS first with custom proxy loader
@@ -197,7 +216,19 @@ export function VideoPlayer({
             enableWorker: true,
             lowLatencyMode: false,
             loader: ProxyLoader,
-            debug: true,
+            debug: false, // Disable debug logs for performance
+            maxBufferLength: 30, // Buffer 30 seconds ahead
+            maxMaxBufferLength: 600, // Max 10 minutes buffer
+            maxBufferSize: 60 * 1000 * 1000, // 60 MB buffer
+            maxBufferHole: 0.5, // Allow small gaps
+            highBufferWatchdogPeriod: 2, // Check buffer health every 2s
+            nudgeMaxRetry: 3,
+            manifestLoadingTimeOut: 10000,
+            manifestLoadingMaxRetry: 2,
+            levelLoadingTimeOut: 10000,
+            levelLoadingMaxRetry: 2,
+            fragLoadingTimeOut: 20000,
+            fragLoadingMaxRetry: 3,
           })
 
           hlsRef.current = hls
@@ -273,17 +304,42 @@ export function VideoPlayer({
           video.src = currentSource.url
           setLoading(false)
 
-          if (autoPlay) {
-            video.play().catch((e) => console.error('Autoplay failed:', e))
+          // Seek to initial time when metadata is loaded
+          const handleLoadedMetadata = () => {
+            if (initialTime > 0) {
+              console.log(`Seeking to saved position: ${initialTime}s`)
+              video.currentTime = initialTime
+            }
+
+            if (autoPlay) {
+              video.play().catch((e) => console.error('Autoplay failed:', e))
+            }
+
+            video.removeEventListener('loadedmetadata', handleLoadedMetadata)
           }
+
+          video.addEventListener('loadedmetadata', handleLoadedMetadata)
         } else {
-          // Direct MP4 playback
+          // Direct MP4 playback (including downloaded videos)
+          console.log('Loading direct MP4 video source')
           video.src = currentSource.url
           setLoading(false)
 
-          if (autoPlay) {
-            video.play().catch((e) => console.error('Autoplay failed:', e))
+          // Seek to initial time when metadata is loaded
+          const handleLoadedMetadata = () => {
+            if (initialTime > 0) {
+              console.log(`Seeking to saved position: ${initialTime}s`)
+              video.currentTime = initialTime
+            }
+
+            if (autoPlay) {
+              video.play().catch((e) => console.error('Autoplay failed:', e))
+            }
+
+            video.removeEventListener('loadedmetadata', handleLoadedMetadata)
           }
+
+          video.addEventListener('loadedmetadata', handleLoadedMetadata)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load video')
@@ -312,11 +368,18 @@ export function VideoPlayer({
     }
     const handlePause = () => setIsPlaying(false)
     const handleTimeUpdate = () => {
+      const now = Date.now()
+
+      // Throttle to max 2 updates per second to prevent frame drops
+      if (now - lastTimeUpdateRef.current < 500) return
+      lastTimeUpdateRef.current = now
+
       setCurrentTime(video.currentTime)
       onProgress?.(video.currentTime)
 
-      // Update buffered percentage
-      if (video.buffered.length > 0 && video.duration > 0) {
+      // Update buffered percentage only every 2 seconds
+      if (now - lastBufferUpdateRef.current >= 2000 && video.buffered.length > 0 && video.duration > 0) {
+        lastBufferUpdateRef.current = now
         const bufferedEnd = video.buffered.end(video.buffered.length - 1)
         const percentage = (bufferedEnd / video.duration) * 100
         setBufferedPercentage(percentage)
@@ -338,21 +401,14 @@ export function VideoPlayer({
       setLoading(false)
     }
     const handleProgress = () => {
-      // Update buffered percentage
-      if (video.buffered.length > 0 && video.duration > 0) {
-        const bufferedEnd = video.buffered.end(video.buffered.length - 1)
-        const percentage = (bufferedEnd / video.duration) * 100
-        setBufferedPercentage(percentage)
-        // Only log every 5%
-        if (Math.floor(percentage) % 5 === 0) {
-          console.debug(`Buffered: ${percentage.toFixed(1)}%`)
-        }
-      }
+      // Update buffered percentage (throttled in handleTimeUpdate now)
+      // No-op here to reduce event handler overhead
     }
     const handleEnded = () => {
-      // Auto-play next episode
+      // Show next episode overlay if there's a next episode
       if (onNextEpisode && currentEpisode && totalEpisodes && currentEpisode < totalEpisodes) {
-        onNextEpisode()
+        setShowNextEpisodeOverlay(true)
+        setCountdown(3)
       }
     }
 
@@ -381,6 +437,69 @@ export function VideoPlayer({
     }
   }, [currentEpisode, totalEpisodes, onNextEpisode, onProgress])
 
+  // Resume functionality is now handled via initialTime prop passed from watch.tsx
+  // This ensures the video seeks to the saved position as soon as it loads,
+  // avoiding race conditions between source loading and progress loading
+
+  // Handle next episode countdown
+  useEffect(() => {
+    if (!showNextEpisodeOverlay) return
+
+    if (countdown === 0) {
+      setShowNextEpisodeOverlay(false)
+      onNextEpisode?.()
+      return
+    }
+
+    const timer = setTimeout(() => {
+      setCountdown(countdown - 1)
+    }, 1000)
+
+    return () => clearTimeout(timer)
+  }, [showNextEpisodeOverlay, countdown, onNextEpisode])
+
+  // Save watch progress periodically and on unmount
+  useEffect(() => {
+    if (!mediaId || !episodeId || typeof currentEpisode !== 'number') {
+      return
+    }
+
+    const saveProgress = async () => {
+      const video = videoRef.current
+      if (!video || video.currentTime === 0 || video.currentTime < 5) {
+        return
+      }
+
+      try {
+        const completed = video.currentTime >= video.duration - 30
+
+        console.log(`💾 Saving watch progress: ${video.currentTime.toFixed(1)}s / ${video.duration.toFixed(1)}s (Episode ID: ${episodeId})`)
+
+        await saveWatchProgress(
+          mediaId,
+          episodeId,
+          currentEpisode,
+          video.currentTime,
+          video.duration,
+          completed
+        )
+
+        console.log(`✓ Watch progress saved successfully`)
+      } catch (error) {
+        console.error('Failed to save watch progress:', error)
+      }
+    }
+
+    // Save progress every 20 seconds (reduced frequency for performance)
+    const interval = setInterval(saveProgress, 20000)
+
+    // Save on unmount
+    return () => {
+      clearInterval(interval)
+      saveProgress()
+    }
+  }, [mediaId, episodeId, currentEpisode])
+
   // Fullscreen handling
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -405,6 +524,34 @@ export function VideoPlayer({
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+    }
+  }, [])
+
+  // Picture-in-Picture handling
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const handleEnterPiP = () => {
+      console.log('Entered Picture-in-Picture mode')
+      setIsPiP(true)
+      // Show controls in PiP mode
+      setShowControls(true)
+    }
+
+    const handleLeavePiP = () => {
+      console.log('Left Picture-in-Picture mode')
+      setIsPiP(false)
+      // Keep user on the watch page after exiting PiP
+      // Controls will show automatically since we're not in fullscreen
+    }
+
+    video.addEventListener('enterpictureinpicture', handleEnterPiP)
+    video.addEventListener('leavepictureinpicture', handleLeavePiP)
+
+    return () => {
+      video.removeEventListener('enterpictureinpicture', handleEnterPiP)
+      video.removeEventListener('leavepictureinpicture', handleLeavePiP)
     }
   }, [])
 
@@ -599,12 +746,73 @@ export function VideoPlayer({
     return `${m}:${s.toString().padStart(2, '0')}`
   }
 
+  // Handle mouse movement to show controls and reset auto-hide timer
+  const handleMouseMove = () => {
+    setShowControls(true)
+
+    // Only auto-hide in fullscreen mode when playing (not in PiP)
+    if (isFullscreen && isPlaying && !isPiP) {
+      // Clear existing timer
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current)
+      }
+
+      // Set new timer to hide controls after 2 seconds
+      hideControlsTimerRef.current = setTimeout(() => {
+        setShowControls(false)
+      }, 2000)
+    }
+  }
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Auto-hide controls when entering fullscreen or resuming playback
+  useEffect(() => {
+    if (!isFullscreen || !isPlaying || isPiP) {
+      // Clear timer when exiting fullscreen, pausing, or in PiP mode
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current)
+        hideControlsTimerRef.current = null
+      }
+      // Always show controls when not in fullscreen, when paused, or in PiP
+      setShowControls(true)
+    } else {
+      // When entering fullscreen AND playing (not PiP), start auto-hide timer
+      setShowControls(true) // Show controls initially
+
+      // Clear any existing timer
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current)
+      }
+
+      // Start 2-second timer to hide controls
+      hideControlsTimerRef.current = setTimeout(() => {
+        setShowControls(false)
+      }, 2000)
+    }
+  }, [isFullscreen, isPlaying, isPiP])
+
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full bg-black group"
-      onMouseMove={() => setShowControls(true)}
-      onMouseLeave={() => setShowControls(false)}
+      style={{
+        cursor: isFullscreen && !showControls && !isPiP ? 'none' : 'default',
+      }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => {
+        // Only hide on mouse leave if not in fullscreen or PiP
+        if (!isFullscreen && !isPiP) {
+          setShowControls(false)
+        }
+      }}
     >
       {/* Video Element */}
       <video
@@ -614,6 +822,11 @@ export function VideoPlayer({
         preload="auto"
         playsInline
         crossOrigin="anonymous"
+        style={{
+          willChange: 'transform',
+          contain: 'layout style paint',
+          transform: 'translateZ(0)',
+        }}
       />
 
       {/* Loading/Buffering Overlay */}
@@ -634,6 +847,75 @@ export function VideoPlayer({
           <p className="text-[var(--color-text-secondary)]">{error}</p>
         </div>
       )}
+
+      {/* Next Episode Overlay - Bottom Right */}
+      {showNextEpisodeOverlay && currentEpisode && totalEpisodes && (
+        <div className="absolute bottom-24 right-6 z-50 animate-in slide-in-from-right duration-300">
+          <div className="bg-black/90 backdrop-blur-md rounded-lg p-6 max-w-sm border border-white/20 shadow-2xl">
+            <div className="flex items-start gap-4">
+              <div className="flex-1">
+                <h3 className="text-lg font-bold mb-1">Next Episode</h3>
+                <p className="text-sm text-white/70 mb-3">
+                  Episode {currentEpisode + 1} starts in {countdown}s
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setShowNextEpisodeOverlay(false)
+                      onNextEpisode?.()
+                    }}
+                    className="flex-1 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white font-medium py-2 px-4 rounded-lg transition-colors text-sm"
+                  >
+                    Play Now
+                  </button>
+                  <button
+                    onClick={() => setShowNextEpisodeOverlay(false)}
+                    className="px-3 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+                    title="Cancel"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Title Overlay - Shows when paused or controls visible */}
+      <div
+        className={`absolute top-0 left-0 right-0 bg-gradient-to-b from-black/90 via-black/60 to-transparent p-6 transition-opacity duration-300 ${
+          showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex-1 min-w-0 pr-4">
+            {animeTitle && (
+              <>
+                <h1 className="text-2xl font-bold mb-2 truncate">{animeTitle}</h1>
+                {currentEpisode && (
+                  <p className="text-base text-white/80">
+                    Episode {currentEpisode}
+                    {episodeTitle && ` - ${episodeTitle}`}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          {onGoBack && (
+            <button
+              onClick={onGoBack}
+              className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors backdrop-blur-sm"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span className="text-sm font-medium">Back</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Controls */}
       <div
@@ -755,9 +1037,11 @@ export function VideoPlayer({
           </div>
 
           {/* Download */}
-          {animeTitle && currentEpisode && (
+          {animeTitle && currentEpisode && mediaId && episodeId && (
             <DownloadButton
               sources={sources}
+              mediaId={mediaId}
+              episodeId={episodeId}
               animeTitle={animeTitle}
               episodeNumber={currentEpisode}
             />

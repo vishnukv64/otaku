@@ -11,6 +11,8 @@ import { startDownload } from '@/utils/tauri-commands'
 
 interface DownloadButtonProps {
   sources: VideoSource[]
+  mediaId: string
+  episodeId: string
   animeTitle: string
   episodeNumber: number
   className?: string
@@ -18,6 +20,8 @@ interface DownloadButtonProps {
 
 export function DownloadButton({
   sources,
+  mediaId,
+  episodeId,
   animeTitle,
   episodeNumber,
   className = '',
@@ -32,7 +36,8 @@ export function DownloadButton({
 
     try {
       const filename = `${animeTitle.replace(/[^a-zA-Z0-9]/g, '_')}_EP${episodeNumber}_${source.quality}.mp4`
-      await startDownload(source.url, filename, animeTitle, episodeNumber)
+      // Correct parameter order: mediaId, episodeId, episodeNumber, url, filename
+      await startDownload(mediaId, episodeId, episodeNumber, source.url, filename)
 
       setCompleted(true)
       setTimeout(() => {
@@ -106,10 +111,6 @@ export function DownloadButton({
                   <Download size={16} className="opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
               ))}
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-white/10 text-xs text-[var(--color-text-muted)]">
-              Files will be saved to ~/Downloads/Otaku/
             </div>
           </div>
         </>

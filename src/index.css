@@ -41,4 +41,35 @@
   .animate-scale-hover:hover {
     transform: scale(1.15);
   }
+
+  /* Shimmer loading animation */
+  .shimmer-bg {
+    background: linear-gradient(
+      90deg,
+      var(--color-bg-secondary) 0%,
+      var(--color-bg-hover) 50%,
+      var(--color-bg-secondary) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }

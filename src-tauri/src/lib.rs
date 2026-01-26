@@ -7,13 +7,16 @@ mod extensions;
 mod media;
 mod trackers;
 
-use commands::{AppState, DownloadManager};
+use commands::AppState;
+use database::Database;
+use downloads::DownloadManager;
+use tauri::Manager;
+use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // Database and DownloadManager will be initialized in setup
   tauri::Builder::default()
-    .manage(AppState::new())
-    .manage(DownloadManager::new())
     .plugin(tauri_plugin_shell::init())
     .register_asynchronous_uri_scheme_protocol("stream", |_app, request, responder| {
       // Custom protocol to stream videos through Rust backend with Range support
@@ -147,6 +150,50 @@ pub fn run() {
             .build(),
         )?;
       }
+
+      // Initialize database and download manager
+      let app_handle = app.handle();
+      tauri::async_runtime::block_on(async move {
+        // Get app data directory
+        let app_dir = app_handle
+          .path()
+          .app_data_dir()
+          .expect("Failed to get app data directory");
+
+        // Create database path
+        let db_path = app_dir.join("otaku.db");
+
+        log::info!("Initializing database at: {:?}", db_path);
+
+        // Initialize database
+        let database = Database::new(db_path)
+          .await
+          .expect("Failed to initialize database");
+
+        let db_pool = Arc::new(database.pool().clone());
+
+        // Add database to app state
+        app_handle.manage(AppState::new(database));
+
+        // Initialize download manager with database
+        let downloads_dir = app_dir.join("downloads");
+        std::fs::create_dir_all(&downloads_dir)
+          .expect("Failed to create downloads directory");
+
+        let download_manager = DownloadManager::new(downloads_dir)
+          .with_database(db_pool);
+
+        // Load downloads from database
+        download_manager
+          .load_from_database()
+          .await
+          .expect("Failed to load downloads from database");
+
+        app_handle.manage(download_manager);
+
+        log::info!("Database and download manager initialized");
+      });
+
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -163,6 +210,32 @@ pub fn run() {
       commands::get_download_progress,
       commands::list_downloads,
       commands::cancel_download,
+      commands::is_episode_downloaded,
+      commands::get_episode_file_path,
+      commands::get_total_storage_used,
+      commands::get_downloads_directory,
+      commands::open_downloads_folder,
+      commands::remove_download,
+      commands::delete_download,
+      commands::delete_episode_download,
+      commands::clear_completed_downloads,
+      commands::clear_failed_downloads,
+      // Watch History
+      commands::save_watch_progress,
+      commands::get_watch_progress,
+      commands::get_continue_watching,
+      // Library
+      commands::add_to_library,
+      commands::remove_from_library,
+      commands::get_library_entry,
+      commands::get_library_by_status,
+      commands::get_library_with_media,
+      commands::toggle_favorite,
+      commands::is_in_library,
+      // Media
+      commands::save_media_details,
+      commands::get_continue_watching_with_details,
+      commands::get_downloads_with_media,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

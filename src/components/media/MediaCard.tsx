@@ -10,12 +10,20 @@ import type { SearchResult } from '@/types/extension'
 interface MediaCardProps {
   media: SearchResult
   onClick?: () => void
+  progress?: {
+    current: number
+    total: number
+    episodeNumber?: number
+  }
 }
 
-export function MediaCard({ media, onClick }: MediaCardProps) {
+export function MediaCard({ media, onClick, progress }: MediaCardProps) {
   return (
-    <div className="group cursor-pointer" onClick={onClick}>
-      <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] animate-scale-hover focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]">
+    <button
+      className="group cursor-pointer w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-primary)] rounded-md"
+      onClick={onClick}
+    >
+      <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] animate-scale-hover">
         {/* Cover Image */}
         {media.cover_url ? (
           <img
@@ -28,6 +36,34 @@ export function MediaCard({ media, onClick }: MediaCardProps) {
           <div className="w-full h-full flex items-center justify-center text-4xl">
             📺
           </div>
+        )}
+
+        {/* Progress Bar */}
+        {progress && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60">
+            <div
+              className="h-full bg-[var(--color-accent-primary)]"
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
+          </div>
+        )}
+
+        {/* Continue Watching Badge */}
+        {progress && (
+          <>
+            <div className="absolute top-2 left-2 px-2 py-1 bg-[var(--color-accent-primary)] text-white text-xs font-semibold rounded">
+              EP {progress.episodeNumber}
+            </div>
+            {/* Resume indicator on hover */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/50">
+              <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent-primary)] rounded-lg">
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                <span className="text-sm font-bold">RESUME</span>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Hover Overlay with Additional Info */}
@@ -70,17 +106,25 @@ export function MediaCard({ media, onClick }: MediaCardProps) {
           {media.title}
         </h3>
       </div>
-    </div>
+    </button>
   )
 }
 
 /**
- * MediaCardSkeleton - Loading state
+ * MediaCardSkeleton - Loading state with shimmer effect
  */
 export function MediaCardSkeleton() {
   return (
-    <div className="w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] animate-pulse">
-      <div className="w-full h-full bg-[var(--color-bg-hover)]" />
+    <div className="group">
+      <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)]">
+        <div className="absolute inset-0 shimmer-bg" />
+      </div>
+
+      {/* Title skeleton */}
+      <div className="mt-2 px-1 space-y-2">
+        <div className="h-3 bg-[var(--color-bg-secondary)] rounded shimmer-bg w-full" />
+        <div className="h-3 bg-[var(--color-bg-secondary)] rounded shimmer-bg w-2/3" />
+      </div>
     </div>
   )
 }

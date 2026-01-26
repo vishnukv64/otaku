@@ -8,54 +8,22 @@
 // runtime pool.
 
 use crate::extensions::{Extension, ExtensionMetadata, ExtensionRuntime, MediaDetails, SearchResults, VideoSources};
+use crate::database::Database;
+use crate::downloads::{DownloadManager, DownloadProgress};
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use tauri::{State, AppHandle};
-
-/// Download progress information
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DownloadProgress {
-    pub id: String,
-    pub filename: String,
-    pub total_bytes: u64,
-    pub downloaded_bytes: u64,
-    pub percentage: f32,
-    pub status: DownloadStatus,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum DownloadStatus {
-    Queued,
-    Downloading,
-    Paused,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-/// Download manager state
-pub struct DownloadManager {
-    pub downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
-}
+use tauri::State;
 
 /// Global state for loaded extensions (stores just the code, not runtimes)
 pub struct AppState {
     pub extensions: Mutex<Vec<Extension>>,
+    pub database: Arc<Database>,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(database: Database) -> Self {
         Self {
             extensions: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-impl DownloadManager {
-    pub fn new() -> Self {
-        Self {
-            downloads: Arc::new(Mutex::new(HashMap::new())),
+            database: Arc::new(database),
         }
     }
 }
@@ -382,66 +350,27 @@ fn rewrite_playlist_urls(playlist: &str, base_url: &str) -> String {
 #[tauri::command]
 pub async fn start_download(
     download_manager: State<'_, DownloadManager>,
-    _app_handle: AppHandle,
+    media_id: String,
+    episode_id: String,
+    episode_number: i32,
     url: String,
     filename: String,
-    anime_title: String,
-    episode_number: f32,
 ) -> Result<String, String> {
-    let download_id = format!("{}_{}", anime_title.replace(' ', "_"), episode_number);
+    let download_id = format!("{}_{}", media_id, episode_number);
 
     log::info!("Starting download: {} ({})", filename, download_id);
 
-    // Initialize download progress
-    {
-        let mut downloads = download_manager.downloads.lock()
-            .map_err(|e| format!("Failed to lock downloads: {}", e))?;
-
-        downloads.insert(download_id.clone(), DownloadProgress {
-            id: download_id.clone(),
-            filename: filename.clone(),
-            total_bytes: 0,
-            downloaded_bytes: 0,
-            percentage: 0.0,
-            status: DownloadStatus::Queued,
-        });
-    }
-
-    // Spawn download task
-    let download_id_clone = download_id.clone();
-    let downloads_arc = download_manager.downloads.clone();
-
-    tauri::async_runtime::spawn(async move {
-        // Update status to downloading
-        {
-            if let Ok(mut downloads) = downloads_arc.lock() {
-                if let Some(progress) = downloads.get_mut(&download_id_clone) {
-                    progress.status = DownloadStatus::Downloading;
-                }
-            }
-        }
-
-        // Perform download
-        match perform_download(&url, &filename, &download_id_clone, downloads_arc.clone()).await {
-            Ok(_) => {
-                log::info!("Download completed: {}", download_id_clone);
-                if let Ok(mut downloads) = downloads_arc.lock() {
-                    if let Some(progress) = downloads.get_mut(&download_id_clone) {
-                        progress.status = DownloadStatus::Completed;
-                        progress.percentage = 100.0;
-                    }
-                }
-            }
-            Err(e) => {
-                log::error!("Download failed: {} - {}", download_id_clone, e);
-                if let Ok(mut downloads) = downloads_arc.lock() {
-                    if let Some(progress) = downloads.get_mut(&download_id_clone) {
-                        progress.status = DownloadStatus::Failed;
-                    }
-                }
-            }
-        }
-    });
+    download_manager
+        .queue_download(
+            download_id.clone(),
+            media_id,
+            episode_id,
+            episode_number,
+            url,
+            filename,
+        )
+        .await
+        .map_err(|e| format!("Failed to queue download: {}", e))?;
 
     Ok(download_id)
 }
@@ -452,11 +381,9 @@ pub async fn get_download_progress(
     download_manager: State<'_, DownloadManager>,
     download_id: String,
 ) -> Result<DownloadProgress, String> {
-    let downloads = download_manager.downloads.lock()
-        .map_err(|e| format!("Failed to lock downloads: {}", e))?;
-
-    downloads.get(&download_id)
-        .cloned()
+    download_manager
+        .get_progress(&download_id)
+        .await
         .ok_or_else(|| format!("Download not found: {}", download_id))
 }
 
@@ -465,10 +392,7 @@ pub async fn get_download_progress(
 pub async fn list_downloads(
     download_manager: State<'_, DownloadManager>,
 ) -> Result<Vec<DownloadProgress>, String> {
-    let downloads = download_manager.downloads.lock()
-        .map_err(|e| format!("Failed to lock downloads: {}", e))?;
-
-    Ok(downloads.values().cloned().collect())
+    Ok(download_manager.list_downloads().await)
 }
 
 /// Cancel a download
@@ -477,111 +401,351 @@ pub async fn cancel_download(
     download_manager: State<'_, DownloadManager>,
     download_id: String,
 ) -> Result<(), String> {
-    let mut downloads = download_manager.downloads.lock()
-        .map_err(|e| format!("Failed to lock downloads: {}", e))?;
+    download_manager
+        .cancel_download(&download_id)
+        .await
+        .map_err(|e| format!("Failed to cancel download: {}", e))
+}
 
-    if let Some(progress) = downloads.get_mut(&download_id) {
-        if progress.status == DownloadStatus::Downloading || progress.status == DownloadStatus::Queued {
-            progress.status = DownloadStatus::Cancelled;
-        }
+/// Check if an episode is downloaded
+#[tauri::command]
+pub async fn is_episode_downloaded(
+    download_manager: State<'_, DownloadManager>,
+    media_id: String,
+    episode_number: i32,
+) -> Result<bool, String> {
+    Ok(download_manager.is_episode_downloaded(&media_id, episode_number).await)
+}
+
+/// Get the file path for a downloaded episode
+#[tauri::command]
+pub async fn get_episode_file_path(
+    download_manager: State<'_, DownloadManager>,
+    media_id: String,
+    episode_number: i32,
+) -> Result<Option<String>, String> {
+    Ok(download_manager.get_episode_file_path(&media_id, episode_number).await)
+}
+
+/// Get total storage used by downloads
+#[tauri::command]
+pub async fn get_total_storage_used(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<u64, String> {
+    Ok(download_manager.get_total_storage_used().await)
+}
+
+/// Get the downloads directory path
+#[tauri::command]
+pub async fn get_downloads_directory(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<String, String> {
+    Ok(download_manager.get_downloads_directory())
+}
+
+/// Open the downloads directory in file explorer
+#[tauri::command]
+pub async fn open_downloads_folder(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<(), String> {
+    let path = download_manager.get_downloads_directory();
+
+    // Ensure the directory exists
+    std::fs::create_dir_all(&path)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+
+    // Open the directory based on the platform
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
 
     Ok(())
 }
 
-/// Perform the actual download
-async fn perform_download(
-    url: &str,
-    filename: &str,
-    download_id: &str,
-    downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
+/// Remove a download from the list
+#[tauri::command]
+pub async fn remove_download(
+    download_manager: State<'_, DownloadManager>,
+    download_id: String,
 ) -> Result<(), String> {
-    use std::io::Read;
-    use std::fs::File;
-    use std::io::Write;
+    download_manager
+        .remove_download(&download_id)
+        .await
+        .map_err(|e| format!("Failed to remove download: {}", e))
+}
 
-    // Get downloads directory
-    let downloads_dir = dirs::download_dir()
-        .ok_or_else(|| "Could not find downloads directory".to_string())?;
+/// Delete a downloaded file
+#[tauri::command]
+pub async fn delete_download(
+    download_manager: State<'_, DownloadManager>,
+    download_id: String,
+) -> Result<(), String> {
+    download_manager
+        .delete_download(&download_id)
+        .await
+        .map_err(|e| format!("Failed to delete download: {}", e))
+}
 
-    let otaku_dir = downloads_dir.join("Otaku");
-    std::fs::create_dir_all(&otaku_dir)
-        .map_err(|e| format!("Failed to create Otaku directory: {}", e))?;
+/// Delete a downloaded episode by media ID and episode number
+#[tauri::command]
+pub async fn delete_episode_download(
+    download_manager: State<'_, DownloadManager>,
+    media_id: String,
+    episode_number: i32,
+) -> Result<(), String> {
+    download_manager
+        .delete_episode_download(&media_id, episode_number)
+        .await
+        .map_err(|e| format!("Failed to delete episode download: {}", e))
+}
 
-    let file_path = otaku_dir.join(filename);
+/// Clear completed downloads from list
+#[tauri::command]
+pub async fn clear_completed_downloads(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<(), String> {
+    download_manager
+        .clear_completed()
+        .await
+        .map_err(|e| format!("Failed to clear completed downloads: {}", e))
+}
 
-    log::info!("Downloading to: {:?}", file_path);
+/// Clear failed downloads from list
+#[tauri::command]
+pub async fn clear_failed_downloads(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<(), String> {
+    download_manager
+        .clear_failed()
+        .await
+        .map_err(|e| format!("Failed to clear failed downloads: {}", e))
+}
 
-    // Make HTTP request
-    let response = ureq::get(url)
-        .set("Referer", "https://allmanga.to")
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .call()
-        .map_err(|e| format!("Request failed: {}", e))?;
 
-    let total_bytes = response.header("Content-Length")
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
+// ==================== Watch History Commands ====================
 
-    // Update total bytes
-    {
-        if let Ok(mut downloads_lock) = downloads.lock() {
-            if let Some(progress) = downloads_lock.get_mut(download_id) {
-                progress.total_bytes = total_bytes;
-            }
-        }
-    }
+/// Save or update watch progress for an episode
+#[tauri::command]
+pub async fn save_watch_progress(
+    state: State<'_, AppState>,
+    media_id: String,
+    episode_id: String,
+    episode_number: i32,
+    progress_seconds: f64,
+    duration: Option<f64>,
+    completed: bool,
+) -> Result<(), String> {
+    use crate::database::watch_history::{save_watch_progress as save_progress, WatchProgress};
 
-    // Create file
-    let mut file = File::create(&file_path)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+    let progress = WatchProgress {
+        media_id,
+        episode_id,
+        episode_number,
+        progress_seconds,
+        duration,
+        completed,
+    };
 
-    // Download in chunks
-    let mut reader = response.into_reader();
-    let mut buffer = vec![0; 8192]; // 8KB chunks
-    let mut downloaded = 0u64;
+    save_progress(state.database.pool(), &progress)
+        .await
+        .map_err(|e| format!("Failed to save watch progress: {}", e))
+}
 
-    loop {
-        // Check if download was cancelled
-        {
-            if let Ok(downloads_lock) = downloads.lock() {
-                if let Some(progress) = downloads_lock.get(download_id) {
-                    if progress.status == DownloadStatus::Cancelled {
-                        log::info!("Download cancelled: {}", download_id);
-                        std::fs::remove_file(&file_path).ok();
-                        return Err("Download cancelled".to_string());
-                    }
-                }
-            }
-        }
+/// Get watch progress for a specific episode
+#[tauri::command]
+pub async fn get_watch_progress(
+    state: State<'_, AppState>,
+    episode_id: String,
+) -> Result<Option<crate::database::watch_history::WatchHistory>, String> {
+    use crate::database::watch_history::get_watch_progress as get_progress;
 
-        let bytes_read = reader.read(&mut buffer)
-            .map_err(|e| format!("Failed to read chunk: {}", e))?;
+    get_progress(state.database.pool(), &episode_id)
+        .await
+        .map_err(|e| format!("Failed to get watch progress: {}", e))
+}
 
-        if bytes_read == 0 {
-            break; // EOF
-        }
+/// Get continue watching list (recently watched episodes that aren't completed)
+#[tauri::command]
+pub async fn get_continue_watching(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::watch_history::WatchHistory>, String> {
+    use crate::database::watch_history::get_continue_watching as get_continue;
 
-        file.write_all(&buffer[..bytes_read])
-            .map_err(|e| format!("Failed to write to file: {}", e))?;
+    get_continue(state.database.pool(), limit)
+        .await
+        .map_err(|e| format!("Failed to get continue watching: {}", e))
+}
 
-        downloaded += bytes_read as u64;
+// ==================== Library Commands ====================
 
-        // Update progress
-        {
-            if let Ok(mut downloads_lock) = downloads.lock() {
-                if let Some(progress) = downloads_lock.get_mut(download_id) {
-                    progress.downloaded_bytes = downloaded;
-                    if total_bytes > 0 {
-                        progress.percentage = (downloaded as f32 / total_bytes as f32) * 100.0;
-                    }
-                }
-            }
-        }
-    }
+/// Add media to library
+#[tauri::command]
+pub async fn add_to_library(
+    state: State<'_, AppState>,
+    media_id: String,
+    status: String,
+) -> Result<crate::database::library::LibraryEntry, String> {
+    use crate::database::library::{add_to_library as add_media, LibraryStatus};
 
-    file.flush().map_err(|e| format!("Failed to flush file: {}", e))?;
+    let status = LibraryStatus::from_str(&status)
+        .ok_or_else(|| format!("Invalid library status: {}", status))?;
 
-    log::info!("Download completed: {} ({} bytes)", filename, downloaded);
-    Ok(())
+    add_media(state.database.pool(), &media_id, status)
+        .await
+        .map_err(|e| format!("Failed to add to library: {}", e))
+}
+
+/// Remove media from library
+#[tauri::command]
+pub async fn remove_from_library(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<(), String> {
+    use crate::database::library::remove_from_library as remove_media;
+
+    remove_media(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to remove from library: {}", e))
+}
+
+/// Get library entry for a specific media
+#[tauri::command]
+pub async fn get_library_entry(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<crate::database::library::LibraryEntry>, String> {
+    use crate::database::library::get_library_entry as get_entry;
+
+    get_entry(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get library entry: {}", e))
+}
+
+/// Get all library entries by status
+#[tauri::command]
+pub async fn get_library_by_status(
+    state: State<'_, AppState>,
+    status: Option<String>,
+) -> Result<Vec<crate::database::library::LibraryEntry>, String> {
+    use crate::database::library::{get_library_by_status as get_by_status, LibraryStatus};
+
+    let status = match status {
+        Some(s) => Some(
+            LibraryStatus::from_str(&s)
+                .ok_or_else(|| format!("Invalid library status: {}", s))?
+        ),
+        None => None,
+    };
+
+    get_by_status(state.database.pool(), status)
+        .await
+        .map_err(|e| format!("Failed to get library: {}", e))
+}
+
+/// Get library entries with full media details by status
+#[tauri::command]
+pub async fn get_library_with_media(
+    state: State<'_, AppState>,
+    status: Option<String>,
+) -> Result<Vec<crate::database::library::LibraryEntryWithMedia>, String> {
+    use crate::database::library::{get_library_with_media_by_status, LibraryStatus};
+
+    let status = match status {
+        Some(s) => Some(
+            LibraryStatus::from_str(&s)
+                .ok_or_else(|| format!("Invalid library status: {}", s))?
+        ),
+        None => None,
+    };
+
+    get_library_with_media_by_status(state.database.pool(), status)
+        .await
+        .map_err(|e| format!("Failed to get library with media: {}", e))
+}
+
+/// Toggle favorite status
+#[tauri::command]
+pub async fn toggle_favorite(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<bool, String> {
+    use crate::database::library::toggle_favorite as toggle;
+
+    toggle(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to toggle favorite: {}", e))
+}
+
+/// Check if media is in library
+#[tauri::command]
+pub async fn is_in_library(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<bool, String> {
+    use crate::database::library::is_in_library as check_library;
+
+    check_library(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to check library: {}", e))
+}
+
+// ==================== Media Commands ====================
+
+/// Save media details to database
+#[tauri::command]
+pub async fn save_media_details(
+    state: State<'_, AppState>,
+    media: crate::database::media::MediaEntry,
+) -> Result<(), String> {
+    use crate::database::media::save_media;
+
+    save_media(state.database.pool(), &media)
+        .await
+        .map_err(|e| format!("Failed to save media: {}", e))
+}
+
+/// Get continue watching with full media details
+#[tauri::command]
+pub async fn get_continue_watching_with_details(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::media::ContinueWatchingEntry>, String> {
+    use crate::database::media::get_continue_watching_with_media;
+
+    get_continue_watching_with_media(state.database.pool(), limit)
+        .await
+        .map_err(|e| format!("Failed to get continue watching: {}", e))
+}
+
+/// Get downloads with full media details
+#[tauri::command]
+pub async fn get_downloads_with_media(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::media::DownloadWithMedia>, String> {
+    use crate::database::media::get_downloads_with_media as get_downloads;
+
+    get_downloads(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get downloads with media: {}", e))
 }

@@ -1,11 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Search, Loader2, AlertCircle } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import { loadExtension, getRecommendations } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import type { SearchResult } from '@/types/extension'
 
 export const Route = createFileRoute('/anime')({
@@ -16,6 +17,7 @@ export const Route = createFileRoute('/anime')({
 const EXTENSION_CODE = ALLANIME_EXTENSION
 
 function AnimeScreen() {
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +58,16 @@ function AnimeScreen() {
       setRecommendationsLoading(true)
       try {
         const results = await getRecommendations(extensionId)
-        setRecommendations(results.results)
+
+        // Deduplicate recommendations by ID to avoid React key warnings
+        const uniqueResults = results.results.reduce((acc, item) => {
+          if (!acc.find(existing => existing.id === item.id)) {
+            acc.push(item)
+          }
+          return acc
+        }, [] as SearchResult[])
+
+        setRecommendations(uniqueResults)
       } catch (err) {
         console.error('Failed to load recommendations:', err)
       } finally {
@@ -73,6 +84,17 @@ function AnimeScreen() {
       search(extensionId, searchInput, 1)
     }
   }
+
+  // Keyboard shortcuts
+  useKeyboardShortcut(
+    {
+      '/': (e) => {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      },
+    },
+    []
+  )
 
   if (loading) {
     return (
@@ -108,10 +130,11 @@ function AnimeScreen() {
               size={20}
             />
             <input
+              ref={searchInputRef}
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search for anime..."
+              placeholder="Search for anime... (Press / to focus)"
               className="w-full pl-12 pr-4 py-3 bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg text-white placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:border-transparent"
             />
           </div>
@@ -224,6 +247,7 @@ function AnimeScreen() {
           extensionId={extensionId}
           isOpen={true}
           onClose={() => setSelectedMedia(null)}
+          onMediaChange={setSelectedMedia}
         />
       )}
     </div>

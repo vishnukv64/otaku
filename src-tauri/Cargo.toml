@@ -33,3 +33,11 @@ url = "2.5"
 regex = "1.11"
 anyhow = "1.0"
 dirs = "5.0"
+
+# Database
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "migrate"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Downloads
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"

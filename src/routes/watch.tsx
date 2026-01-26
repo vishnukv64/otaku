@@ -6,10 +6,12 @@
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Download } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
-import { getMediaDetails, getVideoSources } from '@/utils/tauri-commands'
+import { getMediaDetails, getVideoSources, saveMediaDetails, getEpisodeFilePath, getWatchProgress, type MediaEntry } from '@/utils/tauri-commands'
 import type { MediaDetails, VideoSources } from '@/types/extension'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import toast from 'react-hot-toast'
 
 interface WatchSearch {
   extensionId: string
@@ -37,6 +39,7 @@ function WatchPage() {
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string>(initialEpisodeId || '')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [resumeTime, setResumeTime] = useState<number>(0)
 
   // Load anime details
   useEffect(() => {
@@ -48,7 +51,47 @@ function WatchPage() {
     const loadDetails = async () => {
       try {
         const result = await getMediaDetails(extensionId, animeId)
+
+        // Sort episodes in ascending order by episode number
+        if (result.episodes) {
+          result.episodes.sort((a, b) => a.number - b.number)
+        }
+
         setDetails(result)
+
+        // Save media details to database for continue watching
+        try {
+          const mediaEntry: MediaEntry = {
+            id: result.id,
+            extension_id: extensionId,
+            title: result.title,
+            english_name: result.english_name,
+            native_name: result.native_name,
+            description: result.description,
+            cover_url: result.cover_url,
+            banner_url: result.cover_url, // Use cover as banner if no separate banner
+            trailer_url: result.trailer_url,
+            media_type: 'anime',
+            content_type: result.type,
+            status: result.status,
+            year: result.year,
+            rating: result.rating,
+            episode_count: result.episodes.length,
+            episode_duration: result.episode_duration,
+            season_quarter: result.season?.quarter,
+            season_year: result.season?.year,
+            aired_start_year: result.aired_start?.year,
+            aired_start_month: result.aired_start?.month,
+            aired_start_date: result.aired_start?.date,
+            genres: result.genres ? JSON.stringify(result.genres) : undefined,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          await saveMediaDetails(mediaEntry)
+        } catch (saveErr) {
+          console.error('Failed to save media details:', saveErr)
+          // Non-fatal error, continue anyway
+        }
 
         // Set initial episode if not provided
         if (!initialEpisodeId && result.episodes.length > 0) {
@@ -62,17 +105,69 @@ function WatchPage() {
     loadDetails()
   }, [extensionId, animeId, initialEpisodeId])
 
-  // Load video sources for current episode
-  useEffect(() => {
-    if (!extensionId || !currentEpisodeId) return
+  // Define current episode variables
+  const currentEpisode = details?.episodes.find((ep) => ep.id === currentEpisodeId)
+  const currentEpisodeIndex = details?.episodes.findIndex((ep) => ep.id === currentEpisodeId) ?? -1
 
-    const loadSources = async () => {
+  // Load watch progress and video sources for current episode
+  // IMPORTANT: Load watch progress BEFORE sources to ensure resume time is set
+  useEffect(() => {
+    if (!extensionId || !currentEpisodeId || !currentEpisode) return
+
+    const loadProgressAndSources = async () => {
       setLoading(true)
       setError(null)
 
       try {
-        const result = await getVideoSources(extensionId, currentEpisodeId)
-        setSources(result)
+        // Step 1: Load watch progress FIRST
+        console.log(`📖 Loading watch progress for episode: ${currentEpisodeId}`)
+        try {
+          const progress = await getWatchProgress(currentEpisodeId)
+
+          if (progress && progress.progress_seconds > 0) {
+            const minutes = Math.floor(progress.progress_seconds / 60)
+            const seconds = Math.floor(progress.progress_seconds % 60)
+            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
+            console.log(`✓ Found saved progress: ${timeStr} (${progress.progress_seconds}s)`)
+            setResumeTime(progress.progress_seconds)
+
+            // Show resume notification with unique ID to prevent duplicates
+            toast.success(`Resuming from ${timeStr}`, {
+              id: `resume-${currentEpisodeId}`,
+              duration: 3000,
+              position: 'bottom-center',
+            })
+          } else {
+            console.log('No saved progress found, starting from beginning')
+            setResumeTime(0)
+          }
+        } catch (error) {
+          console.error('Failed to load watch progress:', error)
+          setResumeTime(0)
+        }
+
+        // Step 2: Load video sources AFTER watch progress is loaded
+        // Check if episode is downloaded first
+        const filePath = await getEpisodeFilePath(animeId, currentEpisode.number)
+
+        if (filePath) {
+          // Use local file for offline playback
+          const localUrl = convertFileSrc(filePath)
+          setSources({
+            sources: [{
+              url: localUrl,
+              quality: 'Downloaded',
+              type: 'video/mp4',
+              server: 'Local'
+            }],
+            subtitles: []
+          })
+          console.log('Playing from local file:', filePath)
+        } else {
+          // Fetch from extension
+          const result = await getVideoSources(extensionId, currentEpisodeId)
+          setSources(result)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load video sources')
       } finally {
@@ -80,11 +175,8 @@ function WatchPage() {
       }
     }
 
-    loadSources()
-  }, [extensionId, currentEpisodeId])
-
-  const currentEpisode = details?.episodes.find((ep) => ep.id === currentEpisodeId)
-  const currentEpisodeIndex = details?.episodes.findIndex((ep) => ep.id === currentEpisodeId) ?? -1
+    loadProgressAndSources()
+  }, [extensionId, currentEpisodeId, currentEpisode, animeId])
 
   const handleNextEpisode = () => {
     if (!details || currentEpisodeIndex === -1) return
@@ -113,32 +205,11 @@ function WatchPage() {
   }
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col">
-      {/* Top Bar */}
-      <div className="h-14 bg-[var(--color-bg-secondary)]/95 backdrop-blur-sm border-b border-white/10 flex items-center px-4 z-10">
-        <button
-          onClick={handleGoBack}
-          className="flex items-center gap-2 hover:bg-white/10 px-3 py-2 rounded-lg transition-colors"
-        >
-          <ArrowLeft size={20} />
-          <span className="text-sm font-medium">Back to Browse</span>
-        </button>
-
-        {details && currentEpisode && (
-          <div className="ml-6 flex-1 min-w-0">
-            <h1 className="text-base font-bold truncate">{details.title}</h1>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Episode {currentEpisode.number}
-              {currentEpisode.title && ` - ${currentEpisode.title}`}
-            </p>
-          </div>
-        )}
-      </div>
-
+    <div className="fixed inset-0 bg-black z-50" style={{ paddingTop: '64px' }}>
       {/* Player Container */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="w-full h-full">
         {/* Video Player */}
-        <div className="flex-1">
+        <div className="w-full h-full">
           {loading && (
             <div className="w-full h-full flex items-center justify-center bg-black">
               <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
@@ -155,13 +226,18 @@ function WatchPage() {
           {!loading && !error && sources && sources.sources.length > 0 && (
             <VideoPlayer
               sources={sources.sources}
+              mediaId={animeId}
+              episodeId={currentEpisodeId}
               animeTitle={details?.title}
+              episodeTitle={currentEpisode?.title}
               currentEpisode={currentEpisode?.number}
               totalEpisodes={details?.episodes.length}
               episodes={details?.episodes}
               onEpisodeSelect={handleEpisodeSelect}
               onNextEpisode={handleNextEpisode}
               onPreviousEpisode={handlePreviousEpisode}
+              onGoBack={handleGoBack}
+              initialTime={resumeTime}
               autoPlay
             />
           )}

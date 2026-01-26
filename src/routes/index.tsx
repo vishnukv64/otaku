@@ -4,7 +4,9 @@ import { Loader2, AlertCircle } from 'lucide-react'
 import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
+import { HeroSectionSkeleton } from '@/components/media/HeroSectionSkeleton'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
+import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
 
@@ -85,11 +87,19 @@ function HomeScreen() {
 
           console.log(`Category ${category.id} results:`, results)
 
+          // Deduplicate results to avoid React key warnings
+          const uniqueResults = results.results.reduce((acc, item) => {
+            if (!acc.find(existing => existing.id === item.id)) {
+              acc.push(item)
+            }
+            return acc
+          }, [] as SearchResult[])
+
           setCategories(prev => ({
             ...prev,
             [category.id]: {
               id: category.id,
-              items: results.results,
+              items: uniqueResults,
               loading: false,
               error: null,
             },
@@ -190,7 +200,7 @@ function HomeScreen() {
     <div className="min-h-[calc(100vh-4rem)] pb-12">
       <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-screen-2xl mx-auto">
         {/* Hero Section */}
-        {featuredAnime && (
+        {featuredAnime ? (
           <HeroSection
             media={featuredAnime}
             onWatch={handleWatch}
@@ -199,7 +209,12 @@ function HomeScreen() {
             currentIndex={featuredIndex}
             onIndexChange={handleFeaturedIndexChange}
           />
+        ) : (
+          <HeroSectionSkeleton />
         )}
+
+        {/* Continue Watching Section */}
+        {extensionId && <ContinueWatchingSection extensionId={extensionId} />}
 
         {/* Content Carousels */}
         <div className="space-y-8">
@@ -227,6 +242,7 @@ function HomeScreen() {
           extensionId={extensionId}
           isOpen={isModalOpen}
           onClose={handleCloseModal}
+          onMediaChange={setSelectedMedia}
         />
       )}
     </div>

@@ -53,8 +53,19 @@ export const useMediaStore = create<MediaState>((set, get) => ({
     try {
       const results = await tauri.searchAnime(extensionId, query, page)
 
+      // Deduplicate results to avoid React key warnings
+      const existingResults = page === 1 ? [] : get().searchResults
+      const allResults = [...existingResults, ...results.results]
+
+      const uniqueResults = allResults.reduce((acc, item) => {
+        if (!acc.find(existing => existing.id === item.id)) {
+          acc.push(item)
+        }
+        return acc
+      }, [] as SearchResult[])
+
       set({
-        searchResults: page === 1 ? results.results : [...get().searchResults, ...results.results],
+        searchResults: uniqueResults,
         hasNextPage: results.has_next_page,
         currentPage: page,
         searchLoading: false,

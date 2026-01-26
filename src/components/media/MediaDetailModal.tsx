@@ -10,15 +10,19 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Loader2 } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, type MediaEntry } from '@/utils/tauri-commands'
+import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
+import { MediaCard } from './MediaCard'
 
 interface MediaDetailModalProps {
   media: SearchResult
   extensionId: string
   isOpen: boolean
   onClose: () => void
+  onMediaChange?: (media: SearchResult) => void
 }
 
 export function MediaDetailModal({
@@ -26,11 +30,19 @@ export function MediaDetailModal({
   extensionId,
   isOpen,
   onClose,
+  onMediaChange,
 }: MediaDetailModalProps) {
   const navigate = useNavigate()
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [inLibrary, setInLibrary] = useState(false)
+  const [libraryLoading, setLibraryLoading] = useState(false)
+  const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
+  const [relatedAnime, setRelatedAnime] = useState<SearchResult[]>([])
+  const [relatedLoading, setRelatedLoading] = useState(false)
 
   const handleWatch = (episodeId: string) => {
     navigate({
@@ -43,6 +55,247 @@ export function MediaDetailModal({
     })
   }
 
+  const toggleEpisodeSelection = (episodeId: string) => {
+    setSelectedEpisodes(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(episodeId)) {
+        newSet.delete(episodeId)
+      } else {
+        newSet.add(episodeId)
+      }
+      return newSet
+    })
+  }
+
+  const selectAllEpisodes = () => {
+    if (!details) return
+    setSelectedEpisodes(new Set(details.episodes.map(ep => ep.id)))
+  }
+
+  const deselectAllEpisodes = () => {
+    setSelectedEpisodes(new Set())
+  }
+
+  const refreshDownloadedEpisodes = async () => {
+    if (!details) return
+
+    try {
+      const downloaded = new Set<number>()
+      for (const episode of details.episodes) {
+        const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
+        if (isDownloaded) {
+          downloaded.add(episode.number)
+        }
+      }
+      setDownloadedEpisodes(downloaded)
+    } catch (error) {
+      console.error('Failed to refresh downloaded episodes:', error)
+    }
+  }
+
+  const handleDeleteEpisode = async (episodeNumber: number) => {
+    const toastId = toast.loading(`Deleting Episode ${episodeNumber}...`)
+
+    try {
+      await deleteEpisodeDownload(media.id, episodeNumber)
+
+      // Remove from downloaded set
+      setDownloadedEpisodes(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(episodeNumber)
+        return newSet
+      })
+
+      toast.success(`Episode ${episodeNumber} deleted`, { id: toastId })
+    } catch (error) {
+      console.error('Failed to delete episode:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to delete episode', { id: toastId })
+    }
+  }
+
+  const handleDownloadAll = async () => {
+    if (!details) return
+
+    const toastId = toast.loading(`Preparing to download ${details.episodes.length} episodes...`)
+
+    try {
+      let successCount = 0
+      let failCount = 0
+      let skippedCount = 0
+
+      for (const episode of details.episodes) {
+        try {
+          // Check if already downloaded
+          const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
+          if (isDownloaded) {
+            skippedCount++
+            continue
+          }
+
+          // Get video sources
+          const sources = await getVideoSources(extensionId, episode.id)
+          if (!sources.sources || sources.sources.length === 0) {
+            console.error(`No sources found for episode ${episode.number}`)
+            failCount++
+            continue
+          }
+
+          // Pick the best quality source (first one is usually highest quality)
+          const videoUrl = sources.sources[0].url
+
+          // Generate filename
+          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.mp4`
+
+          // Start download
+          await startDownload(media.id, episode.id, episode.number, videoUrl, filename)
+          successCount++
+        } catch (err) {
+          console.error(`Failed to download episode ${episode.number}:`, err)
+          failCount++
+        }
+      }
+
+      toast.dismiss(toastId)
+
+      if (successCount > 0) {
+        toast.success(`Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
+      } else if (skippedCount > 0) {
+        toast.success(`All ${skippedCount} episodes already downloaded`)
+      }
+      if (failCount > 0) {
+        toast.error(`Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
+      }
+
+      // Refresh downloaded episodes after a short delay
+      setTimeout(refreshDownloadedEpisodes, 2000)
+    } catch (error) {
+      toast.dismiss(toastId)
+      toast.error('Failed to start downloads')
+      console.error('Download all error:', error)
+    }
+  }
+
+  const handleDownloadSelected = async () => {
+    if (selectedEpisodes.size === 0) {
+      toast.error('No episodes selected')
+      return
+    }
+
+    if (!details) return
+
+    const selectedEpisodesList = details.episodes.filter(ep => selectedEpisodes.has(ep.id))
+    const toastId = toast.loading(`Preparing to download ${selectedEpisodesList.length} episodes...`)
+
+    try {
+      let successCount = 0
+      let failCount = 0
+      let skippedCount = 0
+
+      for (const episode of selectedEpisodesList) {
+        try {
+          // Check if already downloaded
+          const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
+          if (isDownloaded) {
+            skippedCount++
+            continue
+          }
+
+          // Get video sources
+          const sources = await getVideoSources(extensionId, episode.id)
+          if (!sources.sources || sources.sources.length === 0) {
+            console.error(`No sources found for episode ${episode.number}`)
+            failCount++
+            continue
+          }
+
+          // Pick the best quality source
+          const videoUrl = sources.sources[0].url
+
+          // Generate filename
+          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.mp4`
+
+          // Start download
+          await startDownload(media.id, episode.id, episode.number, videoUrl, filename)
+          successCount++
+        } catch (err) {
+          console.error(`Failed to download episode ${episode.number}:`, err)
+          failCount++
+        }
+      }
+
+      toast.dismiss(toastId)
+
+      if (successCount > 0) {
+        toast.success(`Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
+      } else if (skippedCount > 0) {
+        toast.success(`All ${skippedCount} selected episodes already downloaded`)
+      }
+      if (failCount > 0) {
+        toast.error(`Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
+      }
+
+      // Exit selection mode and clear selection
+      setSelectionMode(false)
+      setSelectedEpisodes(new Set())
+
+      // Refresh downloaded episodes after a short delay
+      setTimeout(refreshDownloadedEpisodes, 2000)
+    } catch (error) {
+      toast.dismiss(toastId)
+      toast.error('Failed to start downloads')
+      console.error('Download selected error:', error)
+    }
+  }
+
+  const handleDownload = async (episodeId: string, episodeNumber: number, episodeTitle?: string) => {
+    if (!details) return
+
+    try {
+      // Generate filename
+      const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episodeNumber}.mp4`
+
+      // We would need to get the video URL first
+      // For now, show a placeholder message
+      toast.loading('Preparing download...', { id: 'download-prep' })
+
+      // In a real implementation, we would:
+      // 1. Call getVideoSources to get the actual video URL
+      // 2. Select the best quality source
+      // 3. Start the download
+      // For now, we'll show a message
+      toast.dismiss('download-prep')
+      toast.error('Download feature requires video source selection. Please play the episode first.')
+
+      // TODO: Implement proper download workflow:
+      // const sources = await getVideoSources(extensionId, episodeId)
+      // const videoUrl = sources.sources[0].url
+      // const downloadId = await startDownload(media.id, episodeId, episodeNumber, videoUrl, filename)
+      // toast.success(`Download started: ${episodeTitle || `Episode ${episodeNumber}`}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start download')
+    }
+  }
+
+  const handleToggleLibrary = async () => {
+    setLibraryLoading(true)
+    try {
+      if (inLibrary) {
+        await removeFromLibrary(media.id)
+        setInLibrary(false)
+        toast.success('Removed from My List')
+      } else {
+        await addToLibrary(media.id, 'plan_to_watch')
+        setInLibrary(true)
+        toast.success('Added to My List')
+      }
+    } catch (error) {
+      console.error('Failed to toggle library:', error)
+      toast.error('Failed to update My List')
+    } finally {
+      setLibraryLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!isOpen) return
 
@@ -52,6 +305,54 @@ export function MediaDetailModal({
       try {
         const result = await getMediaDetails(extensionId, media.id)
         setDetails(result)
+
+        // Save media details to database for library/continue watching
+        try {
+          const mediaEntry: MediaEntry = {
+            id: result.id,
+            extension_id: extensionId,
+            title: result.title,
+            english_name: result.english_name,
+            native_name: result.native_name,
+            description: result.description,
+            cover_url: result.cover_url,
+            banner_url: result.cover_url, // Use cover as banner if no separate banner
+            trailer_url: result.trailer_url,
+            media_type: 'anime',
+            content_type: result.type,
+            status: result.status,
+            year: result.year,
+            rating: result.rating,
+            episode_count: result.episodes.length,
+            episode_duration: result.episode_duration,
+            season_quarter: result.season?.quarter,
+            season_year: result.season?.year,
+            aired_start_year: result.aired_start?.year,
+            aired_start_month: result.aired_start?.month,
+            aired_start_date: result.aired_start?.date,
+            genres: result.genres ? JSON.stringify(result.genres) : undefined,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          await saveMediaDetails(mediaEntry)
+        } catch (saveErr) {
+          console.error('Failed to save media details:', saveErr)
+          // Non-fatal error, continue anyway
+        }
+
+        // Check which episodes are downloaded
+        try {
+          const downloaded = new Set<number>()
+          for (const episode of result.episodes) {
+            const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
+            if (isDownloaded) {
+              downloaded.add(episode.number)
+            }
+          }
+          setDownloadedEpisodes(downloaded)
+        } catch (checkErr) {
+          console.error('Failed to check downloaded episodes:', checkErr)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load details')
       } finally {
@@ -61,6 +362,56 @@ export function MediaDetailModal({
 
     loadDetails()
   }, [isOpen, extensionId, media.id])
+
+  // Check if media is in library
+  useEffect(() => {
+    if (!isOpen) return
+
+    const checkLibrary = async () => {
+      try {
+        const status = await isInLibrary(media.id)
+        setInLibrary(status)
+      } catch (error) {
+        console.error('Failed to check library status:', error)
+      }
+    }
+
+    checkLibrary()
+  }, [isOpen, media.id])
+
+  // Load related anime
+  useEffect(() => {
+    if (!isOpen || !media.title) return
+
+    const loadRelated = async () => {
+      setRelatedLoading(true)
+      try {
+        // Search using the anime title to find related anime
+        const results = await searchAnime(extensionId, media.title, 1)
+        // Filter out the current anime and limit to 12 results
+        const filtered = results.results
+          .filter(item => item.id !== media.id)
+          .slice(0, 12)
+        setRelatedAnime(filtered)
+      } catch (error) {
+        console.error('Failed to load related anime:', error)
+      } finally {
+        setRelatedLoading(false)
+      }
+    }
+
+    loadRelated()
+  }, [isOpen, extensionId, media.id, media.title])
+
+  // Keyboard shortcuts
+  useKeyboardShortcut(
+    {
+      escape: () => {
+        if (isOpen) onClose()
+      },
+    },
+    [isOpen, onClose]
+  )
 
   if (!isOpen) return null
 
@@ -237,10 +588,22 @@ export function MediaDetailModal({
                           </button>
                         )}
                         <button
-                          className="flex items-center gap-2 px-6 py-3.5 bg-white/10 backdrop-blur-sm text-white font-bold rounded-lg hover:bg-white/20 transition-all border border-white/20"
+                          onClick={handleToggleLibrary}
+                          disabled={libraryLoading}
+                          className={`flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border ${
+                            inLibrary
+                              ? 'bg-white/20 backdrop-blur-sm text-white border-white/30 hover:bg-white/25'
+                              : 'bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
-                          <Plus size={22} />
-                          <span>My List</span>
+                          {libraryLoading ? (
+                            <Loader2 size={22} className="animate-spin" />
+                          ) : inLibrary ? (
+                            <Check size={22} />
+                          ) : (
+                            <Plus size={22} />
+                          )}
+                          <span>{inLibrary ? 'In My List' : 'My List'}</span>
                         </button>
                         <button
                           className="flex items-center justify-center w-12 h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
@@ -303,20 +666,78 @@ export function MediaDetailModal({
                 {/* Episodes */}
                 {details.episodes.length > 0 && (
                   <div>
-                    <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-                      <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      Episodes ({details.episodes.length})
-                    </h2>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-2xl font-semibold flex items-center gap-2">
+                        <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Episodes ({details.episodes.length})
+                      </h2>
+
+                      {/* Download Action Buttons */}
+                      <div className="flex items-center gap-2">
+                        {selectionMode && (
+                          <>
+                            <button
+                              onClick={selectedEpisodes.size === details.episodes.length ? deselectAllEpisodes : selectAllEpisodes}
+                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
+                            >
+                              {selectedEpisodes.size === details.episodes.length ? 'Deselect All' : 'Select All'}
+                            </button>
+                            <button
+                              onClick={handleDownloadSelected}
+                              disabled={selectedEpisodes.size === 0}
+                              className="px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
+                            >
+                              <Download className="w-4 h-4" />
+                              Download Selected ({selectedEpisodes.size})
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectionMode(false)
+                                setSelectedEpisodes(new Set())
+                              }}
+                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        )}
+                        {!selectionMode && (
+                          <>
+                            <button
+                              onClick={handleDownloadAll}
+                              className="px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
+                            >
+                              <Download className="w-4 h-4" />
+                              Download All
+                            </button>
+                            <button
+                              onClick={() => setSelectionMode(true)}
+                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
+                            >
+                              <CheckSquare className="w-4 h-4" />
+                              Select Episodes
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                       {details.episodes.map((episode) => (
-                        <button
+                        <div
                           key={episode.id}
-                          onClick={() => handleWatch(episode.id)}
-                          className="group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] hover:ring-2 hover:ring-[var(--color-accent-primary)] transition-all hover:scale-105 transform"
+                          className={`group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] hover:ring-2 transition-all hover:scale-105 transform ${
+                            selectionMode
+                              ? selectedEpisodes.has(episode.id)
+                                ? 'ring-2 ring-[var(--color-accent-primary)]'
+                                : 'hover:ring-white/30'
+                              : 'hover:ring-[var(--color-accent-primary)]'
+                          } ${selectionMode ? 'cursor-pointer' : ''}`}
+                          onClick={selectionMode ? () => toggleEpisodeSelection(episode.id) : undefined}
                         >
+                          {/* Thumbnail or placeholder */}
                           {episode.thumbnail ? (
                             <img
                               src={episode.thumbnail}
@@ -332,18 +753,61 @@ export function MediaDetailModal({
                               <span className="text-xs text-[var(--color-text-muted)]">Episode {episode.number}</span>
                             </div>
                           )}
-                          {/* Play icon overlay on hover */}
-                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <div className="w-12 h-12 rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center transform group-hover:scale-110 transition-transform">
-                              <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z" />
-                              </svg>
+
+                          {/* Action buttons overlay on hover (only in normal mode) */}
+                          {!selectionMode && (
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                              {/* Play button */}
+                              <button
+                                onClick={() => handleWatch(episode.id)}
+                                className="w-12 h-12 rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center transform hover:scale-110 transition-transform"
+                                title="Play episode"
+                              >
+                                <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M8 5v14l11-7z" />
+                                </svg>
+                              </button>
+
+                              {/* Delete button (only for downloaded episodes) */}
+                              {downloadedEpisodes.has(episode.number) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDeleteEpisode(episode.number)
+                                  }}
+                                  className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center transform hover:scale-110 transition-transform"
+                                  title="Delete downloaded episode"
+                                >
+                                  <Trash2 size={20} />
+                                </button>
+                              )}
                             </div>
-                          </div>
+                          )}
+
+                          {/* Selection checkbox (only in selection mode) */}
+                          {selectionMode && (
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              {selectedEpisodes.has(episode.id) ? (
+                                <CheckSquare className="w-12 h-12 text-[var(--color-accent-primary)]" />
+                              ) : (
+                                <Square className="w-12 h-12 text-white/60" />
+                              )}
+                            </div>
+                          )}
+
                           {/* Episode number badge */}
                           <div className="absolute top-2 left-2 px-2.5 py-1 bg-black/80 backdrop-blur-sm rounded-md text-xs font-bold">
                             EP {episode.number}
                           </div>
+
+                          {/* Downloaded badge */}
+                          {downloadedEpisodes.has(episode.number) && (
+                            <div className="absolute top-2 right-2 px-2.5 py-1 bg-green-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" />
+                              Downloaded
+                            </div>
+                          )}
+
                           {/* Episode title on hover */}
                           {episode.title && (
                             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black via-black/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
@@ -352,7 +816,31 @@ export function MediaDetailModal({
                               </p>
                             </div>
                           )}
-                        </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Related Anime */}
+                {relatedAnime.length > 0 && (
+                  <div className="mt-12">
+                    <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                      <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                      </svg>
+                      Related Anime
+                    </h2>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                      {relatedAnime.map((anime) => (
+                        <MediaCard
+                          key={anime.id}
+                          media={anime}
+                          onClick={() => {
+                            // Change the media being displayed
+                            onMediaChange?.(anime)
+                          }}
+                        />
                       ))}
                     </div>
                   </div>
