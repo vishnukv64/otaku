@@ -18,6 +18,7 @@ pub fn run() {
   // Database and DownloadManager will be initialized in setup
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
+    .plugin(tauri_plugin_dialog::init())
     .register_asynchronous_uri_scheme_protocol("stream", |_app, request, responder| {
       // Custom protocol to stream videos through Rust backend with Range support
       use std::io::Read;
@@ -236,6 +237,11 @@ pub fn run() {
       commands::save_media_details,
       commands::get_continue_watching_with_details,
       commands::get_downloads_with_media,
+      // Data Management
+      commands::clear_all_watch_history,
+      commands::clear_library,
+      commands::clear_all_data,
+      commands::get_storage_usage,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

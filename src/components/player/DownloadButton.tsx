@@ -5,9 +5,10 @@
  */
 
 import { useState } from 'react'
-import { Download, Check, X, Loader2 } from 'lucide-react'
+import { Download, Check, X, Loader2, Star } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
+import { useSettingsStore } from '@/store/settingsStore'
 
 interface DownloadButtonProps {
   sources: VideoSource[]
@@ -26,6 +27,7 @@ export function DownloadButton({
   episodeNumber,
   className = '',
 }: DownloadButtonProps) {
+  const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
   const [showOptions, setShowOptions] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [completed, setCompleted] = useState(false)
@@ -96,21 +98,36 @@ export function DownloadButton({
             </div>
 
             <div className="space-y-1">
-              {downloadOptions.map((source, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleDownload(source)}
-                  className="w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between group"
-                >
-                  <div>
-                    <div className="font-medium">{source.quality}</div>
-                    <div className="text-xs text-[var(--color-text-muted)]">
-                      {source.server} · {source.type.toUpperCase()}
+              {downloadOptions.map((source, index) => {
+                // Check if this matches the default quality (or auto = first available)
+                const isDefault =
+                  defaultDownloadQuality === 'auto'
+                    ? index === 0
+                    : source.quality.toLowerCase().includes(defaultDownloadQuality);
+
+                return (
+                  <button
+                    key={index}
+                    onClick={() => handleDownload(source)}
+                    className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between group ${
+                      isDefault ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30' : ''
+                    }`}
+                  >
+                    <div>
+                      <div className="font-medium flex items-center gap-2">
+                        {source.quality}
+                        {isDefault && (
+                          <Star size={12} className="text-[var(--color-accent-primary)]" fill="currentColor" />
+                        )}
+                      </div>
+                      <div className="text-xs text-[var(--color-text-muted)]">
+                        {source.server} · {source.type.toUpperCase()}
+                      </div>
                     </div>
-                  </div>
-                  <Download size={16} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-              ))}
+                    <Download size={16} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                );
+              })}
             </div>
           </div>
         </>

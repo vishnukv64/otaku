@@ -12,6 +12,7 @@ use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress};
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use sqlx;
 
 /// Global state for loaded extensions (stores just the code, not runtimes)
 pub struct AppState {
@@ -748,4 +749,84 @@ pub async fn get_downloads_with_media(
     get_downloads(state.database.pool())
         .await
         .map_err(|e| format!("Failed to get downloads with media: {}", e))
+}
+
+// ==================== Data Management Commands ====================
+
+/// Clear all watch history
+#[tauri::command]
+pub async fn clear_all_watch_history(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM watch_history")
+        .execute(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to clear watch history: {}", e))?;
+
+    log::info!("Cleared all watch history");
+    Ok(())
+}
+
+/// Clear all library entries
+#[tauri::command]
+pub async fn clear_library(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM library")
+        .execute(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to clear library: {}", e))?;
+
+    log::info!("Cleared all library entries");
+    Ok(())
+}
+
+/// Clear all data (watch history, library, media cache)
+#[tauri::command]
+pub async fn clear_all_data(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Clear all tables
+    let tables = vec!["watch_history", "library", "media"];
+
+    for table in tables {
+        sqlx::query(&format!("DELETE FROM {}", table))
+            .execute(state.database.pool())
+            .await
+            .map_err(|e| format!("Failed to clear {}: {}", table, e))?;
+    }
+
+    // Optimize database after clearing
+    state.database.optimize()
+        .await
+        .map_err(|e| format!("Failed to optimize database: {}", e))?;
+
+    log::info!("Cleared all data");
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+pub struct StorageUsage {
+    database_size: u64,
+    downloads_size: u64,
+    total_size: u64,
+}
+
+/// Get storage usage information
+#[tauri::command]
+pub async fn get_storage_usage(
+    state: State<'_, AppState>,
+    download_manager: State<'_, DownloadManager>,
+) -> Result<StorageUsage, String> {
+    let database_size = state.database.get_database_size()
+        .await
+        .map_err(|e| format!("Failed to get database size: {}", e))?;
+
+    let downloads_size = download_manager.get_total_storage_used().await;
+
+    Ok(StorageUsage {
+        database_size,
+        downloads_size,
+        total_size: database_size + downloads_size,
+    })
 }

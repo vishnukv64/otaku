@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
 import { ToastContainer } from '@/components/ui/Toast'
 import { DownloadManager } from '@/components/player/DownloadManager'
+import logoImage from '@/assets/logo.png'
 
 const navItems = [
   { name: 'Home', path: '/' },
@@ -41,10 +42,17 @@ export function TopNav() {
           <div className="flex items-center gap-8">
             <Link
               to="/"
-              className="text-2xl font-bold text-[var(--color-accent-primary)] hover:opacity-80 transition-opacity"
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
               onClick={() => setMobileMenuOpen(false)}
             >
-              OTAKU
+              <img
+                src={logoImage}
+                alt="Otaku Logo"
+                className="h-10 w-10 object-contain bg-black rounded-full"
+              />
+              <span className="text-2xl font-bold text-[var(--color-accent-primary)] hidden sm:inline">
+                OTAKU
+              </span>
             </Link>
 
             {/* Desktop Navigation Links */}

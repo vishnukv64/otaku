@@ -15,6 +15,7 @@ interface PlayerSettings {
   autoPlayNext: boolean
   preferredQuality: string
   preferredServer: number
+  playbackSpeed: number
 }
 
 interface PlayerState {
@@ -49,6 +50,7 @@ export const usePlayerStore = create<PlayerState>()(
         autoPlayNext: true,
         preferredQuality: 'Auto',
         preferredServer: 0,
+        playbackSpeed: 1.0,
       },
       currentAnimeId: null,
       currentEpisodeId: null,

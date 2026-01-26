@@ -15,6 +15,7 @@ import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
+import { useSettingsStore } from '@/store/settingsStore'
 
 export const Route = createFileRoute('/library')({
   component: LibraryScreen,
@@ -31,6 +32,7 @@ const TABS: { id: LibraryStatus | 'all' | 'downloaded'; label: string }[] = [
 ]
 
 function LibraryScreen() {
+  const gridDensity = useSettingsStore((state) => state.gridDensity)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<LibraryStatus | 'all' | 'downloaded'>('watching')
   const [library, setLibrary] = useState<LibraryEntryWithMedia[]>([])
@@ -39,6 +41,13 @@ function LibraryScreen() {
   const [error, setError] = useState<string | null>(null)
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+
+  // Grid density class mapping
+  const gridClasses = {
+    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2',
+    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4',
+    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6',
+  }[gridDensity]
 
   // Load extension on mount
   useEffect(() => {
@@ -183,7 +192,7 @@ function LibraryScreen() {
               {downloadedAnime.length} {downloadedAnime.length === 1 ? 'anime' : 'anime'}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <div className={`grid ${gridClasses}`}>
               {downloadedAnime.map((anime) => {
                 const formatBytes = (bytes: number) => {
                   if (bytes === 0) return '0 B'
@@ -243,7 +252,7 @@ function LibraryScreen() {
             {library.length} {library.length === 1 ? 'item' : 'items'}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <div className={`grid ${gridClasses}`}>
             {library.map((entry) => {
               // Convert media entry to SearchResult for MediaCard
               const media: SearchResult = {

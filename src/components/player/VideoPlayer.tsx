@@ -23,8 +23,11 @@ import {
   X,
 } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
-import { proxyHlsPlaylist, proxyVideoRequest, saveWatchProgress } from '@/utils/tauri-commands'
+import { proxyHlsPlaylist, proxyVideoRequest, saveWatchProgress, deleteEpisodeDownload } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
+import { usePlayerStore } from '@/store/playerStore'
+import { useSettingsStore } from '@/store/settingsStore'
+import toast from 'react-hot-toast'
 
 // Custom HLS loader that proxies all requests through Rust backend
 class ProxyLoader extends Hls.DefaultConfig.loader {
@@ -146,10 +149,16 @@ export function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
 
+  // Get settings from stores
+  const playerSettings = usePlayerStore((state) => state.settings)
+  const markWatchedThreshold = useSettingsStore((state) => state.markWatchedThreshold)
+  const defaultVolume = useSettingsStore((state) => state.defaultVolume)
+  const autoDeleteWatched = useSettingsStore((state) => state.autoDeleteWatched)
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [volume, setVolume] = useState(1)
+  const [volume, setVolume] = useState(defaultVolume)
   const [isMuted, setIsMuted] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP] = useState(false)
@@ -357,6 +366,25 @@ export function VideoPlayer({
     }
   }, [selectedServer, sources])
 
+  // Apply playback speed from settings
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    video.playbackRate = playerSettings.playbackSpeed
+  }, [playerSettings.playbackSpeed])
+
+  // Apply default volume on first load
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    // Set default volume only if it hasn't been set by user yet
+    if (volume === defaultVolume) {
+      video.volume = defaultVolume
+    }
+  }, []) // Only run on mount
+
   // Video event handlers
   useEffect(() => {
     const video = videoRef.current
@@ -471,9 +499,11 @@ export function VideoPlayer({
       }
 
       try {
-        const completed = video.currentTime >= video.duration - 30
+        // Use the mark-as-watched threshold from settings
+        const percentComplete = (video.currentTime / video.duration) * 100
+        const completed = percentComplete >= markWatchedThreshold
 
-        console.log(`💾 Saving watch progress: ${video.currentTime.toFixed(1)}s / ${video.duration.toFixed(1)}s (Episode ID: ${episodeId})`)
+        console.log(`💾 Saving watch progress: ${video.currentTime.toFixed(1)}s / ${video.duration.toFixed(1)}s (${percentComplete.toFixed(1)}% - threshold: ${markWatchedThreshold}%) (Episode ID: ${episodeId})`)
 
         await saveWatchProgress(
           mediaId,
@@ -485,6 +515,21 @@ export function VideoPlayer({
         )
 
         console.log(`✓ Watch progress saved successfully`)
+
+        // Auto-delete downloaded episode if enabled and episode is completed
+        if (completed && autoDeleteWatched) {
+          try {
+            await deleteEpisodeDownload(mediaId, currentEpisode)
+            console.log(`🗑️ Auto-deleted downloaded episode ${currentEpisode}`)
+            toast.success(`Episode ${currentEpisode} deleted (auto-delete enabled)`, {
+              icon: '🗑️',
+              duration: 3000,
+            })
+          } catch (error) {
+            // Silently fail if episode wasn't downloaded - this is expected
+            console.log(`Episode ${currentEpisode} not downloaded, skipping auto-delete`)
+          }
+        }
       } catch (error) {
         console.error('Failed to save watch progress:', error)
       }

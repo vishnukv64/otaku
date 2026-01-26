@@ -8,6 +8,7 @@ import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import type { SearchResult } from '@/types/extension'
+import { useSettingsStore } from '@/store/settingsStore'
 
 export const Route = createFileRoute('/anime')({
   component: AnimeScreen,
@@ -17,6 +18,7 @@ export const Route = createFileRoute('/anime')({
 const EXTENSION_CODE = ALLANIME_EXTENSION
 
 function AnimeScreen() {
+  const gridDensity = useSettingsStore((state) => state.gridDensity)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -25,6 +27,13 @@ function AnimeScreen() {
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [recommendations, setRecommendations] = useState<SearchResult[]>([])
   const [recommendationsLoading, setRecommendationsLoading] = useState(false)
+
+  // Grid density class mapping
+  const gridClasses = {
+    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2',
+    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4',
+    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6',
+  }[gridDensity]
 
   const {
     searchQuery,
@@ -165,7 +174,7 @@ function AnimeScreen() {
               <h2 className="text-xl font-semibold mb-4">
                 Search Results for "{searchQuery}" ({searchResults.length} results)
               </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              <div className={`grid ${gridClasses}`}>
                 {searchResults.map((item) => (
                   <MediaCard
                     key={item.id}
@@ -215,7 +224,7 @@ function AnimeScreen() {
                 Recommended Anime
 
               </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              <div className={`grid ${gridClasses}`}>
                 {recommendations.map((item) => (
                   <MediaCard
                     key={item.id}
