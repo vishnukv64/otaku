@@ -467,3 +467,38 @@ export async function getDownloadsWithMedia(): Promise<DownloadWithMedia[]> {
   return await invoke('get_downloads_with_media')
 }
 
+// ==================== Video Server Commands ====================
+
+export interface VideoServerUrls {
+  local_base_url: string
+  proxy_base_url: string
+  token: string
+  port: number
+}
+
+/**
+ * Get video server info for streaming
+ * The video server handles large videos properly with true HTTP Range support
+ */
+export async function getVideoServerInfo(): Promise<VideoServerUrls> {
+  return await invoke('get_video_server_info')
+}
+
+/**
+ * Get streaming URL for a local downloaded file
+ * Uses the embedded HTTP server for proper Range request support
+ * @param filename - Filename in the downloads directory
+ */
+export async function getLocalVideoUrl(filename: string): Promise<string> {
+  return await invoke('get_local_video_url', { filename })
+}
+
+/**
+ * Get proxy URL for a remote video
+ * Uses the embedded HTTP server for proper streaming
+ * @param url - Remote video URL to proxy
+ */
+export async function getProxyVideoUrl(url: string): Promise<string> {
+  return await invoke('get_proxy_video_url', { url })
+}
+

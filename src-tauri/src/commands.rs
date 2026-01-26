@@ -10,6 +10,7 @@
 use crate::extensions::{Extension, ExtensionMetadata, ExtensionRuntime, MediaDetails, SearchResults, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress};
+use crate::VideoServerInfo;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 use sqlx;
@@ -217,9 +218,20 @@ pub async fn proxy_video_request(
 
     match request.call() {
         Ok(response) => {
-            let mut bytes = Vec::new();
+            // Get content length hint for pre-allocation
+            let content_length = response.header("Content-Length")
+                .and_then(|v| v.parse::<usize>().ok());
+
+            // Pre-allocate vector based on content length, cap at 100MB for initial allocation
+            let initial_capacity = content_length
+                .map(|l| l.min(100 * 1024 * 1024))
+                .unwrap_or(1024 * 1024); // Default 1MB if unknown
+
+            let mut bytes = Vec::with_capacity(initial_capacity);
+
+            // Read entire response - HLS segments are typically a few MB
+            // No artificial limit - trust the server's response size
             response.into_reader()
-                .take(100_000_000) // 100MB limit
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("Failed to read response: {}", e))?;
 
@@ -829,4 +841,45 @@ pub async fn get_storage_usage(
         downloads_size,
         total_size: database_size + downloads_size,
     })
+}
+
+// ==================== Video Server Commands ====================
+
+#[derive(serde::Serialize)]
+pub struct VideoServerUrls {
+    pub local_base_url: String,
+    pub proxy_base_url: String,
+    pub token: String,
+    pub port: u16,
+}
+
+/// Get video server info for streaming
+#[tauri::command]
+pub async fn get_video_server_info(
+    video_server: State<'_, VideoServerInfo>,
+) -> Result<VideoServerUrls, String> {
+    Ok(VideoServerUrls {
+        local_base_url: format!("http://127.0.0.1:{}/local", video_server.port),
+        proxy_base_url: format!("http://127.0.0.1:{}/proxy", video_server.port),
+        token: video_server.access_token.clone(),
+        port: video_server.port,
+    })
+}
+
+/// Get streaming URL for a local downloaded file
+#[tauri::command]
+pub async fn get_local_video_url(
+    video_server: State<'_, VideoServerInfo>,
+    filename: String,
+) -> Result<String, String> {
+    Ok(video_server.local_url(&filename))
+}
+
+/// Get proxy URL for a remote video
+#[tauri::command]
+pub async fn get_proxy_video_url(
+    video_server: State<'_, VideoServerInfo>,
+    url: String,
+) -> Result<String, String> {
+    Ok(video_server.proxy_url(&url))
 }

@@ -7,7 +7,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Hls from 'hls.js'
-import type { LoaderContext, LoaderConfiguration, LoaderCallbacks } from 'hls.js'
 import {
   Play,
   Pause,
@@ -23,85 +22,15 @@ import {
   X,
 } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
-import { proxyHlsPlaylist, proxyVideoRequest, saveWatchProgress, deleteEpisodeDownload } from '@/utils/tauri-commands'
+import { saveWatchProgress, deleteEpisodeDownload, getVideoServerInfo, type VideoServerUrls } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import toast from 'react-hot-toast'
 
-// Custom HLS loader that proxies all requests through Rust backend
-class ProxyLoader extends Hls.DefaultConfig.loader {
-  constructor(config: LoaderConfiguration) {
-    super(config)
-  }
-
-  load(
-    context: LoaderContext,
-    config: LoaderConfiguration,
-    callbacks: LoaderCallbacks
-  ): void {
-    const { url, responseType } = context
-
-    // Proxy the request through Rust backend
-    if (responseType === 'text' || responseType === '' || !responseType) {
-      // Playlist request
-      proxyHlsPlaylist(url)
-        .then((data) => {
-          callbacks.onSuccess(
-            {
-              url,
-              data,
-            },
-            { code: 200, text: 'OK' },
-            context,
-            null as any
-          )
-        })
-        .catch((error) => {
-          console.error('Playlist load error:', error)
-          // If it's a binary file error, this URL is not an HLS playlist
-          callbacks.onError(
-            { code: 500, text: error.toString() },
-            context,
-            error,
-            null as any
-          )
-        })
-    } else {
-      // Video segment request (arraybuffer)
-      proxyVideoRequest(url, undefined)
-        .then((data) => {
-          // Convert number array to ArrayBuffer
-          const buffer = new Uint8Array(data).buffer
-          callbacks.onSuccess(
-            {
-              url,
-              data: buffer,
-            },
-            { code: 200, text: 'OK' },
-            context,
-            null as any
-          )
-        })
-        .catch((error) => {
-          console.error('Video segment load error:', error)
-          callbacks.onError(
-            { code: 500, text: error.toString() },
-            context,
-            error,
-            null as any
-          )
-        })
-    }
-  }
-
-  abort(): void {
-    // Nothing to abort since we're using Rust backend
-  }
-
-  destroy(): void {
-    // Cleanup if needed
-  }
+// Helper to create proxy URL for HLS streaming via embedded video server
+function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
+  return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}`
 }
 
 interface Episode {
@@ -182,6 +111,7 @@ export function VideoPlayer({
   const [selectedServer, setSelectedServer] = useState(0)
   const [selectedQuality, setSelectedQuality] = useState('Auto')
   const [availableQualities, setAvailableQualities] = useState<string[]>(['Auto'])
+  const [videoServer, setVideoServer] = useState<VideoServerUrls | null>(null)
 
   // Group sources by server
   const serverGroups = sources.reduce((acc, source, index) => {
@@ -195,6 +125,13 @@ export function VideoPlayer({
 
   const servers = Object.keys(serverGroups)
   const currentServerSources = serverGroups[servers[selectedServer]] || []
+
+  // Load video server info on mount
+  useEffect(() => {
+    getVideoServerInfo()
+      .then(setVideoServer)
+      .catch((err) => console.error('Failed to get video server info:', err))
+  }, [])
 
   // Initialize HLS and load video
   useEffect(() => {
@@ -215,8 +152,22 @@ export function VideoPlayer({
       try {
         // Loading video source
 
-        if (currentSource.type === 'hls' && Hls.isSupported()) {
-          // Try HLS first with custom proxy loader
+        // Wait for video server to be ready
+        if (!videoServer) {
+          console.log('Waiting for video server to be ready...')
+          setLoading(true)
+          return // Will retry when videoServer becomes available
+        }
+
+        // Check if this is actually an HLS stream by looking at the URL
+        // Some sources mark videos as 'hls' type but they're actually direct MP4s
+        const isActuallyHls = currentSource.url.toLowerCase().includes('.m3u8') ||
+                              currentSource.url.toLowerCase().includes('m3u8')
+
+        console.log('Source type:', currentSource.type, 'URL contains m3u8:', isActuallyHls)
+
+        if (isActuallyHls && Hls.isSupported()) {
+          // Try HLS with video server proxy for proper streaming
           if (hlsRef.current) {
             hlsRef.current.destroy()
           }
@@ -224,26 +175,34 @@ export function VideoPlayer({
           const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            loader: ProxyLoader,
             debug: false, // Disable debug logs for performance
-            maxBufferLength: 30, // Buffer 30 seconds ahead
+            maxBufferLength: 60, // Buffer 60 seconds ahead for smoother playback
             maxMaxBufferLength: 600, // Max 10 minutes buffer
-            maxBufferSize: 60 * 1000 * 1000, // 60 MB buffer
+            maxBufferSize: 120 * 1000 * 1000, // 120 MB buffer for high-bitrate videos
             maxBufferHole: 0.5, // Allow small gaps
             highBufferWatchdogPeriod: 2, // Check buffer health every 2s
-            nudgeMaxRetry: 3,
-            manifestLoadingTimeOut: 10000,
-            manifestLoadingMaxRetry: 2,
-            levelLoadingTimeOut: 10000,
-            levelLoadingMaxRetry: 2,
-            fragLoadingTimeOut: 20000,
-            fragLoadingMaxRetry: 3,
+            nudgeMaxRetry: 5,
+            // Increased timeouts for large files and slower connections
+            manifestLoadingTimeOut: 30000, // 30 seconds for manifest
+            manifestLoadingMaxRetry: 3,
+            levelLoadingTimeOut: 30000, // 30 seconds for level playlists
+            levelLoadingMaxRetry: 3,
+            fragLoadingTimeOut: 60000, // 60 seconds for fragments (large segments)
+            fragLoadingMaxRetry: 5,
+            // Use xhrSetup to proxy all requests through video server
+            xhrSetup: (xhr, url) => {
+              // Rewrite URL to go through our video server proxy
+              const proxyUrl = createProxyUrl(videoServer, url)
+              xhr.open('GET', proxyUrl, true)
+            },
           })
 
           hlsRef.current = hls
 
-          // Load the URL - ProxyLoader will handle the requests
-          hls.loadSource(currentSource.url)
+          // Load the proxied URL
+          const proxyUrl = createProxyUrl(videoServer, currentSource.url)
+          console.log('Loading HLS via video server:', proxyUrl)
+          hls.loadSource(proxyUrl)
           hls.attachMedia(video)
 
           hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
@@ -270,17 +229,17 @@ export function VideoPlayer({
                 case Hls.ErrorTypes.NETWORK_ERROR:
                   console.error('Network error details:', data.details, data.response)
 
-                  // If the error is manifestLoadError, this might not be an HLS stream
-                  if (data.details === 'manifestLoadError') {
-                    console.log('Not an HLS stream, trying direct video playback')
+                  // If it's a manifest error, this is not an HLS stream - fall back to direct playback
+                  if ((data.details === 'manifestLoadError' || data.details === 'manifestParsingError') && videoServer) {
+                    console.log('Not an HLS stream (error: ' + data.details + '), trying direct video playback via proxy')
                     hls.destroy()
                     hlsRef.current = null
 
-                    // Convert HTTPS URL to stream:// protocol to bypass CORS
-                    const streamUrl = currentSource.url.replace('https://', 'stream://')
-                    console.log('Using stream protocol:', streamUrl)
+                    // Use video server proxy for direct video playback
+                    const proxyUrl = createProxyUrl(videoServer, currentSource.url)
+                    console.log('Using video server proxy for direct playback:', proxyUrl)
 
-                    video.src = streamUrl
+                    video.src = proxyUrl
                     setLoading(false)
 
                     if (autoPlay) {
@@ -308,9 +267,11 @@ export function VideoPlayer({
               }
             }
           })
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          // Native HLS support (Safari)
-          video.src = currentSource.url
+        } else if (isActuallyHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+          // Native HLS support (Safari) - only for actual HLS streams
+          console.log('Using native HLS support via proxy')
+          const proxyUrl = createProxyUrl(videoServer, currentSource.url)
+          video.src = proxyUrl
           setLoading(false)
 
           // Seek to initial time when metadata is loaded
@@ -329,9 +290,44 @@ export function VideoPlayer({
 
           video.addEventListener('loadedmetadata', handleLoadedMetadata)
         } else {
-          // Direct MP4 playback (including downloaded videos)
-          console.log('Loading direct MP4 video source')
-          video.src = currentSource.url
+          // Direct MP4 playback (including downloaded videos and remote non-HLS)
+          console.log('Loading direct video source:', currentSource.url)
+
+          // Determine the URL to use:
+          // - Local files (localhost URLs) - use directly
+          // - Remote URLs - use video server proxy for proper streaming
+          let videoUrl = currentSource.url
+          if (videoServer && currentSource.url.startsWith('http') && !currentSource.url.includes('127.0.0.1')) {
+            // Remote URL - proxy through video server
+            videoUrl = createProxyUrl(videoServer, currentSource.url)
+            console.log('Using video server proxy for direct video:', videoUrl)
+          }
+
+          video.src = videoUrl
+
+          // Handle video errors
+          const handleError = (e: Event) => {
+            const videoEl = e.target as HTMLVideoElement
+            const error = videoEl.error
+            console.error('Video error:', error?.code, error?.message)
+            if (error) {
+              // Don't show error for CORS failures on subtitle tracks - these are non-fatal
+              if (error.code === MediaError.MEDIA_ERR_NETWORK) {
+                console.warn('Network error loading video - may be subtitle/track loading failure (non-fatal)')
+              } else {
+                setError(`Video error: ${error.message || 'Unknown error'}`)
+              }
+            }
+          }
+          video.addEventListener('error', handleError)
+
+          // Handle successful loading
+          const handleCanPlay = () => {
+            console.log('Video can play!')
+            setLoading(false)
+          }
+          video.addEventListener('canplay', handleCanPlay)
+
           setLoading(false)
 
           // Seek to initial time when metadata is loaded
@@ -364,7 +360,7 @@ export function VideoPlayer({
         hlsRef.current = null
       }
     }
-  }, [selectedServer, sources])
+  }, [selectedServer, sources, videoServer])
 
   // Apply playback speed from settings
   useEffect(() => {
@@ -866,7 +862,6 @@ export function VideoPlayer({
         onClick={togglePlay}
         preload="auto"
         playsInline
-        crossOrigin="anonymous"
         style={{
           willChange: 'transform',
           contain: 'layout style paint',

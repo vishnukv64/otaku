@@ -6,12 +6,44 @@ mod downloads;
 mod extensions;
 mod media;
 mod trackers;
+mod video_server;
 
 use commands::AppState;
 use database::Database;
 use downloads::DownloadManager;
+use video_server::VideoServer;
 use tauri::Manager;
 use std::sync::Arc;
+
+/// Holds video server connection info
+pub struct VideoServerInfo {
+    pub port: u16,
+    pub access_token: String,
+}
+
+impl VideoServerInfo {
+    /// Get the base URL for local file streaming
+    /// Uses tower-http ServeDir which handles Range requests automatically
+    pub fn local_url(&self, filename: &str) -> String {
+        format!(
+            "http://127.0.0.1:{}/files/{}?token={}",
+            self.port,
+            urlencoding::encode(filename),
+            self.access_token
+        )
+    }
+
+    /// Get the proxy URL for remote video streaming
+    /// Streams without buffering and forwards Range headers for seeking
+    pub fn proxy_url(&self, remote_url: &str) -> String {
+        format!(
+            "http://127.0.0.1:{}/proxy?token={}&url={}",
+            self.port,
+            self.access_token,
+            urlencoding::encode(remote_url)
+        )
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,27 +58,11 @@ pub fn run() {
       let url_str = request.uri().to_string();
       let url = url_str.replace("stream://", "https://");
 
-      // Get Range header if present (for seeking)
+      // Get Range header if present (for seeking) - pass through as-is
+      // The browser/HLS.js handles chunking appropriately
       let range_header = request.headers().get("range")
         .and_then(|v| v.to_str().ok())
-        .map(|s| {
-          // Limit chunk size to 5MB to prevent memory issues and improve responsiveness
-          let original = s.to_string();
-          if let Some(range_str) = original.strip_prefix("bytes=") {
-            if let Some((start, end)) = range_str.split_once('-') {
-              if let (Ok(start_byte), Ok(end_byte)) = (start.parse::<u64>(), end.parse::<u64>()) {
-                let requested_size = end_byte - start_byte + 1;
-                const MAX_CHUNK: u64 = 5 * 1024 * 1024; // 5MB chunks
-                if requested_size > MAX_CHUNK {
-                  let new_end = start_byte + MAX_CHUNK - 1;
-                  log::debug!("Limiting chunk: {} -> {}", requested_size, MAX_CHUNK);
-                  return format!("bytes={}-{}", start_byte, new_end);
-                }
-              }
-            }
-          }
-          original
-        });
+        .map(|s| s.to_string());
 
       log::debug!("Stream: {} (Range: {:?})", &url[..url.len().min(50)], range_header);
 
@@ -57,7 +73,7 @@ pub fn run() {
           .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
           .set("Origin", "https://allmanga.to");
 
-        // Add Range header if present
+        // Add Range header if present (don't limit the range - let the server handle it)
         if let Some(ref range) = range_header {
           req = req.set("Range", range);
         }
@@ -75,26 +91,22 @@ pub fn run() {
 
             log::debug!("Response: status={}, len={:?}", status, content_length);
 
-            // Stream data in smaller chunks to avoid blocking and memory pressure
-            const CHUNK_SIZE: usize = 256 * 1024; // 256KB chunks for smooth streaming
-            const MAX_BUFFER: usize = 10 * 1024 * 1024; // 10MB absolute max
+            // Stream data in chunks - NO SIZE LIMIT for video playback
+            // HLS.js handles chunked requests via Range headers, so each request
+            // is typically a segment (a few MB) rather than the entire video
+            const CHUNK_SIZE: usize = 256 * 1024; // 256KB read chunks for smooth streaming
 
+            // Pre-allocate based on content length if known, otherwise start small
             let initial_capacity = content_length
-              .map(|l| (l as usize).min(MAX_BUFFER))
+              .map(|l| (l as usize).min(50 * 1024 * 1024)) // Cap initial allocation at 50MB
               .unwrap_or(CHUNK_SIZE);
 
             let mut bytes = Vec::with_capacity(initial_capacity);
             let mut reader = response.into_reader();
             let mut buffer = vec![0u8; CHUNK_SIZE];
 
-            // Read in chunks instead of all at once
+            // Read the entire response - Range requests are already limited by the client
             loop {
-              // Safety check - prevent runaway memory usage
-              if bytes.len() >= MAX_BUFFER {
-                log::warn!("Reached max buffer size, truncating response");
-                break;
-              }
-
               match reader.read(&mut buffer) {
                 Ok(0) => break, // EOF
                 Ok(n) => {
@@ -181,7 +193,7 @@ pub fn run() {
         std::fs::create_dir_all(&downloads_dir)
           .expect("Failed to create downloads directory");
 
-        let download_manager = DownloadManager::new(downloads_dir)
+        let download_manager = DownloadManager::new(downloads_dir.clone())
           .with_database(db_pool);
 
         // Load downloads from database
@@ -192,7 +204,29 @@ pub fn run() {
 
         app_handle.manage(download_manager);
 
-        log::info!("Database and download manager initialized");
+        // Start video streaming server (workaround for Tauri protocol memory issues)
+        let video_server = VideoServer::new(downloads_dir);
+        let video_server_info = VideoServerInfo {
+            port: video_server.port(),
+            access_token: video_server.access_token().to_string(),
+        };
+
+        log::info!(
+            "Video server configured on port {} with token {}",
+            video_server_info.port,
+            &video_server_info.access_token[..8]
+        );
+
+        app_handle.manage(video_server_info);
+
+        // Spawn video server in background
+        tokio::spawn(async move {
+            if let Err(e) = video_server.start().await {
+                log::error!("Video server error: {}", e);
+            }
+        });
+
+        log::info!("Database, download manager, and video server initialized");
       });
 
       Ok(())
@@ -242,6 +276,10 @@ pub fn run() {
       commands::clear_library,
       commands::clear_all_data,
       commands::get_storage_usage,
+      // Video Server
+      commands::get_video_server_info,
+      commands::get_local_video_url,
+      commands::get_proxy_video_url,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

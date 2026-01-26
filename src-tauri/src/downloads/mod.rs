@@ -412,8 +412,14 @@ impl DownloadManager {
             (progress.url.clone(), progress.file_path.clone())
         };
 
-        // Make HTTP request
-        let client = reqwest::Client::new();
+        // Make HTTP request with appropriate timeouts for large files
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            // No read timeout - large files can take a long time to download
+            // Progress tracking handles stalls via cancellation
+            .build()
+            .context("Failed to create HTTP client")?;
+
         let response = client
             .get(&url)
             .header("User-Agent", "Mozilla/5.0")

@@ -8,9 +8,8 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { ArrowLeft, Loader2, Download } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
-import { getMediaDetails, getVideoSources, saveMediaDetails, getEpisodeFilePath, getWatchProgress, type MediaEntry } from '@/utils/tauri-commands'
+import { getMediaDetails, getVideoSources, saveMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import type { MediaDetails, VideoSources } from '@/types/extension'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import toast from 'react-hot-toast'
 
 interface WatchSearch {
@@ -40,6 +39,14 @@ function WatchPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resumeTime, setResumeTime] = useState<number>(0)
+  const [videoServerInfo, setVideoServerInfo] = useState<VideoServerUrls | null>(null)
+
+  // Load video server info on mount
+  useEffect(() => {
+    getVideoServerInfo()
+      .then(setVideoServerInfo)
+      .catch((err) => console.error('Failed to get video server info:', err))
+  }, [])
 
   // Load anime details
   useEffect(() => {
@@ -150,9 +157,12 @@ function WatchPage() {
         // Check if episode is downloaded first
         const filePath = await getEpisodeFilePath(animeId, currentEpisode.number)
 
-        if (filePath) {
-          // Use local file for offline playback
-          const localUrl = convertFileSrc(filePath)
+        if (filePath && videoServerInfo) {
+          // Use video server for local file (proper Range request support for large files)
+          // Extract just the filename from the full path
+          const filename = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+          // Use /files endpoint which uses tower-http ServeDir for automatic Range support
+          const localUrl = `http://127.0.0.1:${videoServerInfo.port}/files/${encodeURIComponent(filename)}?token=${videoServerInfo.token}`
           setSources({
             sources: [{
               url: localUrl,
@@ -162,8 +172,29 @@ function WatchPage() {
             }],
             subtitles: []
           })
-          console.log('Playing from local file:', filePath)
-        } else {
+          console.log('Playing from video server:', localUrl)
+        } else if (filePath) {
+          // Fallback: Try getLocalVideoUrl command
+          try {
+            const filename = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+            const localUrl = await getLocalVideoUrl(filename)
+            setSources({
+              sources: [{
+                url: localUrl,
+                quality: 'Downloaded',
+                type: 'video/mp4',
+                server: 'Local'
+              }],
+              subtitles: []
+            })
+            console.log('Playing from video server (fallback):', localUrl)
+          } catch (err) {
+            console.error('Failed to get local video URL:', err)
+            // Fall through to streaming
+          }
+        }
+
+        if (!filePath) {
           // Fetch from extension
           const result = await getVideoSources(extensionId, currentEpisodeId)
           setSources(result)
@@ -176,7 +207,7 @@ function WatchPage() {
     }
 
     loadProgressAndSources()
-  }, [extensionId, currentEpisodeId, currentEpisode, animeId])
+  }, [extensionId, currentEpisodeId, currentEpisode, animeId, videoServerInfo])
 
   const handleNextEpisode = () => {
     if (!details || currentEpisodeIndex === -1) return
