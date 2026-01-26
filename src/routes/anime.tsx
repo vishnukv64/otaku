@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState, useRef } from 'react'
-import { Search, Loader2, AlertCircle } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Search, Loader2, AlertCircle, X } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import { loadExtension, getRecommendations } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
@@ -9,6 +9,9 @@ import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
+
+// Debounce delay for instant search (ms)
+const SEARCH_DEBOUNCE_MS = 300
 
 export const Route = createFileRoute('/anime')({
   component: AnimeScreen,
@@ -41,6 +44,7 @@ function AnimeScreen() {
     searchLoading,
     searchError,
     search,
+    clearSearch,
   } = useMediaStore()
 
   // Load AllAnime extension on mount
@@ -87,12 +91,32 @@ function AnimeScreen() {
     loadRecommendations()
   }, [extensionId])
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (extensionId && searchInput.trim()) {
-      search(extensionId, searchInput, 1)
+  // Debounced instant search - triggers as user types
+  useEffect(() => {
+    if (!extensionId) return
+
+    // If input is empty, clear search results
+    if (!searchInput.trim()) {
+      if (searchQuery) {
+        clearSearch()
+      }
+      return
     }
-  }
+
+    // Debounce the search
+    const timer = setTimeout(() => {
+      search(extensionId, searchInput, 1)
+    }, SEARCH_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [searchInput, extensionId])
+
+  // Clear search input
+  const handleClearSearch = useCallback(() => {
+    setSearchInput('')
+    clearSearch()
+    searchInputRef.current?.focus()
+  }, [clearSearch])
 
   // Keyboard shortcuts
   useKeyboardShortcut(
@@ -131,45 +155,51 @@ function AnimeScreen() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-6">Anime Browser</h1>
 
-        {/* Search Form */}
-        <form onSubmit={handleSearch} className="max-w-2xl">
+        {/* Instant Search */}
+        <div className="max-w-2xl">
           <div className="relative">
-            <Search
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
-              size={20}
-            />
+            {searchLoading ? (
+              <Loader2
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-accent-primary)] animate-spin"
+                size={20}
+              />
+            ) : (
+              <Search
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
+                size={20}
+              />
+            )}
             <input
               ref={searchInputRef}
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search for anime... (Press / to focus)"
-              className="w-full pl-12 pr-4 py-3 bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg text-white placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:border-transparent"
+              className="w-full pl-12 pr-12 py-3 bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg text-white placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:border-transparent"
             />
+            {searchInput && (
+              <button
+                onClick={handleClearSearch}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                aria-label="Clear search"
+              >
+                <X size={20} />
+              </button>
+            )}
           </div>
-          {searchInput && (
+          {searchInput && !searchLoading && (
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Press Enter to search or type to see suggestions
+              Showing results as you type
             </p>
           )}
-        </form>
+        </div>
       </div>
 
       {/* Search Results */}
-      {searchQuery && (
+      {searchInput && (
         <div>
-          {/* Loading State */}
-          {searchLoading && (
-            <div className="flex flex-col items-center justify-center py-20">
-              <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)] mb-4" />
-              <p className="text-lg text-[var(--color-text-secondary)]">
-                Searching for "{searchQuery}"...
-              </p>
-            </div>
-          )}
-
           {/* Results */}
-          {!searchLoading && searchResults.length > 0 && (
+          {searchResults.length > 0 && (
             <div>
               <h2 className="text-xl font-semibold mb-4">
                 Search Results for "{searchQuery}" ({searchResults.length} results)
@@ -195,7 +225,7 @@ function AnimeScreen() {
           )}
 
           {/* No Results */}
-          {!searchLoading && searchResults.length === 0 && !searchError && (
+          {!searchLoading && searchResults.length === 0 && !searchError && searchQuery && (
             <div className="text-center py-12">
               <p className="text-lg text-[var(--color-text-secondary)]">
                 No results found for "{searchQuery}"
@@ -206,7 +236,7 @@ function AnimeScreen() {
       )}
 
       {/* Recommendations / Empty State */}
-      {!searchQuery && (
+      {!searchInput && (
         <div>
           {recommendationsLoading ? (
             <div className="flex flex-col items-center justify-center py-20">

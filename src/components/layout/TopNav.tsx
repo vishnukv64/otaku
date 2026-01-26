@@ -13,7 +13,11 @@ const navItems = [
   { name: 'Library', path: '/library' },
 ]
 
-export function TopNav() {
+interface TopNavProps {
+  onSearchClick?: () => void
+}
+
+export function TopNav({ onSearchClick }: TopNavProps) {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [downloadManagerOpen, setDownloadManagerOpen] = useState(false)
@@ -76,10 +80,15 @@ export function TopNav() {
           {/* Right Side Icons */}
           <div className="flex items-center gap-2 sm:gap-4">
             <button
-              className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-              aria-label="Search"
+              onClick={onSearchClick}
+              className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group flex items-center gap-2"
+              aria-label="Search (Cmd+K)"
+              title="Search (Cmd+K)"
             >
               <Search size={20} />
+              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] rounded border border-[var(--color-bg-hover)] group-hover:border-[var(--color-text-muted)]">
+                <span className="text-[10px]">⌘</span>K
+              </kbd>
             </button>
 
             {/* Download Indicator with Badge */}

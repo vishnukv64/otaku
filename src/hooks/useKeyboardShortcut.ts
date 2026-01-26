@@ -1,7 +1,10 @@
 /**
  * useKeyboardShortcut Hook
  *
- * Handles global keyboard shortcuts
+ * Handles global keyboard shortcuts with support for:
+ * - Key combinations (ctrl+k, shift+/, etc.)
+ * - Optional input field handling
+ * - Escape key always works in inputs
  */
 
 import { useEffect } from 'react'
@@ -12,7 +15,18 @@ interface KeyMap {
   [key: string]: KeyHandler
 }
 
-export function useKeyboardShortcut(keyMap: KeyMap, deps: React.DependencyList = []) {
+interface Options {
+  /** Allow shortcuts to trigger even when focused on input/textarea */
+  allowInInputs?: boolean
+}
+
+export function useKeyboardShortcut(
+  keyMap: KeyMap,
+  deps: React.DependencyList = [],
+  options: Options = {}
+) {
+  const { allowInInputs = false } = options
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Build key combination string (e.g., "ctrl+k", "shift+/", "escape")
@@ -29,15 +43,15 @@ export function useKeyboardShortcut(keyMap: KeyMap, deps: React.DependencyList =
       const handler = keyMap[combination] || keyMap[key]
 
       if (handler) {
-        // Don't trigger if user is typing in an input/textarea
+        // Don't trigger if user is typing in an input/textarea (unless allowed)
         const target = event.target as HTMLElement
         const isInputField =
           target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
           target.isContentEditable
 
-        // Allow escape key even in input fields
-        if (!isInputField || key === 'escape') {
+        // Allow escape key even in input fields, or if allowInInputs is true
+        if (!isInputField || key === 'escape' || allowInInputs) {
           handler(event)
         }
       }
@@ -48,5 +62,5 @@ export function useKeyboardShortcut(keyMap: KeyMap, deps: React.DependencyList =
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, deps)
+  }, [...deps, allowInInputs])
 }

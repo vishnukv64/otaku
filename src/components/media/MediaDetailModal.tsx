@@ -45,6 +45,8 @@ export function MediaDetailModal({
   const [relatedLoading, setRelatedLoading] = useState(false)
 
   const handleWatch = (episodeId: string) => {
+    // Close modal first, then navigate to watch page
+    onClose()
     navigate({
       to: '/watch',
       search: {
