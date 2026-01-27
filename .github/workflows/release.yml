@@ -83,10 +83,10 @@ jobs:
             target: ''
             arch: x64
 
-          # Linux ARM64
-          - platform: ubuntu-22.04
-            args: '--target aarch64-unknown-linux-gnu'
-            target: aarch64-unknown-linux-gnu
+          # Linux ARM64 (using native ARM runner)
+          - platform: ubuntu-24.04-arm
+            args: ''
+            target: ''
             arch: aarch64
 
     runs-on: ${{ matrix.platform }}
@@ -135,25 +135,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      # Linux ARM64 cross-compilation setup
+      # Linux ARM64 native dependencies (runs on ubuntu-24.04-arm)
       - name: Install Linux ARM64 dependencies
-        if: matrix.platform == 'ubuntu-22.04' && matrix.arch == 'aarch64'
+        if: matrix.platform == 'ubuntu-24.04-arm'
         run: |
-          sudo dpkg --add-architecture arm64
-          sudo bash -c 'cat > /etc/apt/sources.list.d/arm64.list << EOF
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-security main restricted universe multiverse
-          EOF'
-          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          sudo apt-get install -y libwebkit2gtk-4.1-dev:arm64 libssl-dev:arm64 libappindicator3-dev:arm64 librsvg2-dev:arm64 patchelf
-
-          # Set up cross-compilation environment
-          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
         run: pnpm install
