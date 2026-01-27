@@ -77,13 +77,19 @@ jobs:
         working-directory: src-tauri
         run: |
           echo "🔍 Auditing Rust dependencies..."
-          cargo audit || {
-            echo ""
-            echo "⚠️  Vulnerabilities found in Rust dependencies!"
-            echo "Run 'cargo audit' locally for details."
-            exit 1
-          }
-          echo "✅ No vulnerabilities found in Rust dependencies"
+          # Ignore known transitive dependency issues we can't control:
+          # - RUSTSEC-2023-0071: rsa timing sidechannel (Tauri's TLS stack)
+          # - RUSTSEC-2024-0429: glib unsoundness (Tauri's GTK bindings)
+          cargo audit \
+            --ignore RUSTSEC-2023-0071 \
+            --ignore RUSTSEC-2024-0429 \
+            || {
+              echo ""
+              echo "⚠️  New vulnerabilities found in Rust dependencies!"
+              echo "Review and update src-tauri/.cargo/audit.toml if needed."
+              exit 1
+            }
+          echo "✅ Rust dependency audit passed"
 
   codeql:
     name: CodeQL Analysis

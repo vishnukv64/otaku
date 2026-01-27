@@ -1,0 +1,18 @@
+# Cargo audit configuration
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+# Advisories to ignore (transitive dependencies we can't control)
+ignore = [
+    # rsa 0.9.10 - Marvin Attack timing sidechannel
+    # This is a transitive dependency from Tauri's TLS/crypto stack
+    # The attack requires precise timing measurements which is impractical in our use case
+    # Tauri will update when a patched version is available
+    # https://rustsec.org/advisories/RUSTSEC-2023-0071
+    "RUSTSEC-2023-0071",
+
+    # glib 0.18.5 - unsoundness in VariantStrIter (warning, not vulnerability)
+    # Transitive dependency from Tauri's GTK bindings (Linux only)
+    # https://rustsec.org/advisories/RUSTSEC-2024-0429
+    "RUSTSEC-2024-0429",
+]
