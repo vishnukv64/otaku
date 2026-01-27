@@ -49,6 +49,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Generate route tree
+        run: pnpm generate-routes
+
       - name: Lint
         run: pnpm lint
 
