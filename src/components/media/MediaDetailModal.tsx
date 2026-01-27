@@ -448,7 +448,7 @@ export function MediaDetailModal({
           ) : details ? (
             <>
               {/* Hero Banner */}
-              <div className="relative h-[28rem] rounded-t-xl overflow-hidden">
+              <div className="relative rounded-t-xl overflow-hidden">
                 {/* Background Image (blurred) */}
                 {details.cover_url && (
                   <>
@@ -463,32 +463,32 @@ export function MediaDetailModal({
                 )}
 
                 {/* Content */}
-                <div className="relative h-full flex items-end p-10">
-                  <div className="flex gap-8 w-full">
+                <div className="relative p-10">
+                  <div className="flex gap-8 w-full items-start">
                     {/* Poster */}
                     {details.cover_url && (
                       <div className="relative flex-shrink-0 group">
                         <img
                           src={details.cover_url}
                           alt={details.title}
-                          className="w-56 h-80 object-cover rounded-xl shadow-2xl ring-1 ring-white/10 transform group-hover:scale-105 transition-transform duration-300"
+                          className="w-48 sm:w-56 h-72 sm:h-80 object-cover rounded-xl shadow-2xl ring-1 ring-white/10 transform group-hover:scale-105 transition-transform duration-300"
                         />
                         <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-black/20 to-transparent" />
                       </div>
                     )}
 
                     {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <h1 className="text-5xl font-black mb-3 drop-shadow-2xl leading-tight tracking-tight">
+                    <div className="flex-1 min-w-0 pt-4">
+                      <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black mb-3 drop-shadow-2xl leading-tight tracking-tight">
                         {details.english_name || details.title}
                       </h1>
                       {details.english_name && details.title !== details.english_name && (
-                        <h2 className="text-xl text-[var(--color-text-secondary)] mb-2 font-medium">
+                        <h2 className="text-base sm:text-lg text-[var(--color-text-secondary)] mb-2 font-medium">
                           {details.title}
                         </h2>
                       )}
                       {details.native_name && (
-                        <h3 className="text-base text-[var(--color-text-muted)] mb-3">
+                        <h3 className="text-sm text-[var(--color-text-muted)] mb-3">
                           {details.native_name}
                         </h3>
                       )}
