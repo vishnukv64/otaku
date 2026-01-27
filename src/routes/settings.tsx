@@ -11,7 +11,8 @@ import { SettingSlider } from '../components/settings/SettingSlider'
 import { SettingDropdown } from '../components/settings/SettingDropdown'
 import { SettingFileInput } from '../components/settings/SettingFileInput'
 import { DangerButton } from '../components/settings/DangerButton'
-import { HardDrive } from 'lucide-react'
+import { HardDrive, Activity, ChevronRight } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsScreen,
@@ -336,6 +337,36 @@ function SettingsScreen() {
                 })
               }
             />
+          </SettingRow>
+        </SettingSection>
+
+        {/* Developer Section */}
+        <SettingSection
+          title="Developer"
+          description="Debugging and diagnostic tools"
+        >
+          <SettingRow
+            label="System Stats"
+            description="View real-time CPU, memory, and storage metrics"
+          >
+            <Link
+              to="/stats"
+              className="
+                flex items-center gap-2
+                bg-[var(--color-surface-subtle)]
+                hover:bg-[var(--color-surface-hover)]
+                text-[var(--color-text-primary)]
+                rounded-lg
+                px-4
+                py-2
+                font-medium
+                transition-colors
+              "
+            >
+              <Activity size={16} />
+              View Stats
+              <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
+            </Link>
           </SettingRow>
         </SettingSection>
 

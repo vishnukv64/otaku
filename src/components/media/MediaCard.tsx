@@ -82,7 +82,7 @@ export function MediaCard({ media, onClick, progress }: MediaCardProps) {
                   <span>{media.year}</span>
                 </>
               )}
-              {media.status && (
+              {media.status && media.status.toLowerCase() !== 'unknown' && (
                 <>
                   <span>•</span>
                   <span className="capitalize">{media.status.toLowerCase()}</span>

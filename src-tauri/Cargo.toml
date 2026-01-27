@@ -51,3 +51,6 @@ rand = "0.8"
 async-stream = "0.3"
 urlencoding = "2.1"
 tokio-util = { version = "0.7", features = ["io"] }
+
+# System metrics
+sysinfo = "0.31"

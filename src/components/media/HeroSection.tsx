@@ -65,7 +65,7 @@ export function HeroSection({
                 <span className="text-[var(--color-text-secondary)]">{media.year}</span>
               </>
             )}
-            {media.status && (
+            {media.status && media.status.toLowerCase() !== 'unknown' && (
               <>
                 <span className="text-[var(--color-text-muted)]">•</span>
                 <span className="text-[var(--color-text-secondary)] capitalize">

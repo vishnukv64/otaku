@@ -502,3 +502,34 @@ export async function getProxyVideoUrl(url: string): Promise<string> {
   return await invoke('get_proxy_video_url', { url })
 }
 
+// ==================== System Stats Commands ====================
+
+export interface SystemStats {
+  // Memory (in bytes)
+  memory_used: number
+  memory_total: number
+  memory_percent: number
+
+  // CPU (percentage)
+  cpu_usage: number
+  cpu_count: number
+
+  // Process-specific
+  process_memory: number
+  process_cpu: number
+  thread_count: number
+
+  // Storage
+  disk_used: number
+  disk_total: number
+  disk_percent: number
+}
+
+/**
+ * Get real-time system statistics for developer debugging
+ * @returns System stats including CPU, memory, storage, and process info
+ */
+export async function getSystemStats(): Promise<SystemStats> {
+  return await invoke('get_system_stats')
+}
+

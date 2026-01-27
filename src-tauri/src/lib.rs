@@ -280,6 +280,8 @@ pub fn run() {
       commands::get_video_server_info,
       commands::get_local_video_url,
       commands::get_proxy_video_url,
+      // System Stats
+      commands::get_system_stats,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -883,3 +883,105 @@ pub async fn get_proxy_video_url(
 ) -> Result<String, String> {
     Ok(video_server.proxy_url(&url))
 }
+
+// ==================== System Stats Commands ====================
+
+/// System statistics for developer debugging
+#[derive(serde::Serialize)]
+pub struct SystemStats {
+    // Memory (in bytes)
+    pub memory_used: u64,
+    pub memory_total: u64,
+    pub memory_percent: f32,
+
+    // CPU (percentage)
+    pub cpu_usage: f32,
+    pub cpu_count: usize,
+
+    // Process-specific
+    pub process_memory: u64,
+    pub process_cpu: f32,
+    pub thread_count: usize,
+
+    // Storage
+    pub disk_used: u64,
+    pub disk_total: u64,
+    pub disk_percent: f32,
+}
+
+/// Get real-time system statistics for developer debugging
+#[tauri::command]
+pub async fn get_system_stats() -> Result<SystemStats, String> {
+    use sysinfo::{System, Pid, Disks};
+
+    // Create system info instance and refresh relevant data
+    let mut sys = System::new();
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+    // Get CPU usage (average across all cores)
+    // Note: First call returns 0, subsequent calls show actual usage
+    let cpu_usage = sys.cpus().iter()
+        .map(|cpu| cpu.cpu_usage())
+        .sum::<f32>() / sys.cpus().len().max(1) as f32;
+
+    let cpu_count = sys.cpus().len();
+
+    // Get memory stats
+    let memory_total = sys.total_memory();
+    let memory_used = sys.used_memory();
+    let memory_percent = if memory_total > 0 {
+        (memory_used as f32 / memory_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    // Get current process stats
+    let current_pid = Pid::from_u32(std::process::id());
+    let (process_memory, process_cpu, thread_count) = if let Some(process) = sys.process(current_pid) {
+        (
+            process.memory(),
+            process.cpu_usage(),
+            // Thread count from /proc/self/stat or platform equivalent
+            std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(1)
+        )
+    } else {
+        (0, 0.0, 1)
+    };
+
+    // Get disk stats (primary disk)
+    let disks = Disks::new_with_refreshed_list();
+    let (disk_used, disk_total) = disks.iter()
+        .find(|d| d.mount_point() == std::path::Path::new("/"))
+        .or_else(|| disks.first())
+        .map(|d| {
+            let total = d.total_space();
+            let available = d.available_space();
+            let used = total.saturating_sub(available);
+            (used, total)
+        })
+        .unwrap_or((0, 0));
+
+    let disk_percent = if disk_total > 0 {
+        (disk_used as f32 / disk_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok(SystemStats {
+        memory_used,
+        memory_total,
+        memory_percent,
+        cpu_usage,
+        cpu_count,
+        process_memory,
+        process_cpu,
+        thread_count,
+        disk_used,
+        disk_total,
+        disk_percent,
+    })
+}

@@ -506,7 +506,7 @@ export function MediaDetailModal({
                             <span className="text-white font-medium">{details.year}</span>
                           </>
                         )}
-                        {details.status && (
+                        {details.status && details.status.toLowerCase() !== 'unknown' && (
                           <>
                             <span className="text-[var(--color-text-muted)]">•</span>
                             <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium capitalize">
@@ -640,10 +640,12 @@ export function MediaDetailModal({
                       )}
                     </div>
                   </div>
-                  <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                    <div className="text-[var(--color-text-muted)] text-sm mb-1">Status</div>
-                    <div className="text-2xl font-bold capitalize">{details.status || 'Unknown'}</div>
-                  </div>
+                  {details.status && details.status.toLowerCase() !== 'unknown' && (
+                    <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                      <div className="text-[var(--color-text-muted)] text-sm mb-1">Status</div>
+                      <div className="text-2xl font-bold capitalize">{details.status.toLowerCase()}</div>
+                    </div>
+                  )}
                   <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
                     <div className="text-[var(--color-text-muted)] text-sm mb-1">Year</div>
                     <div className="text-2xl font-bold">{details.year || 'N/A'}</div>
