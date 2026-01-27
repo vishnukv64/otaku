@@ -45,7 +45,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: `v${version}`,
               name: `Otaku v${version}`,
-              body: `## What's New\n\nSee the [changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.\n\n## Downloads\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Windows | x64 | \`otaku_${version}_x64-setup.exe\` |\n| macOS | Apple Silicon (M1/M2/M3) | \`otaku_${version}_aarch64.dmg\` |\n| macOS | Intel | \`otaku_${version}_x64.dmg\` |\n| Linux | x64 | \`otaku_${version}_amd64.deb\` / \`.AppImage\` |\n| Linux | ARM64 | \`otaku_${version}_arm64.deb\` / \`.AppImage\` |`,
+              body: `## What's New\n\nSee the [changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.\n\n## Downloads\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Windows | x64 | \`otaku_${version}_x64-setup.exe\` |\n| macOS | Apple Silicon (M1/M2/M3) | \`otaku_${version}_aarch64.dmg\` |\n| macOS | Intel | \`otaku_${version}_x64.dmg\` |\n| Linux | x64 | \`otaku_${version}_amd64.deb\` / \`.AppImage\` |`,
               draft: true,
               prerelease: false
             });
@@ -82,12 +82,6 @@ jobs:
             args: ''
             target: ''
             arch: x64
-
-          # Linux ARM64 (using native ARM runner)
-          - platform: ubuntu-24.04-arm
-            args: ''
-            target: ''
-            arch: aarch64
 
     runs-on: ${{ matrix.platform }}
 
@@ -129,15 +123,8 @@ jobs:
           key: ${{ matrix.platform }}-${{ matrix.arch }}
 
       # Linux dependencies
-      - name: Install Linux dependencies (x64)
-        if: matrix.platform == 'ubuntu-22.04' && matrix.arch == 'x64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      # Linux ARM64 native dependencies (runs on ubuntu-24.04-arm)
-      - name: Install Linux ARM64 dependencies
-        if: matrix.platform == 'ubuntu-24.04-arm'
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
