@@ -117,7 +117,7 @@ impl DownloadManager {
                         let file_size = metadata.len();
                         total_bytes = file_size;
                         downloaded_bytes = file_size;
-                        log::info!("Fixed total_bytes for {}: {} bytes", file_path, file_size);
+                        log::debug!("Fixed total_bytes for download");
 
                         // Update database with correct size
                         let updated_progress = DownloadProgress {
@@ -162,7 +162,7 @@ impl DownloadManager {
                 downloads.insert(progress.id.clone(), progress);
             }
 
-            log::info!("Loaded {} downloads from database", downloads.len());
+            log::debug!("Loaded {} downloads from database", downloads.len());
         }
         Ok(())
     }
@@ -259,7 +259,7 @@ impl DownloadManager {
         downloads.insert(id.clone(), progress.clone());
         drop(downloads);
 
-        log::info!("Queued download: {} - {}", id, progress.file_path);
+        log::debug!("Queued download: {}", id);
 
         // Start download task
         self.start_download_task(id).await?;
@@ -329,11 +329,11 @@ impl DownloadManager {
                                     let file_size = metadata.len();
                                     progress.total_bytes = file_size;
                                     progress.downloaded_bytes = file_size;
-                                    log::info!("Updated total_bytes to actual file size: {} bytes", file_size);
+                                    log::debug!("Updated total_bytes to actual file size: {} bytes", file_size);
                                 }
                             }
 
-                            log::info!("Download completed: {} ({} bytes)", download_id, progress.total_bytes);
+                            log::debug!("Download completed: {} ({} bytes)", download_id, progress.total_bytes);
                         }
                         Err(e) => {
                             progress.status = DownloadStatus::Failed;
@@ -521,7 +521,7 @@ impl DownloadManager {
         let mut downloads = self.downloads.write().await;
         if let Some(progress) = downloads.get_mut(download_id) {
             progress.status = DownloadStatus::Cancelled;
-            log::info!("Cancelled download: {}", download_id);
+            log::debug!("Cancelled download: {}", download_id);
 
             // Save to database
             self.save_to_database(progress).await.ok();
@@ -536,7 +536,7 @@ impl DownloadManager {
 
         let mut downloads = self.downloads.write().await;
         downloads.remove(download_id);
-        log::info!("Removed download from list: {}", download_id);
+        log::debug!("Removed download from list: {}", download_id);
         Ok(())
     }
 
@@ -601,7 +601,7 @@ impl DownloadManager {
         // Remove from memory
         let mut downloads = self.downloads.write().await;
         downloads.retain(|_, d| d.status != DownloadStatus::Completed);
-        log::info!("Cleared {} completed downloads from list", completed_ids.len());
+        log::debug!("Cleared {} completed downloads from list", completed_ids.len());
         Ok(())
     }
 
@@ -631,7 +631,7 @@ impl DownloadManager {
         // Remove from memory
         let mut downloads = self.downloads.write().await;
         downloads.retain(|_, d| d.status != DownloadStatus::Failed);
-        log::info!("Cleared {} failed downloads from list", failed_ids.len());
+        log::debug!("Cleared {} failed downloads from list", failed_ids.len());
         Ok(())
     }
 
@@ -649,7 +649,7 @@ impl DownloadManager {
                 .await
                 .context("Failed to delete file")?;
 
-            log::info!("Deleted file: {}", path);
+            log::debug!("Deleted file: {}", path);
         }
 
         // Remove from list and database
@@ -675,7 +675,7 @@ impl DownloadManager {
 
         if let Some(id) = download_id {
             self.delete_download(&id).await?;
-            log::info!("Deleted episode download: {} episode {}", media_id, episode_number);
+            log::debug!("Deleted episode download: {} episode {}", media_id, episode_number);
             Ok(())
         } else {
             anyhow::bail!("Episode download not found")

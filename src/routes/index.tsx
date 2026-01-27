@@ -77,15 +77,12 @@ function HomeScreen() {
       // Load each category
       for (const category of CATEGORIES) {
         try {
-          console.log(`Loading category: ${category.id}`, category)
           const results = await discoverAnime(
             extensionId,
             category.page,
             category.sortType,
             []
           )
-
-          console.log(`Category ${category.id} results:`, results)
 
           // Deduplicate results to avoid React key warnings
           const uniqueResults = results.results.reduce((acc, item) => {

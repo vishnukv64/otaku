@@ -125,23 +125,8 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const recommendations = data?.data?.queryPopular?.recommendations || [];
 
-      // Debug: log first result to see what fields are available
-      if (recommendations.length > 0) {
-        console.log('First anyCard:', JSON.stringify(recommendations[0].anyCard, null, 2));
-      }
-
-      const results = recommendations.map((rec, index) => {
+      const results = recommendations.map((rec) => {
         const show = rec.anyCard;
-
-        // Debug: log available fields for first item
-        if (index === 0) {
-          console.log('Available show fields:', Object.keys(show));
-          console.log('show.score:', show.score);
-          console.log('show.status:', show.status);
-          console.log('show.airedStart:', JSON.stringify(show.airedStart));
-          console.log('show.season:', JSON.stringify(show.season));
-          console.log('show.availableEpisodes:', show.availableEpisodes);
-        }
 
         // Thumbnail can be a full URL or a path - handle both cases
         let coverUrl = null;
@@ -283,9 +268,6 @@ const extensionObject = {
           const hexPart = source.sourceUrl.substring(2);
           const decodedPath = extensionObject.hexDecode(hexPart);
 
-          console.log('Hex-encoded source:', source.sourceName);
-          console.log('  Decoded path:', decodedPath);
-
           // Check if decoded path is already a full URL or a relative path
           let baseUrl;
           if (decodedPath.startsWith('http://') || decodedPath.startsWith('https://')) {
@@ -297,16 +279,9 @@ const extensionObject = {
           }
 
           // Skip /apivtwo/clock URLs - they consistently return 404
-          // Only use direct video URLs (like tools.fast4speed.rsvp)
           if (baseUrl.includes('/apivtwo/clock')) {
-            console.log('  Skipping clock URL (returns 404)');
             continue;
           }
-
-          // The decoded URL is the actual video URL - use it directly
-          // Don't append .m3u8 or /master.m3u8, and keep double slashes intact
-
-          console.log('  Final video URL:', baseUrl);
 
           sources.push({
             url: baseUrl,
@@ -319,11 +294,9 @@ const extensionObject = {
         else if (source.sourceUrl.startsWith('http://') || source.sourceUrl.startsWith('https://')) {
           // Skip iframe embeds - they're not direct video URLs
           if (source.type === 'iframe') {
-            console.log('Skipping iframe source:', source.sourceName);
             continue;
           }
 
-          // Only include if it's marked as 'player' type
           sources.push({
             url: source.sourceUrl,
             quality: source.sourceName || 'Default',

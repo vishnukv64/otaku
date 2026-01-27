@@ -109,17 +109,14 @@ function HomeScreen() {
 
   const handleWatch = () => {
     // TODO: Navigate to watch screen or show details
-    console.log('Watch clicked')
   }
 
   const handleMoreInfo = () => {
     // TODO: Show details modal or navigate to details page
-    console.log('More info clicked')
   }
 
-  const handleMediaClick = (item: SearchResult) => {
+  const handleMediaClick = (_item: SearchResult) => {
     // TODO: Navigate to details page
-    console.log('Media clicked:', item.title)
   }
 
   if (loading) {

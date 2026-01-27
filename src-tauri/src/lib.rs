@@ -176,7 +176,7 @@ pub fn run() {
         // Create database path
         let db_path = app_dir.join("otaku.db");
 
-        log::info!("Initializing database at: {:?}", db_path);
+        log::debug!("Initializing database");
 
         // Initialize database
         let database = Database::new(db_path)
@@ -211,12 +211,6 @@ pub fn run() {
             access_token: video_server.access_token().to_string(),
         };
 
-        log::info!(
-            "Video server configured on port {} with token {}",
-            video_server_info.port,
-            &video_server_info.access_token[..8]
-        );
-
         app_handle.manage(video_server_info);
 
         // Spawn video server in background
@@ -226,7 +220,7 @@ pub fn run() {
             }
         });
 
-        log::info!("Database, download manager, and video server initialized");
+        log::debug!("Backend initialized");
       });
 
       Ok(())

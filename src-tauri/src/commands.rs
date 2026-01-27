@@ -51,7 +51,7 @@ pub async fn load_extension(
     // Add the new extension
     extensions.push(extension);
 
-    log::info!("Loaded extension: {} v{}", metadata.name, metadata.version);
+    log::debug!("Loaded extension: {}", metadata.name);
 
     Ok(metadata)
 }
@@ -202,7 +202,7 @@ pub async fn proxy_video_request(
     url: String,
     range: Option<String>,
 ) -> Result<Vec<u8>, String> {
-    log::info!("Proxying video request: {} (range: {:?})", &url[..url.len().min(100)], range);
+    log::debug!("Proxying video request");
 
     use std::io::Read;
 
@@ -235,7 +235,6 @@ pub async fn proxy_video_request(
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("Failed to read response: {}", e))?;
 
-            log::info!("Proxy success: {} bytes", bytes.len());
             Ok(bytes)
         }
         Err(e) => {
@@ -250,7 +249,7 @@ pub async fn proxy_video_request(
 pub async fn proxy_hls_playlist(
     url: String,
 ) -> Result<String, String> {
-    log::info!("Proxying HLS playlist: {}", &url[..url.len().min(100)]);
+    log::debug!("Proxying HLS playlist");
 
     use std::io::Read;
 
@@ -266,7 +265,7 @@ pub async fn proxy_hls_playlist(
             let content_type = response.header("Content-Type")
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            log::info!("Playlist response status: {}, Content-Type: {}", status, content_type);
+            let _ = status; // silence unused warning
 
             // Try to read as bytes first
             let mut bytes = Vec::new();
@@ -275,36 +274,26 @@ pub async fn proxy_hls_playlist(
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("Failed to read response: {}", e))?;
 
-            log::info!("Response size: {} bytes", bytes.len());
-
             // Try to parse as UTF-8 text (m3u8 playlist)
             match String::from_utf8(bytes) {
                 Ok(playlist) => {
-                    log::info!("Successfully parsed as UTF-8 playlist, first 200 chars: {}",
-                        &playlist[..playlist.len().min(200)]);
-
                     // Check if it looks like an m3u8 playlist
                     if playlist.contains("#EXTM3U") || playlist.contains("#EXT-X-") {
                         // Rewrite relative URLs in the playlist to absolute URLs
                         let base_url = extract_base_url(&url);
                         let rewritten = rewrite_playlist_urls(&playlist, &base_url);
-                        log::info!("Playlist proxy success: {} chars", rewritten.len());
                         Ok(rewritten)
                     } else {
-                        // It's text but not an m3u8 playlist
-                        log::warn!("Response is text but not an m3u8 playlist");
                         Ok(playlist)
                     }
                 }
                 Err(_) => {
-                    // Not UTF-8 - this is likely a binary video file
-                    log::error!("Response is not UTF-8 text - likely a binary video file, not an HLS playlist");
-                    Err(format!("URL does not point to an HLS playlist (got binary data). Content-Type: {}. This URL might be a direct video file.", content_type))
+                    Err(format!("URL does not point to an HLS playlist (got binary data). Content-Type: {}.", content_type))
                 }
             }
         }
         Err(e) => {
-            log::error!("Playlist proxy error for URL {}: {:?}", &url[..url.len().min(100)], e);
+            log::error!("Playlist proxy error: {:?}", e);
             Err(format!("Failed to fetch playlist: {}", e))
         }
     }
@@ -371,7 +360,7 @@ pub async fn start_download(
 ) -> Result<String, String> {
     let download_id = format!("{}_{}", media_id, episode_number);
 
-    log::info!("Starting download: {} ({})", filename, download_id);
+    log::debug!("Starting download: {}", download_id);
 
     download_manager
         .queue_download(
@@ -775,7 +764,7 @@ pub async fn clear_all_watch_history(
         .await
         .map_err(|e| format!("Failed to clear watch history: {}", e))?;
 
-    log::info!("Cleared all watch history");
+    log::debug!("Cleared watch history");
     Ok(())
 }
 
@@ -789,7 +778,7 @@ pub async fn clear_library(
         .await
         .map_err(|e| format!("Failed to clear library: {}", e))?;
 
-    log::info!("Cleared all library entries");
+    log::debug!("Cleared library");
     Ok(())
 }
 
@@ -813,7 +802,7 @@ pub async fn clear_all_data(
         .await
         .map_err(|e| format!("Failed to optimize database: {}", e))?;
 
-    log::info!("Cleared all data");
+    log::debug!("Cleared all data");
     Ok(())
 }
 

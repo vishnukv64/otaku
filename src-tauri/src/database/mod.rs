@@ -29,7 +29,7 @@ impl Database {
                 .context("Failed to create database directory")?;
         }
 
-        log::info!("Initializing database at: {:?}", db_path);
+        log::debug!("Initializing database at: {:?}", db_path);
 
         // Configure SQLite connection options
         let options = SqliteConnectOptions::new()
@@ -47,21 +47,21 @@ impl Database {
             .await
             .context("Failed to create database pool")?;
 
-        log::info!("Database connection pool created");
+        log::debug!("Database connection pool created");
 
         let db = Self { pool };
 
         // Run migrations
         db.run_migrations().await?;
 
-        log::info!("Database initialized successfully");
+        log::debug!("Database initialized successfully");
 
         Ok(db)
     }
 
     /// Run database migrations
     async fn run_migrations(&self) -> Result<()> {
-        log::info!("Running database migrations");
+        log::debug!("Running database migrations");
 
         // Create migrations tracking table if it doesn't exist
         sqlx::query(
@@ -100,7 +100,7 @@ impl Database {
                 continue;
             }
 
-            log::info!("Running migration: {}", name);
+            log::debug!("Running migration: {}", name);
 
             // Run the migration
             sqlx::raw_sql(migration_sql)
@@ -115,10 +115,10 @@ impl Database {
                 .await
                 .with_context(|| format!("Failed to record migration: {}", name))?;
 
-            log::info!("Migration completed: {}", name);
+            log::debug!("Migration completed: {}", name);
         }
 
-        log::info!("All migrations completed successfully");
+        log::debug!("All migrations completed successfully");
 
         Ok(())
     }
@@ -149,7 +149,7 @@ impl Database {
 
     /// Optimize database (vacuum and analyze)
     pub async fn optimize(&self) -> Result<()> {
-        log::info!("Optimizing database");
+        log::debug!("Optimizing database");
 
         sqlx::query("VACUUM")
             .execute(&self.pool)
@@ -161,7 +161,7 @@ impl Database {
             .await
             .context("Failed to analyze database")?;
 
-        log::info!("Database optimization completed");
+        log::debug!("Database optimization completed");
 
         Ok(())
     }

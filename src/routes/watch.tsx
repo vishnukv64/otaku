@@ -127,7 +127,6 @@ function WatchPage() {
 
       try {
         // Step 1: Load watch progress FIRST
-        console.log(`📖 Loading watch progress for episode: ${currentEpisodeId}`)
         try {
           const progress = await getWatchProgress(currentEpisodeId)
 
@@ -135,7 +134,6 @@ function WatchPage() {
             const minutes = Math.floor(progress.progress_seconds / 60)
             const seconds = Math.floor(progress.progress_seconds % 60)
             const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
-            console.log(`✓ Found saved progress: ${timeStr} (${progress.progress_seconds}s)`)
             setResumeTime(progress.progress_seconds)
 
             // Show resume notification with unique ID to prevent duplicates
@@ -145,11 +143,9 @@ function WatchPage() {
               position: 'bottom-center',
             })
           } else {
-            console.log('No saved progress found, starting from beginning')
             setResumeTime(0)
           }
-        } catch (error) {
-          console.error('Failed to load watch progress:', error)
+        } catch {
           setResumeTime(0)
         }
 
@@ -159,9 +155,7 @@ function WatchPage() {
 
         if (filePath && videoServerInfo) {
           // Use video server for local file (proper Range request support for large files)
-          // Extract just the filename from the full path
           const filename = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
-          // Use /files endpoint which uses tower-http ServeDir for automatic Range support
           const localUrl = `http://127.0.0.1:${videoServerInfo.port}/files/${encodeURIComponent(filename)}?token=${videoServerInfo.token}`
           setSources({
             sources: [{
@@ -172,7 +166,6 @@ function WatchPage() {
             }],
             subtitles: []
           })
-          console.log('Playing from video server:', localUrl)
         } else if (filePath) {
           // Fallback: Try getLocalVideoUrl command
           try {
@@ -187,9 +180,7 @@ function WatchPage() {
               }],
               subtitles: []
             })
-            console.log('Playing from video server (fallback):', localUrl)
-          } catch (err) {
-            console.error('Failed to get local video URL:', err)
+          } catch {
             // Fall through to streaming
           }
         }

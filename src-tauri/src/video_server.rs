@@ -101,8 +101,7 @@ impl VideoServer {
             .with_state(state);
 
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
-        log::info!("Video server starting on http://127.0.0.1:{}", self.port);
-        log::info!("Downloads directory: {:?}", self.downloads_dir);
+        log::debug!("Video server starting on port {}", self.port);
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(listener, app).await?;
@@ -137,7 +136,6 @@ async fn validate_token(
 
     // Check token
     if query.token.as_deref() != Some(&state.access_token) {
-        log::warn!("Invalid access token in request");
         return (StatusCode::FORBIDDEN, "Invalid access token").into_response();
     }
 
@@ -155,7 +153,7 @@ async fn serve_local_redirect(
     let decoded_path = urlencoding::decode(&path).unwrap_or_else(|_| path.clone().into());
     let file_path = state.downloads_dir.join(decoded_path.as_ref());
 
-    log::info!("Serving local file: {:?}", file_path);
+    log::debug!("Serving local file: {:?}", file_path);
 
     // Use ServeDir to serve the file with automatic Range support
     let serve_dir = ServeDir::new(&state.downloads_dir);
@@ -196,7 +194,7 @@ async fn proxy_video(
         None => return (StatusCode::BAD_REQUEST, "Missing url parameter").into_response(),
     };
 
-    log::info!("Proxying video: {}", &url[..url.len().min(100)]);
+    log::debug!("Proxying video");
 
     // Build request to remote server
     // Follow redirects to get the actual video stream
@@ -215,7 +213,6 @@ async fn proxy_video(
     // Forward Range header if present - this is critical for video seeking
     if let Some(range) = request.headers().get(header::RANGE) {
         if let Ok(range_str) = range.to_str() {
-            log::info!("Forwarding Range header: {}", range_str);
             remote_request = remote_request.header("Range", range_str);
         }
     }
@@ -231,8 +228,6 @@ async fn proxy_video(
 
     let status = response.status();
     let response_headers = response.headers().clone();
-
-    log::info!("Remote response status: {}", status);
 
     // Get content info from response headers
     let content_type = response_headers
@@ -255,10 +250,6 @@ async fn proxy_video(
         .get(reqwest::header::ACCEPT_RANGES)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-
-    if let Some(ref range) = content_range {
-        log::info!("Content-Range: {}", range);
-    }
 
     // Stream the response body directly without buffering
     // This is the key to handling large files

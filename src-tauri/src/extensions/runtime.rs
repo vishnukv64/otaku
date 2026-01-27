@@ -71,7 +71,7 @@ impl ExtensionRuntime {
             let fetch_fn = rquickjs::Function::new(ctx.clone(), |url: String, options: rquickjs::Object| {
                 use std::io::Read;
 
-                log::info!("__fetch called: {}", &url[..url.len().min(100)]);
+                log::debug!("__fetch called");
 
                 // Parse options
                 let method = options.get::<_, Option<String>>("method")
@@ -104,25 +104,7 @@ impl ExtensionRuntime {
                             .take(10_000_000)
                             .read_to_string(&mut body);
 
-                        log::info!("__fetch response: status={}, body_len={}, read_ok={}",
-                            status, body.len(), read_result.is_ok());
-
-                        // Detailed logging for AllAnime API responses
-                        if url.contains("api.allanime.day") {
-                            log::info!("=== ALLANIME API REQUEST ===");
-                            log::info!("URL: {}", url);
-                            log::info!("Method: {}", method);
-
-                            // Parse and pretty-print the response body
-                            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&body) {
-                                let pretty_json = serde_json::to_string_pretty(&json_value)
-                                    .unwrap_or_else(|_| body.clone());
-                                log::info!("Response Body (parsed JSON):\n{}", pretty_json);
-                            } else {
-                                log::info!("Response Body (raw): {}", &body[..body.len().min(1000)]);
-                            }
-                            log::info!("============================");
-                        }
+                        let _ = (status, read_result); // silence unused warnings
 
                         // Return response object
                         Ok(serde_json::json!({
@@ -141,7 +123,7 @@ impl ExtensionRuntime {
 
             // Add __log function that outputs to Rust logger
             let log_fn = rquickjs::Function::new(ctx.clone(), |message: String| {
-                log::info!("[Extension Console] {}", message);
+                log::debug!("[Extension] {}", message);
                 Ok::<(), rquickjs::Error>(())
             })?;
 
@@ -179,8 +161,6 @@ impl ExtensionRuntime {
 
     /// Call extension's discover method with filters
     pub fn discover(&self, page: u32, sort_type: Option<String>, genres: Vec<String>) -> Result<SearchResults> {
-        log::info!("Discover called: page={}, sort_type={:?}, genres={:?}", page, sort_type, genres);
-
         self.context.with(|ctx| {
             let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
 
@@ -188,7 +168,6 @@ impl ExtensionRuntime {
             let discover_fn: Option<rquickjs::Function> = ext_obj.get("discover").ok();
 
             let result: rquickjs::Value = if let Some(fn_obj) = discover_fn {
-                log::info!("Calling discover method");
                 // Call discover with sort type and genres
                 let sort = sort_type.unwrap_or_else(|| "score".to_string());
 
@@ -201,7 +180,6 @@ impl ExtensionRuntime {
 
                 fn_obj.call((page, sort.as_str(), genres_arr.clone()))?
             } else {
-                log::info!("Discover method not found, using search");
                 // Fallback to search with empty query
                 let search_fn: rquickjs::Function = ext_obj.get("search")?;
                 search_fn.call(("", page))?
@@ -211,11 +189,7 @@ impl ExtensionRuntime {
                 .ok_or_else(|| anyhow!("Failed to stringify discover result"))?
                 .to_string()?;
 
-            log::info!("Discover result JSON length: {}", json_str.len());
-            log::debug!("Discover result: {}", &json_str[..json_str.len().min(200)]);
-
             let search_results: SearchResults = serde_json::from_str(&json_str)?;
-            log::info!("Parsed {} results", search_results.results.len());
 
             Ok(search_results)
         })
@@ -223,8 +197,6 @@ impl ExtensionRuntime {
 
     /// Call extension's getRecommendations method
     pub fn get_recommendations(&self) -> Result<SearchResults> {
-        log::info!("Get recommendations called");
-
         self.context.with(|ctx| {
             let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
 
@@ -232,10 +204,8 @@ impl ExtensionRuntime {
             let recommendations_fn: Option<rquickjs::Function> = ext_obj.get("getRecommendations").ok();
 
             let result: rquickjs::Value = if let Some(fn_obj) = recommendations_fn {
-                log::info!("Calling getRecommendations method");
                 fn_obj.call(())?
             } else {
-                log::info!("getRecommendations method not found, using discover as fallback");
                 // Fallback to discover
                 let discover_fn: Option<rquickjs::Function> = ext_obj.get("discover").ok();
                 if let Some(fn_obj) = discover_fn {
@@ -252,11 +222,7 @@ impl ExtensionRuntime {
                 .ok_or_else(|| anyhow!("Failed to stringify recommendations result"))?
                 .to_string()?;
 
-            log::info!("Recommendations result JSON length: {}", json_str.len());
-            log::debug!("Recommendations result: {}", &json_str[..json_str.len().min(200)]);
-
             let search_results: SearchResults = serde_json::from_str(&json_str)?;
-            log::info!("Parsed {} recommendations", search_results.results.len());
 
             Ok(search_results)
         })

@@ -154,17 +154,13 @@ export function VideoPlayer({
 
         // Wait for video server to be ready
         if (!videoServer) {
-          console.log('Waiting for video server to be ready...')
           setLoading(true)
           return // Will retry when videoServer becomes available
         }
 
         // Check if this is actually an HLS stream by looking at the URL
-        // Some sources mark videos as 'hls' type but they're actually direct MP4s
         const isActuallyHls = currentSource.url.toLowerCase().includes('.m3u8') ||
                               currentSource.url.toLowerCase().includes('m3u8')
-
-        console.log('Source type:', currentSource.type, 'URL contains m3u8:', isActuallyHls)
 
         if (isActuallyHls && Hls.isSupported()) {
           // Try HLS with video server proxy for proper streaming
@@ -201,7 +197,6 @@ export function VideoPlayer({
 
           // Load the proxied URL
           const proxyUrl = createProxyUrl(videoServer, currentSource.url)
-          console.log('Loading HLS via video server:', proxyUrl)
           hls.loadSource(proxyUrl)
           hls.attachMedia(video)
 
@@ -223,27 +218,21 @@ export function VideoPlayer({
           })
 
           hls.on(Hls.Events.ERROR, (_event, data) => {
-            console.error('HLS Error:', data)
             if (data.fatal) {
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
-                  console.error('Network error details:', data.details, data.response)
-
                   // If it's a manifest error, this is not an HLS stream - fall back to direct playback
                   if ((data.details === 'manifestLoadError' || data.details === 'manifestParsingError') && videoServer) {
-                    console.log('Not an HLS stream (error: ' + data.details + '), trying direct video playback via proxy')
                     hls.destroy()
                     hlsRef.current = null
 
                     // Use video server proxy for direct video playback
                     const proxyUrl = createProxyUrl(videoServer, currentSource.url)
-                    console.log('Using video server proxy for direct playback:', proxyUrl)
-
                     video.src = proxyUrl
                     setLoading(false)
 
                     if (autoPlay) {
-                      video.play().catch((e) => console.error('Autoplay failed:', e))
+                      video.play().catch(() => {})
                     }
 
                     if (initialTime > 0) {
@@ -255,12 +244,10 @@ export function VideoPlayer({
                   }
                   break
                 case Hls.ErrorTypes.MEDIA_ERROR:
-                  console.error('Media error details:', data.details)
                   setError(`Media error: ${data.details}`)
                   hls.recoverMediaError()
                   break
                 default:
-                  console.error('Fatal error details:', data.details)
                   setError(`Fatal error: ${data.details}`)
                   setLoading(false)
                   break
@@ -269,7 +256,6 @@ export function VideoPlayer({
           })
         } else if (isActuallyHls && video.canPlayType('application/vnd.apple.mpegurl')) {
           // Native HLS support (Safari) - only for actual HLS streams
-          console.log('Using native HLS support via proxy')
           const proxyUrl = createProxyUrl(videoServer, currentSource.url)
           video.src = proxyUrl
           setLoading(false)
@@ -277,12 +263,11 @@ export function VideoPlayer({
           // Seek to initial time when metadata is loaded
           const handleLoadedMetadata = () => {
             if (initialTime > 0) {
-              console.log(`Seeking to saved position: ${initialTime}s`)
               video.currentTime = initialTime
             }
 
             if (autoPlay) {
-              video.play().catch((e) => console.error('Autoplay failed:', e))
+              video.play().catch(() => {})
             }
 
             video.removeEventListener('loadedmetadata', handleLoadedMetadata)
@@ -291,16 +276,10 @@ export function VideoPlayer({
           video.addEventListener('loadedmetadata', handleLoadedMetadata)
         } else {
           // Direct MP4 playback (including downloaded videos and remote non-HLS)
-          console.log('Loading direct video source:', currentSource.url)
-
-          // Determine the URL to use:
-          // - Local files (localhost URLs) - use directly
-          // - Remote URLs - use video server proxy for proper streaming
           let videoUrl = currentSource.url
           if (videoServer && currentSource.url.startsWith('http') && !currentSource.url.includes('127.0.0.1')) {
             // Remote URL - proxy through video server
             videoUrl = createProxyUrl(videoServer, currentSource.url)
-            console.log('Using video server proxy for direct video:', videoUrl)
           }
 
           video.src = videoUrl
@@ -309,21 +288,14 @@ export function VideoPlayer({
           const handleError = (e: Event) => {
             const videoEl = e.target as HTMLVideoElement
             const error = videoEl.error
-            console.error('Video error:', error?.code, error?.message)
-            if (error) {
-              // Don't show error for CORS failures on subtitle tracks - these are non-fatal
-              if (error.code === MediaError.MEDIA_ERR_NETWORK) {
-                console.warn('Network error loading video - may be subtitle/track loading failure (non-fatal)')
-              } else {
-                setError(`Video error: ${error.message || 'Unknown error'}`)
-              }
+            if (error && error.code !== MediaError.MEDIA_ERR_NETWORK) {
+              setError(`Video error: ${error.message || 'Unknown error'}`)
             }
           }
           video.addEventListener('error', handleError)
 
           // Handle successful loading
           const handleCanPlay = () => {
-            console.log('Video can play!')
             setLoading(false)
           }
           video.addEventListener('canplay', handleCanPlay)
@@ -333,12 +305,11 @@ export function VideoPlayer({
           // Seek to initial time when metadata is loaded
           const handleLoadedMetadata = () => {
             if (initialTime > 0) {
-              console.log(`Seeking to saved position: ${initialTime}s`)
               video.currentTime = initialTime
             }
 
             if (autoPlay) {
-              video.play().catch((e) => console.error('Autoplay failed:', e))
+              video.play().catch(() => {})
             }
 
             video.removeEventListener('loadedmetadata', handleLoadedMetadata)
@@ -499,8 +470,6 @@ export function VideoPlayer({
         const percentComplete = (video.currentTime / video.duration) * 100
         const completed = percentComplete >= markWatchedThreshold
 
-        console.log(`💾 Saving watch progress: ${video.currentTime.toFixed(1)}s / ${video.duration.toFixed(1)}s (${percentComplete.toFixed(1)}% - threshold: ${markWatchedThreshold}%) (Episode ID: ${episodeId})`)
-
         await saveWatchProgress(
           mediaId,
           episodeId,
@@ -510,24 +479,20 @@ export function VideoPlayer({
           completed
         )
 
-        console.log(`✓ Watch progress saved successfully`)
-
         // Auto-delete downloaded episode if enabled and episode is completed
         if (completed && autoDeleteWatched) {
           try {
             await deleteEpisodeDownload(mediaId, currentEpisode)
-            console.log(`🗑️ Auto-deleted downloaded episode ${currentEpisode}`)
             toast.success(`Episode ${currentEpisode} deleted (auto-delete enabled)`, {
               icon: '🗑️',
               duration: 3000,
             })
-          } catch (error) {
+          } catch {
             // Silently fail if episode wasn't downloaded - this is expected
-            console.log(`Episode ${currentEpisode} not downloaded, skipping auto-delete`)
           }
         }
-      } catch (error) {
-        console.error('Failed to save watch progress:', error)
+      } catch {
+        // Silently fail - watch progress save is not critical
       }
     }
 
@@ -596,17 +561,12 @@ export function VideoPlayer({
     if (!video) return
 
     const handleEnterPiP = () => {
-      console.log('Entered Picture-in-Picture mode')
       setIsPiP(true)
-      // Show controls in PiP mode
       setShowControls(true)
     }
 
     const handleLeavePiP = () => {
-      console.log('Left Picture-in-Picture mode')
       setIsPiP(false)
-      // Keep user on the watch page after exiting PiP
-      // Controls will show automatically since we're not in fullscreen
     }
 
     video.addEventListener('enterpictureinpicture', handleEnterPiP)
