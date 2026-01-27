@@ -1,0 +1,57 @@
+# Gitleaks configuration for Otaku project
+# https://github.com/gitleaks/gitleaks
+
+title = "Otaku Gitleaks Config"
+
+# Use the default rules as a base
+[extend]
+useDefault = true
+
+# Paths to ignore (dependencies, build outputs, etc.)
+[allowlist]
+paths = [
+  '''node_modules''',
+  '''pnpm-lock\.yaml''',
+  '''package-lock\.json''',
+  '''yarn\.lock''',
+  '''\.pnpm''',
+  '''target/''',
+  '''dist/''',
+  '''\.cargo''',
+  '''\.git''',
+  '''\.husky/_''',
+  '''src-tauri/target''',
+  '''\.png$''',
+  '''\.jpg$''',
+  '''\.jpeg$''',
+  '''\.gif$''',
+  '''\.ico$''',
+  '''\.icns$''',
+  '''\.woff''',
+  '''\.woff2''',
+  '''\.ttf''',
+  '''\.eot''',
+]
+
+# Common false positives to ignore
+regexes = [
+  # Example placeholder values
+  '''(?i)example|placeholder|your[-_]?api[-_]?key|replace[-_]?me''',
+  # Test/mock values
+  '''(?i)test[-_]?key|mock[-_]?secret|fake[-_]?token''',
+  # Documentation examples
+  '''sk-\.{3,}|xxx+|your[-_]?secret[-_]?here''',
+]
+
+# Stopwords that indicate non-sensitive content
+stopwords = [
+  "example",
+  "placeholder",
+  "your-api-key",
+  "replace-me",
+  "test",
+  "mock",
+  "fake",
+  "dummy",
+  "sample",
+]

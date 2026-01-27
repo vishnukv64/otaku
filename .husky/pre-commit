@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# Pre-commit hook for security and quality checks
+
+echo "🔍 Running pre-commit checks..."
+
+# Check if gitleaks is installed
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "🔐 Scanning for secrets with gitleaks..."
+  gitleaks protect --staged --verbose
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Gitleaks detected potential secrets in staged files!"
+    echo ""
+    echo "If this is a false positive, you can:"
+    echo "  1. Add the fingerprint to .gitleaksignore"
+    echo "  2. Use 'git commit --no-verify' to bypass (not recommended)"
+    echo ""
+    exit 1
+  fi
+  echo "✅ No secrets detected"
+else
+  echo "⚠️  Gitleaks not installed. Skipping secret scan."
+  echo "   Install with: brew install gitleaks (macOS) or see https://github.com/gitleaks/gitleaks"
+fi
+
+# Run lint on staged files (optional - uncomment if you want)
+# echo "📝 Running lint..."
+# pnpm lint
+
+echo "✅ Pre-commit checks passed!"

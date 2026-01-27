@@ -1,0 +1,16 @@
+# Gitleaks Ignore File
+# Add fingerprints of known false positives here
+#
+# Format: Each line is a unique fingerprint from gitleaks output
+# You can also use commit:filepath:line format for more specific ignores
+#
+# To find the fingerprint, run: gitleaks detect --verbose
+# Then copy the "Fingerprint" field from any false positive
+#
+# Example:
+# a]b:c:d:e:f:1234567890abcdef1234567890abcdef12345678
+#
+# DO NOT add fingerprints for actual secrets!
+# If you accidentally committed a real secret, rotate it immediately.
+
+# Add false positive fingerprints below this line:
