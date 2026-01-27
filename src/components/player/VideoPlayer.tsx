@@ -531,12 +531,34 @@ export function VideoPlayer({
       }
     }
 
-    // Save progress every 20 seconds (reduced frequency for performance)
-    const interval = setInterval(saveProgress, 20000)
+    const video = videoRef.current
 
-    // Save on unmount
+    // Save progress when user leaves the page or closes the app
+    const handleBeforeUnload = () => {
+      saveProgress()
+    }
+
+    // Save progress when tab becomes hidden (user switches tabs)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        saveProgress()
+      }
+    }
+
+    // Save progress when video is paused
+    const handlePauseSave = () => {
+      saveProgress()
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    video?.addEventListener('pause', handlePauseSave)
+
+    // Save on unmount (when navigating away from player)
     return () => {
-      clearInterval(interval)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      video?.removeEventListener('pause', handlePauseSave)
       saveProgress()
     }
   }, [mediaId, episodeId, currentEpisode])
