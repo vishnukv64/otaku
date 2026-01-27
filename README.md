@@ -1,4 +1,9 @@
-# Otaku
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="Otaku Logo" width="120" height="120">
+</p>
+
+<h1 align="center">おたく</h1>
+<p align="center"><b>Otaku</b> — Anime Streaming & Library Manager</p>
 
 A cross-platform desktop application for streaming and managing anime, built with Tauri, React, and Rust. Otaku provides a modern, Netflix-inspired interface for discovering, watching, and organizing your anime collection.
 
@@ -129,12 +134,6 @@ A cross-platform desktop application for streaming and managing anime, built wit
 ![Player Controls Overlay](screenshots/player-controls-overlay.png)
 
 *Video player controls showing playback controls, progress bar, volume slider, quality selector, server switcher, and episode navigation buttons.*
-
-### Quality and Server Selection
-
-![Quality Server Selection](screenshots/quality-server-selection.png)
-
-*Dropdown menus for selecting video quality and streaming server. Available options vary based on the source.*
 
 ### Library View
 
