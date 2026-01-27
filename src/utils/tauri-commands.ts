@@ -91,6 +91,33 @@ export async function discoverAnime(
   return await invoke('discover_anime', { extensionId, page, sortType, genres })
 }
 
+// Tag/Genre types
+export interface Tag {
+  name: string
+  slug: string
+  count: number
+  thumbnail?: string
+}
+
+export interface TagsResult {
+  genres: Tag[]
+  studios: Tag[]
+  has_next_page: boolean
+}
+
+/**
+ * Get available tags (genres and studios) for filtering
+ * @param extensionId - Extension ID
+ * @param page - Page number (1-indexed)
+ * @returns Tags result with genres and studios
+ */
+export async function getTags(
+  extensionId: string,
+  page: number = 1
+): Promise<TagsResult> {
+  return await invoke('get_tags', { extensionId, page })
+}
+
 /**
  * Get detailed media information (alias for getAnimeDetails)
  * @param extensionId - Extension ID
@@ -316,6 +343,13 @@ export async function getWatchProgress(episodeId: string): Promise<WatchHistory 
 }
 
 /**
+ * Get the most recent watch progress for a media (for Resume Watching feature)
+ */
+export async function getLatestWatchProgressForMedia(mediaId: string): Promise<WatchHistory | null> {
+  return await invoke('get_latest_watch_progress_for_media', { mediaId })
+}
+
+/**
  * Get continue watching list (recently watched episodes that aren't completed)
  */
 export async function getContinueWatching(limit: number = 20): Promise<WatchHistory[]> {
@@ -531,5 +565,37 @@ export interface SystemStats {
  */
 export async function getSystemStats(): Promise<SystemStats> {
   return await invoke('get_system_stats')
+}
+
+// ==================== Log Commands ====================
+
+export interface LogEntry {
+  timestamp: string
+  level: string
+  message: string
+}
+
+/**
+ * Get application logs for debugging
+ * @param lines - Number of recent log lines to retrieve (default 100)
+ * @returns Array of log entries
+ */
+export async function getAppLogs(lines?: number): Promise<LogEntry[]> {
+  return await invoke('get_app_logs', { lines })
+}
+
+/**
+ * Clear application logs
+ */
+export async function clearAppLogs(): Promise<void> {
+  return await invoke('clear_app_logs')
+}
+
+/**
+ * Get log file path
+ * @returns Path to the log file
+ */
+export async function getLogFilePath(): Promise<string> {
+  return await invoke('get_log_file_path')
 }
 

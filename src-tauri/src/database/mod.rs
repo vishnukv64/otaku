@@ -83,6 +83,8 @@ impl Database {
             ("002_fix_watch_history.sql", include_str!("../../migrations/002_fix_watch_history.sql")),
             ("003_rename_current_time.sql", include_str!("../../migrations/003_rename_current_time.sql")),
             ("004_downloads_table.sql", include_str!("../../migrations/004_downloads_table.sql")),
+            ("005_fix_column_rename.sql", include_str!("../../migrations/005_fix_column_rename.sql")),
+            ("006_fix_downloads_table.sql", include_str!("../../migrations/006_fix_downloads_table.sql")),
         ];
 
         for (name, migration_sql) in migrations {
@@ -129,6 +131,7 @@ impl Database {
     }
 
     /// Check if database connection is healthy
+    #[allow(dead_code)]
     pub async fn health_check(&self) -> Result<bool> {
         let result: i32 = sqlx::query("SELECT 1")
             .fetch_one(&self.pool)

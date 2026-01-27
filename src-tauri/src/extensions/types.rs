@@ -124,3 +124,21 @@ pub struct VideoSources {
     pub sources: Vec<VideoSource>,
     pub subtitles: Vec<Subtitle>,
 }
+
+/// Tag/Genre information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tag {
+    pub name: String,
+    pub slug: String,
+    pub count: u32,
+    pub thumbnail: Option<String>,
+}
+
+/// Tags result containing genres and studios
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagsResult {
+    pub genres: Vec<Tag>,
+    pub studios: Vec<Tag>,
+    #[serde(alias = "hasNextPage")]
+    pub has_next_page: bool,
+}

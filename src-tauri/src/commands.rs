@@ -7,12 +7,12 @@
 // due to QuickJS's thread-safety limitations. In production, we'd use a thread-local
 // runtime pool.
 
-use crate::extensions::{Extension, ExtensionMetadata, ExtensionRuntime, MediaDetails, SearchResults, VideoSources};
+use crate::extensions::{Extension, ExtensionMetadata, ExtensionRuntime, MediaDetails, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress};
 use crate::VideoServerInfo;
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{Manager, State};
 use sqlx;
 
 /// Global state for loaded extensions (stores just the code, not runtimes)
@@ -178,6 +178,30 @@ pub async fn get_recommendations(
 
     runtime.get_recommendations()
         .map_err(|e| format!("Get recommendations failed: {}", e))
+}
+
+/// Get available tags (genres and studios)
+#[tauri::command]
+pub async fn get_tags(
+    state: State<'_, AppState>,
+    extension_id: String,
+    page: u32,
+) -> Result<TagsResult, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::new(extension)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    runtime.get_tags(page)
+        .map_err(|e| format!("Get tags failed: {}", e))
 }
 
 /// List all loaded extensions
@@ -586,6 +610,19 @@ pub async fn get_watch_progress(
         .map_err(|e| format!("Failed to get watch progress: {}", e))
 }
 
+/// Get the most recent watch progress for a media (for Resume Watching feature)
+#[tauri::command]
+pub async fn get_latest_watch_progress_for_media(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<crate::database::watch_history::WatchHistory>, String> {
+    use crate::database::watch_history::get_latest_watch_progress_for_media as get_latest;
+
+    get_latest(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get latest watch progress: {}", e))
+}
+
 /// Get continue watching list (recently watched episodes that aren't completed)
 #[tauri::command]
 pub async fn get_continue_watching(
@@ -973,4 +1010,99 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
         disk_total,
         disk_percent,
     })
+}
+
+// ==================== Log Commands ====================
+
+/// Log entry structure
+#[derive(serde::Serialize)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub level: String,
+    pub message: String,
+}
+
+/// Get application logs for debugging
+#[tauri::command]
+pub async fn get_app_logs(
+    app: tauri::AppHandle,
+    lines: Option<usize>,
+) -> Result<Vec<LogEntry>, String> {
+    use std::io::{BufRead, BufReader};
+    use std::fs::File;
+
+    // Get log directory
+    let log_dir = app.path().app_log_dir()
+        .map_err(|e| format!("Failed to get log directory: {}", e))?;
+
+    let log_file = log_dir.join("otaku.log");
+
+    if !log_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let file = File::open(&log_file)
+        .map_err(|e| format!("Failed to open log file: {}", e))?;
+
+    let reader = BufReader::new(file);
+    let all_lines: Vec<String> = reader.lines()
+        .filter_map(|l| l.ok())
+        .collect();
+
+    // Take last N lines (default 100)
+    let limit = lines.unwrap_or(100);
+    let start = all_lines.len().saturating_sub(limit);
+    let recent_lines = &all_lines[start..];
+
+    // Parse log entries
+    let entries: Vec<LogEntry> = recent_lines.iter()
+        .map(|line| {
+            // Try to parse structured log format: [TIMESTAMP][LEVEL] message
+            // Or just treat as message if unparseable
+            if let Some(bracket_end) = line.find(']') {
+                let timestamp = line[1..bracket_end].to_string();
+                let rest = &line[bracket_end + 1..];
+
+                if let Some(level_end) = rest.find(']') {
+                    let level = rest[1..level_end].to_string();
+                    let message = rest[level_end + 1..].trim().to_string();
+                    return LogEntry { timestamp, level, message };
+                }
+            }
+
+            LogEntry {
+                timestamp: String::new(),
+                level: "INFO".to_string(),
+                message: line.clone(),
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+/// Clear application logs
+#[tauri::command]
+pub async fn clear_app_logs(app: tauri::AppHandle) -> Result<(), String> {
+    let log_dir = app.path().app_log_dir()
+        .map_err(|e| format!("Failed to get log directory: {}", e))?;
+
+    let log_file = log_dir.join("otaku.log");
+
+    if log_file.exists() {
+        std::fs::write(&log_file, "")
+            .map_err(|e| format!("Failed to clear log file: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Get log file path
+#[tauri::command]
+pub async fn get_log_file_path(app: tauri::AppHandle) -> Result<String, String> {
+    let log_dir = app.path().app_log_dir()
+        .map_err(|e| format!("Failed to get log directory: {}", e))?;
+
+    let log_file = log_dir.join("otaku.log");
+    Ok(log_file.to_string_lossy().to_string())
 }

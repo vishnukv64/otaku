@@ -15,8 +15,6 @@ import {
   Maximize,
   Minimize,
   Settings,
-  SkipBack,
-  SkipForward,
   Loader2,
   AlertCircle,
   X,
@@ -100,6 +98,10 @@ export function VideoPlayer({
   const [error, setError] = useState<string | null>(null)
   const [showNextEpisodeOverlay, setShowNextEpisodeOverlay] = useState(false)
   const [countdown, setCountdown] = useState(3)
+
+  // Skip indicator state for stacking +10/-10 feature
+  const [skipAmount, setSkipAmount] = useState<{ direction: 'forward' | 'backward'; amount: number } | null>(null)
+  const skipTimeoutRef = useRef<number | null>(null)
 
   // Performance: Throttle time updates to prevent frame drops
   const lastTimeUpdateRef = useRef(0)
@@ -600,11 +602,11 @@ export function VideoPlayer({
           break
         case 'ArrowLeft':
           e.preventDefault()
-          seekToTime(Math.max(0, video.currentTime - 10))
+          handleSkip('backward')
           break
         case 'ArrowRight':
           e.preventDefault()
-          seekToTime(Math.min(duration, video.currentTime + 10))
+          handleSkip('forward')
           break
         case 'ArrowUp':
           e.preventDefault()
@@ -787,14 +789,61 @@ export function VideoPlayer({
     }
   }
 
-  // Cleanup timer on unmount
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (hideControlsTimerRef.current) {
         clearTimeout(hideControlsTimerRef.current)
       }
+      if (skipTimeoutRef.current) {
+        clearTimeout(skipTimeoutRef.current)
+      }
     }
   }, [])
+
+  // Handle skip with stacking - clicking multiple times accumulates the skip amount
+  const handleSkip = (direction: 'forward' | 'backward') => {
+    const video = videoRef.current
+    if (!video) return
+
+    const skipSeconds = 10
+    let newAmount = skipSeconds
+
+    // If same direction, stack the skip amount
+    if (skipAmount && skipAmount.direction === direction) {
+      newAmount = skipAmount.amount + skipSeconds
+    }
+
+    // Calculate target time
+    const targetTime = direction === 'forward'
+      ? Math.min(duration, video.currentTime + newAmount)
+      : Math.max(0, video.currentTime - newAmount)
+
+    // Actually seek (but only by 10 seconds from current position each click)
+    const seekAmount = direction === 'forward'
+      ? Math.min(duration - video.currentTime, skipSeconds)
+      : Math.min(video.currentTime, skipSeconds)
+
+    if (seekAmount > 0) {
+      seekToTime(direction === 'forward'
+        ? video.currentTime + seekAmount
+        : video.currentTime - seekAmount
+      )
+    }
+
+    // Update visual indicator
+    setSkipAmount({ direction, amount: newAmount })
+
+    // Clear existing timeout
+    if (skipTimeoutRef.current) {
+      clearTimeout(skipTimeoutRef.current)
+    }
+
+    // Hide indicator after 800ms of no clicks
+    skipTimeoutRef.current = setTimeout(() => {
+      setSkipAmount(null)
+    }, 800)
+  }
 
   // Auto-hide controls when entering fullscreen or resuming playback
   useEffect(() => {
@@ -850,6 +899,62 @@ export function VideoPlayer({
           transform: 'translateZ(0)',
         }}
       />
+
+      {/* Skip Zones - Left (Rewind) and Right (Forward) */}
+      <div className="absolute inset-0 flex pointer-events-none">
+        {/* Left Skip Zone - Rewind */}
+        <div
+          className="w-1/3 h-full flex items-center justify-center pointer-events-auto cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleSkip('backward')
+          }}
+        >
+          {skipAmount?.direction === 'backward' && (
+            <div className="flex flex-col items-center animate-in fade-in zoom-in duration-200">
+              <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
+                <div className="flex items-center gap-1">
+                  {/* Rewind arrows */}
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                  </svg>
+                </div>
+              </div>
+              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
+                {skipAmount.amount} seconds
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Center Zone - Play/Pause (transparent, lets clicks through to video) */}
+        <div className="w-1/3 h-full pointer-events-none" />
+
+        {/* Right Skip Zone - Forward */}
+        <div
+          className="w-1/3 h-full flex items-center justify-center pointer-events-auto cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleSkip('forward')
+          }}
+        >
+          {skipAmount?.direction === 'forward' && (
+            <div className="flex flex-col items-center animate-in fade-in zoom-in duration-200">
+              <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
+                <div className="flex items-center gap-1">
+                  {/* Forward arrows */}
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                  </svg>
+                </div>
+              </div>
+              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
+                {skipAmount.amount} seconds
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Loading/Buffering Overlay */}
       {(loading || buffering) && (
@@ -964,7 +1069,18 @@ export function VideoPlayer({
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          {/* Rewind 10s */}
+          <button
+            onClick={() => handleSkip('backward')}
+            className="w-9 h-9 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+            title="Rewind 10 seconds"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12.5 3C17.15 3 21.08 6.03 22.47 10.22L20.1 11C19.05 7.81 16.04 5.5 12.5 5.5C10.54 5.5 8.77 6.22 7.38 7.38L10 10H3V3L5.6 5.6C7.45 4 9.85 3 12.5 3M10 12V22H8V14H6V12H10M18 14V20C18 21.11 17.11 22 16 22H14C12.9 22 12 21.1 12 20V14C12 12.9 12.9 12 14 12H16C17.11 12 18 12.9 18 14M14 14V20H16V14H14Z" />
+            </svg>
+          </button>
+
           {/* Play/Pause */}
           <button
             onClick={togglePlay}
@@ -972,6 +1088,20 @@ export function VideoPlayer({
           >
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
+
+          {/* Forward 10s */}
+          <button
+            onClick={() => handleSkip('forward')}
+            className="w-9 h-9 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+            title="Forward 10 seconds"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10 3V5.5C5.86 5.5 2.5 8.86 2.5 13S5.86 20.5 10 20.5C12.93 20.5 15.5 18.84 16.77 16.39L14.57 15.27C13.67 16.91 11.96 18 10 18C7.24 18 5 15.76 5 13S7.24 8 10 8V10.5L14 6.5L10 3M18 14V20C18 21.11 17.11 22 16 22H14C12.9 22 12 21.1 12 20V14C12 12.9 12.9 12 14 12H16C17.11 12 18 12.9 18 14M14 14V20H16V14H14Z" />
+            </svg>
+          </button>
+
+          {/* Spacer */}
+          <div className="w-2" />
 
           {/* Time */}
           <span className="text-sm font-medium">

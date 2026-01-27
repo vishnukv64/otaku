@@ -118,6 +118,7 @@ pub async fn save_media(
 }
 
 /// Get media by ID
+#[allow(dead_code)]
 pub async fn get_media(
     pool: &SqlitePool,
     media_id: &str,
@@ -143,6 +144,7 @@ pub async fn get_media(
 }
 
 /// Get continue watching with media details
+/// Excludes anime where the final episode is >= 90% watched
 pub async fn get_continue_watching_with_media(
     pool: &SqlitePool,
     limit: i32,
@@ -159,7 +161,16 @@ pub async fn get_continue_watching_with_media(
             w.episode_id, w.episode_number, w.progress_seconds, w.duration, w.last_watched
         FROM watch_history w
         INNER JOIN media m ON w.media_id = m.id
-        WHERE w.completed = 0 AND w.progress_seconds > 0
+        WHERE w.completed = 0
+          AND w.progress_seconds > 0
+          -- Exclude if this is the final episode AND progress >= 90%
+          AND NOT (
+            m.episode_count IS NOT NULL
+            AND w.episode_number >= m.episode_count
+            AND w.duration IS NOT NULL
+            AND w.duration > 0
+            AND (w.progress_seconds / w.duration) >= 0.9
+          )
         GROUP BY w.media_id
         HAVING MAX(w.last_watched)
         ORDER BY w.last_watched DESC

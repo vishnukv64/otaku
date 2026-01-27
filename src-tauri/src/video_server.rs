@@ -180,6 +180,7 @@ async fn serve_local_redirect(
 
 #[derive(serde::Deserialize)]
 struct ProxyQuery {
+    #[allow(dead_code)]
     token: Option<String>,
     url: Option<String>,
 }

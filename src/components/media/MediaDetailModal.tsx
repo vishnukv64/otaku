@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, type MediaEntry } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, type MediaEntry, type WatchHistory } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { MediaCard } from './MediaCard'
 
@@ -42,7 +42,9 @@ export function MediaDetailModal({
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
   const [relatedAnime, setRelatedAnime] = useState<SearchResult[]>([])
-  const [relatedLoading, setRelatedLoading] = useState(false)
+  const [_relatedLoading, setRelatedLoading] = useState(false)
+  const [watchProgress, setWatchProgress] = useState<WatchHistory | null>(null)
+  const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
 
   const handleWatch = (episodeId: string) => {
     // Close modal first, then navigate to watch page
@@ -249,35 +251,6 @@ export function MediaDetailModal({
     }
   }
 
-  const handleDownload = async (episodeId: string, episodeNumber: number, episodeTitle?: string) => {
-    if (!details) return
-
-    try {
-      // Generate filename
-      const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episodeNumber}.mp4`
-
-      // We would need to get the video URL first
-      // For now, show a placeholder message
-      toast.loading('Preparing download...', { id: 'download-prep' })
-
-      // In a real implementation, we would:
-      // 1. Call getVideoSources to get the actual video URL
-      // 2. Select the best quality source
-      // 3. Start the download
-      // For now, we'll show a message
-      toast.dismiss('download-prep')
-      toast.error('Download feature requires video source selection. Please play the episode first.')
-
-      // TODO: Implement proper download workflow:
-      // const sources = await getVideoSources(extensionId, episodeId)
-      // const videoUrl = sources.sources[0].url
-      // const downloadId = await startDownload(media.id, episodeId, episodeNumber, videoUrl, filename)
-      // toast.success(`Download started: ${episodeTitle || `Episode ${episodeNumber}`}`)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start download')
-    }
-  }
-
   const handleToggleLibrary = async () => {
     setLibraryLoading(true)
     try {
@@ -380,6 +353,45 @@ export function MediaDetailModal({
 
     checkLibrary()
   }, [isOpen, media.id])
+
+  // Load watch progress for Resume Watching feature
+  useEffect(() => {
+    if (!isOpen) return
+
+    const loadWatchProgress = async () => {
+      try {
+        const progress = await getLatestWatchProgressForMedia(media.id)
+        setWatchProgress(progress)
+      } catch (error) {
+        console.error('Failed to load watch progress:', error)
+        setWatchProgress(null)
+      }
+    }
+
+    loadWatchProgress()
+  }, [isOpen, media.id])
+
+  // Load watch history for all episodes
+  useEffect(() => {
+    if (!isOpen || !details) return
+
+    const loadEpisodeWatchHistory = async () => {
+      try {
+        const historyMap = new Map<string, WatchHistory>()
+        for (const episode of details.episodes) {
+          const progress = await getWatchProgress(episode.id)
+          if (progress) {
+            historyMap.set(episode.id, progress)
+          }
+        }
+        setEpisodeWatchHistory(historyMap)
+      } catch (error) {
+        console.error('Failed to load episode watch history:', error)
+      }
+    }
+
+    loadEpisodeWatchHistory()
+  }, [isOpen, details])
 
   // Load related anime
   useEffect(() => {
@@ -580,15 +592,35 @@ export function MediaDetailModal({
 
                       {/* Action Buttons */}
                       <div className="flex items-center gap-3">
-                        {details.episodes.length > 0 && (
-                          <button
-                            onClick={() => handleWatch(details.episodes[0].id)}
-                            className="flex items-center gap-2 px-8 py-3.5 bg-[var(--color-accent-primary)] text-white font-bold rounded-lg hover:bg-[var(--color-accent-primary)]/90 transition-all transform hover:scale-105 shadow-lg shadow-[var(--color-accent-primary)]/50"
-                          >
-                            <Play size={22} fill="currentColor" />
-                            <span>Watch Now</span>
-                          </button>
-                        )}
+                        {details.episodes.length > 0 && (() => {
+                          // Find episode 1 (the first episode by number, not array position)
+                          const firstEpisode = details.episodes.reduce((min, ep) =>
+                            ep.number < min.number ? ep : min
+                          , details.episodes[0])
+
+                          // Check if we should show Resume or Watch Now
+                          const shouldResume = watchProgress && !watchProgress.completed
+
+                          return (
+                            <button
+                              onClick={() => {
+                                if (shouldResume) {
+                                  handleWatch(watchProgress.episode_id)
+                                } else {
+                                  handleWatch(firstEpisode.id)
+                                }
+                              }}
+                              className="flex items-center gap-2 px-8 py-3.5 bg-[var(--color-accent-primary)] text-white font-bold rounded-lg hover:bg-[var(--color-accent-primary)]/90 transition-all transform hover:scale-105 shadow-lg shadow-[var(--color-accent-primary)]/50"
+                            >
+                              <Play size={22} fill="currentColor" />
+                              <span>
+                                {shouldResume
+                                  ? `Resume EP ${watchProgress.episode_number}`
+                                  : 'Watch Now'}
+                              </span>
+                            </button>
+                          )
+                        })()}
                         <button
                           onClick={handleToggleLibrary}
                           disabled={libraryLoading}
@@ -811,6 +843,37 @@ export function MediaDetailModal({
                               Downloaded
                             </div>
                           )}
+
+                          {/* Watched indicator */}
+                          {episodeWatchHistory.has(episode.id) && (() => {
+                            const history = episodeWatchHistory.get(episode.id)!
+                            const isCompleted = history.completed
+                            const progressPercent = history.duration
+                              ? Math.min(100, Math.round((history.progress_seconds / history.duration) * 100))
+                              : 0
+
+                            return (
+                              <>
+                                {/* Completed badge */}
+                                {isCompleted && (
+                                  <div className="absolute bottom-2 right-2 px-2 py-1 bg-blue-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1">
+                                    <Check className="w-3 h-3" />
+                                    Watched
+                                  </div>
+                                )}
+
+                                {/* Progress bar for partially watched */}
+                                {!isCompleted && progressPercent > 0 && (
+                                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+                                    <div
+                                      className="h-full bg-[var(--color-accent-primary)]"
+                                      style={{ width: `${progressPercent}%` }}
+                                    />
+                                  </div>
+                                )}
+                              </>
+                            )
+                          })()}
 
                           {/* Episode title on hover */}
                           {episode.title && (

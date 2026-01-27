@@ -6,7 +6,7 @@
 // - Safe HTTP fetch wrapper with domain validation
 
 use super::extension::Extension;
-use super::types::*;
+use super::types::{ExtensionMetadata, MediaDetails, SearchResults, TagsResult, VideoSources};
 use anyhow::{anyhow, Result};
 use rquickjs::{Context, Runtime};
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use std::sync::Arc;
 /// Extension runtime for executing JavaScript code safely
 pub struct ExtensionRuntime {
     extension: Arc<Extension>,
+    #[allow(dead_code)]
     runtime: Runtime,
     context: Context,
 }
@@ -262,7 +263,37 @@ impl ExtensionRuntime {
         })
     }
 
+    /// Call extension's getTags method
+    pub fn get_tags(&self, page: u32) -> Result<TagsResult> {
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+
+            // Check if getTags method exists
+            let tags_fn: Option<rquickjs::Function> = ext_obj.get("getTags").ok();
+
+            let result: rquickjs::Value = if let Some(fn_obj) = tags_fn {
+                fn_obj.call((page,))?
+            } else {
+                // Return empty result if method doesn't exist
+                return Ok(TagsResult {
+                    genres: vec![],
+                    studios: vec![],
+                    has_next_page: false,
+                });
+            };
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify tags result"))?
+                .to_string()?;
+
+            let tags_result: TagsResult = serde_json::from_str(&json_str)?;
+
+            Ok(tags_result)
+        })
+    }
+
     /// Get extension metadata
+    #[allow(dead_code)]
     pub fn metadata(&self) -> &ExtensionMetadata {
         &self.extension.metadata
     }

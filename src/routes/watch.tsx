@@ -6,7 +6,7 @@
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Loader2, Download } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { getMediaDetails, getVideoSources, saveMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import type { MediaDetails, VideoSources } from '@/types/extension'

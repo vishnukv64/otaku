@@ -12,6 +12,7 @@ use regex::Regex;
 pub struct Extension {
     pub metadata: ExtensionMetadata,
     pub code: String,
+    #[allow(dead_code)]
     pub allowed_domains: Vec<String>,
 }
 
@@ -110,6 +111,7 @@ impl Extension {
     }
 
     /// Validate if a URL is allowed for this extension
+    #[allow(dead_code)]
     pub fn is_url_allowed(&self, url: &str) -> bool {
         let parsed = match url::Url::parse(url) {
             Ok(u) => u,

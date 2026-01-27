@@ -136,10 +136,98 @@ const extensionObject = {
 
   /**
    * Discover anime with filters
-   * Uses AllAnime's persisted query for popular anime
+   * Uses AllAnime's persisted query for popular anime, or shows query for genre filtering
    */
   discover: (page, sortType, genres) => {
-    // Use the persisted query for popular anime (queryPopular)
+    // If genres are provided, use the shows query with genre filtering
+    // The queryPopular persisted query doesn't support genre filtering
+    if (genres && genres.length > 0) {
+      const searchQuery = `
+        query(
+          $search: SearchInput
+          $limit: Int
+          $page: Int
+          $translationType: VaildTranslationTypeEnumType
+          $countryOrigin: VaildCountryOriginEnumType
+        ) {
+          shows(
+            search: $search
+            limit: $limit
+            page: $page
+            translationType: $translationType
+            countryOrigin: $countryOrigin
+          ) {
+            edges {
+              _id
+              name
+              thumbnail
+              availableEpisodes
+              description
+              status
+              score
+              season
+              __typename
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        search: {
+          allowAdult: false,
+          allowUnknown: false,
+          genres: genres
+        },
+        limit: 40,
+        page: page || 1,
+        translationType: "sub",
+        countryOrigin: "ALL"
+      };
+
+      const url = `https://api.allanime.day/api?variables=${encodeURIComponent(JSON.stringify(variables))}&query=${encodeURIComponent(searchQuery)}`;
+
+      try {
+        const responseStr = __fetch(url, {
+          method: 'GET',
+          headers: {
+            'Referer': 'https://allmanga.to',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+          }
+        });
+
+        const response = JSON.parse(responseStr);
+        const data = JSON.parse(response.body);
+        const shows = data?.data?.shows?.edges || [];
+
+        const results = shows.map(show => {
+          let coverUrl = null;
+          if (show.thumbnail) {
+            if (show.thumbnail.startsWith('http://') || show.thumbnail.startsWith('https://')) {
+              coverUrl = show.thumbnail;
+            } else {
+              coverUrl = `https://wp.youtube-anime.com/aln.youtube-anime.com/${show.thumbnail}`;
+            }
+          }
+
+          return {
+            id: show._id,
+            title: show.name,
+            coverUrl: coverUrl,
+            description: show.description || '',
+            year: show.season?.year || null,
+            status: show.status || 'Unknown',
+            rating: show.score ? parseFloat(show.score) : null
+          };
+        });
+
+        return { results: results, hasNextPage: shows.length >= 40 };
+      } catch (error) {
+        console.error('Genre filter failed:', error);
+        return { results: [], hasNextPage: false };
+      }
+    }
+
+    // No genres - use the persisted query for popular anime (queryPopular)
     // dateRange: 1 = daily (trending/recently updated), 30 = monthly (top rated)
     const dateRange = sortType === 'score' ? 30 : 1;
 
@@ -174,25 +262,9 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const recommendations = data?.data?.queryPopular?.recommendations || [];
 
-      // Debug: log first result to see what fields are available
-      if (recommendations.length > 0) {
-        console.log('First anyCard:', JSON.stringify(recommendations[0].anyCard, null, 2));
-      }
-
-      const results = recommendations.map((rec, index) => {
+      const results = recommendations.map((rec) => {
         const show = rec.anyCard;
 
-        // Debug: log available fields for first item
-        if (index === 0) {
-          console.log('Available show fields:', Object.keys(show));
-          console.log('show.score:', show.score);
-          console.log('show.status:', show.status);
-          console.log('show.airedStart:', JSON.stringify(show.airedStart));
-          console.log('show.season:', JSON.stringify(show.season));
-          console.log('show.availableEpisodes:', show.availableEpisodes);
-        }
-
-        // Thumbnail can be a full URL or a path - handle both cases
         let coverUrl = null;
         if (show.thumbnail) {
           if (show.thumbnail.startsWith('http://') || show.thumbnail.startsWith('https://')) {
@@ -392,6 +464,71 @@ const extensionObject = {
         }],
         subtitles: []
       };
+    }
+  },
+
+  /**
+   * Get available tags (genres and studios)
+   */
+  getTags: (page) => {
+    const variables = {
+      search: { format: "anime" },
+      page: page || 1,
+      limit: 50
+    };
+
+    const extensions = {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "fbd24de3aec73d35332185b621beec15396aaf8e8ae00183ddac6c19fbf8adcf"
+      }
+    };
+
+    const url = `https://api.allanime.day/api?variables=${encodeURIComponent(JSON.stringify(variables))}&extensions=${encodeURIComponent(JSON.stringify(extensions))}`;
+
+    try {
+      const responseStr = __fetch(url, {
+        method: 'GET',
+        headers: {
+          'Referer': 'https://allmanga.to',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+        }
+      });
+
+      const response = JSON.parse(responseStr);
+      const data = JSON.parse(response.body);
+      const edges = data?.data?.queryTags?.edges || [];
+
+      const genres = [];
+      const studios = [];
+
+      edges.forEach(tag => {
+        const item = {
+          name: tag.name,
+          slug: tag.slug,
+          count: tag.animeCount || 0,
+          thumbnail: tag.sampleAnime?.thumbnail || null
+        };
+
+        if (tag.tagType === 'studio') {
+          studios.push(item);
+        } else {
+          genres.push(item);
+        }
+      });
+
+      // Sort by anime count (descending)
+      genres.sort((a, b) => b.count - a.count);
+      studios.sort((a, b) => b.count - a.count);
+
+      return {
+        genres: genres,
+        studios: studios,
+        hasNextPage: edges.length >= 50
+      };
+    } catch (error) {
+      console.error('Failed to get tags:', error);
+      return { genres: [], studios: [], hasNextPage: false };
     }
   }
 };

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 /// HTTP fetch options
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct FetchOptions {
     pub method: Option<String>,
     pub headers: Option<HashMap<String, String>>,
@@ -20,6 +21,7 @@ pub struct FetchOptions {
 
 /// HTTP fetch response
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct FetchResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
@@ -27,10 +29,12 @@ pub struct FetchResponse {
 }
 
 /// Safe HTTP fetch implementation
+#[allow(dead_code)]
 pub struct SafeFetch {
     allowed_domains: Vec<String>,
 }
 
+#[allow(dead_code)]
 impl SafeFetch {
     /// Create a new SafeFetch instance
     pub fn new(allowed_domains: Vec<String>) -> Self {

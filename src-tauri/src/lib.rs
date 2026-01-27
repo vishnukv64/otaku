@@ -156,32 +156,53 @@ pub fn run() {
       });
     })
     .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
+      // Always initialize logging (not just in debug mode)
+      let log_level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+      } else {
+        log::LevelFilter::Info
+      };
+
+      let _ = app.handle().plugin(
+        tauri_plugin_log::Builder::default()
+          .level(log_level)
+          .build(),
+      );
 
       // Initialize database and download manager
       let app_handle = app.handle();
-      tauri::async_runtime::block_on(async move {
-        // Get app data directory
-        let app_dir = app_handle
-          .path()
-          .app_data_dir()
-          .expect("Failed to get app data directory");
 
+      // Get app data directory - use match instead of expect
+      let app_dir = match app_handle.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+          log::error!("Failed to get app data directory: {}", e);
+          // Fallback to home directory
+          dirs::home_dir()
+            .map(|h| h.join(".otaku"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".otaku"))
+        }
+      };
+
+      // Create app directory if it doesn't exist
+      if let Err(e) = std::fs::create_dir_all(&app_dir) {
+        log::error!("Failed to create app directory: {}", e);
+      }
+
+      tauri::async_runtime::block_on(async move {
         // Create database path
         let db_path = app_dir.join("otaku.db");
 
-        log::debug!("Initializing database");
+        log::info!("Initializing database at {:?}", db_path);
 
-        // Initialize database
-        let database = Database::new(db_path)
-          .await
-          .expect("Failed to initialize database");
+        // Initialize database with proper error handling
+        let database = match Database::new(db_path).await {
+          Ok(db) => db,
+          Err(e) => {
+            log::error!("Failed to initialize database: {}", e);
+            panic!("Database initialization failed: {}", e);
+          }
+        };
 
         let db_pool = Arc::new(database.pool().clone());
 
@@ -190,17 +211,17 @@ pub fn run() {
 
         // Initialize download manager with database
         let downloads_dir = app_dir.join("downloads");
-        std::fs::create_dir_all(&downloads_dir)
-          .expect("Failed to create downloads directory");
+        if let Err(e) = std::fs::create_dir_all(&downloads_dir) {
+          log::error!("Failed to create downloads directory: {}", e);
+        }
 
         let download_manager = DownloadManager::new(downloads_dir.clone())
           .with_database(db_pool);
 
-        // Load downloads from database
-        download_manager
-          .load_from_database()
-          .await
-          .expect("Failed to load downloads from database");
+        // Load downloads from database (non-fatal if fails)
+        if let Err(e) = download_manager.load_from_database().await {
+          log::error!("Failed to load downloads from database: {}", e);
+        }
 
         app_handle.manage(download_manager);
 
@@ -220,7 +241,7 @@ pub fn run() {
             }
         });
 
-        log::debug!("Backend initialized");
+        log::info!("Backend initialized successfully");
       });
 
       Ok(())
@@ -230,6 +251,7 @@ pub fn run() {
       commands::search_anime,
       commands::discover_anime,
       commands::get_recommendations,
+      commands::get_tags,
       commands::get_anime_details,
       commands::get_video_sources,
       commands::list_extensions,
@@ -252,6 +274,7 @@ pub fn run() {
       // Watch History
       commands::save_watch_progress,
       commands::get_watch_progress,
+      commands::get_latest_watch_progress_for_media,
       commands::get_continue_watching,
       // Library
       commands::add_to_library,
@@ -276,6 +299,10 @@ pub fn run() {
       commands::get_proxy_video_url,
       // System Stats
       commands::get_system_stats,
+      // Logs
+      commands::get_app_logs,
+      commands::clear_app_logs,
+      commands::get_log_file_path,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

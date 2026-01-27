@@ -11,7 +11,7 @@ import { SettingSlider } from '../components/settings/SettingSlider'
 import { SettingDropdown } from '../components/settings/SettingDropdown'
 import { SettingFileInput } from '../components/settings/SettingFileInput'
 import { DangerButton } from '../components/settings/DangerButton'
-import { HardDrive, Activity, ChevronRight } from 'lucide-react'
+import { HardDrive, Activity, ChevronRight, FileText } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/settings')({
@@ -365,6 +365,29 @@ function SettingsScreen() {
             >
               <Activity size={16} />
               View Stats
+              <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
+            </Link>
+          </SettingRow>
+          <SettingRow
+            label="Application Logs"
+            description="View error logs and debug information"
+          >
+            <Link
+              to="/logs"
+              className="
+                flex items-center gap-2
+                bg-[var(--color-surface-subtle)]
+                hover:bg-[var(--color-surface-hover)]
+                text-[var(--color-text-primary)]
+                rounded-lg
+                px-4
+                py-2
+                font-medium
+                transition-colors
+              "
+            >
+              <FileText size={16} />
+              View Logs
               <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
             </Link>
           </SettingRow>

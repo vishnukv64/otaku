@@ -131,6 +131,7 @@ pub async fn get_watch_progress(
 }
 
 /// Get watch progress for all episodes of a media
+#[allow(dead_code)]
 pub async fn get_media_watch_history(
     pool: &SqlitePool,
     media_id: &str,
@@ -148,6 +149,27 @@ pub async fn get_media_watch_history(
     .await?;
 
     Ok(history)
+}
+
+/// Get the most recently watched episode for a media (for Resume Watching)
+pub async fn get_latest_watch_progress_for_media(
+    pool: &SqlitePool,
+    media_id: &str,
+) -> Result<Option<WatchHistory>> {
+    let progress = sqlx::query_as::<_, WatchHistory>(
+        r#"
+        SELECT id, media_id, episode_id, episode_number, progress_seconds, duration, completed, last_watched, created_at
+        FROM watch_history
+        WHERE media_id = ?
+        ORDER BY last_watched DESC
+        LIMIT 1
+        "#
+    )
+    .bind(media_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(progress)
 }
 
 /// Get continue watching list (recently watched, not completed)
@@ -173,6 +195,7 @@ pub async fn get_continue_watching(
 }
 
 /// Mark episode as completed
+#[allow(dead_code)]
 pub async fn mark_episode_completed(
     pool: &SqlitePool,
     episode_id: &str,
@@ -192,6 +215,7 @@ pub async fn mark_episode_completed(
 }
 
 /// Delete watch history for a media
+#[allow(dead_code)]
 pub async fn delete_media_watch_history(
     pool: &SqlitePool,
     media_id: &str,

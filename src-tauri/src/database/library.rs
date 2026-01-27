@@ -239,6 +239,7 @@ pub async fn get_library_with_media_by_status(
 }
 
 /// Get favorites
+#[allow(dead_code)]
 pub async fn get_favorites(pool: &SqlitePool) -> Result<Vec<LibraryEntry>> {
     let entries = sqlx::query_as::<_, LibraryEntry>(
         r#"
@@ -255,6 +256,7 @@ pub async fn get_favorites(pool: &SqlitePool) -> Result<Vec<LibraryEntry>> {
 }
 
 /// Update library entry status
+#[allow(dead_code)]
 pub async fn update_library_status(
     pool: &SqlitePool,
     media_id: &str,
@@ -302,6 +304,7 @@ pub async fn toggle_favorite(
 }
 
 /// Update score
+#[allow(dead_code)]
 pub async fn update_score(
     pool: &SqlitePool,
     media_id: &str,
@@ -323,6 +326,7 @@ pub async fn update_score(
 }
 
 /// Update notes
+#[allow(dead_code)]
 pub async fn update_notes(
     pool: &SqlitePool,
     media_id: &str,
