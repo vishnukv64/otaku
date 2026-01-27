@@ -34,12 +34,6 @@ function SettingsScreen() {
   const [appVersion, setAppVersion] = useState<string>('')
   const [tauriVersion, setTauriVersion] = useState<string>('')
 
-  // Load storage usage and version info on mount
-  useEffect(() => {
-    loadStorageUsage()
-    loadVersionInfo()
-  }, [])
-
   const loadVersionInfo = async () => {
     try {
       const [version, tauri] = await Promise.all([
@@ -61,6 +55,16 @@ function SettingsScreen() {
       console.error('Failed to load storage usage:', error)
     }
   }
+
+  // Load storage usage and version info on mount
+  useEffect(() => {
+    // Defer setState calls to avoid synchronous setState in effect body
+    const timeoutId = setTimeout(() => {
+      loadStorageUsage()
+      loadVersionInfo()
+    }, 0)
+    return () => clearTimeout(timeoutId)
+  }, [])
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 B'
@@ -283,7 +287,7 @@ function SettingsScreen() {
               ]}
               onChange={(value) =>
                 settings.updateSettings({
-                  defaultDownloadQuality: value as any,
+                  defaultDownloadQuality: value as 'auto' | '1080p' | '720p' | '480p' | '360p',
                 })
               }
             />

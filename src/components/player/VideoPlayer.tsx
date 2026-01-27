@@ -142,9 +142,12 @@ export function VideoPlayer({
 
     const currentSource = currentServerSources[0]
     if (!currentSource || !currentSource.url) {
-      setError('No video source available')
-      setLoading(false)
-      return
+      // Defer setState to avoid synchronous setState in effect body
+      const timeoutId = setTimeout(() => {
+        setError('No video source available')
+        setLoading(false)
+      }, 0)
+      return () => clearTimeout(timeoutId)
     }
 
     const loadVideo = async () => {
@@ -443,9 +446,12 @@ export function VideoPlayer({
     if (!showNextEpisodeOverlay) return
 
     if (countdown === 0) {
-      setShowNextEpisodeOverlay(false)
-      onNextEpisode?.()
-      return
+      // Defer setState to avoid synchronous setState in effect body
+      const timeoutId = setTimeout(() => {
+        setShowNextEpisodeOverlay(false)
+        onNextEpisode?.()
+      }, 0)
+      return () => clearTimeout(timeoutId)
     }
 
     const timer = setTimeout(() => {
@@ -533,7 +539,11 @@ export function VideoPlayer({
   // Fullscreen handling
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const doc = document as any
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element
+        mozFullScreenElement?: Element
+        msFullscreenElement?: Element
+      }
       const isFullscreen = !!(
         doc.fullscreenElement ||
         doc.webkitFullscreenElement ||
@@ -579,6 +589,145 @@ export function VideoPlayer({
       video.removeEventListener('leavepictureinpicture', handleLeavePiP)
     }
   }, [])
+
+  // Control functions - defined before useEffect that uses them
+  const togglePlay = () => {
+    const video = videoRef.current
+    if (!video) return
+
+    if (video.paused) {
+      video.play()
+    } else {
+      video.pause()
+    }
+  }
+
+  const toggleMute = () => {
+    const video = videoRef.current
+    if (!video) return
+    video.muted = !video.muted
+  }
+
+  type FullscreenElement = HTMLDivElement & {
+    webkitRequestFullscreen?: () => Promise<void>
+    webkitEnterFullscreen?: () => void
+    mozRequestFullScreen?: () => void
+    msRequestFullscreen?: () => void
+  }
+
+  type FullscreenDocument = Document & {
+    webkitFullscreenElement?: Element
+    mozFullScreenElement?: Element
+    msFullscreenElement?: Element
+    webkitExitFullscreen?: () => void
+    mozCancelFullScreen?: () => void
+    msExitFullscreen?: () => void
+  }
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return
+
+    const elem = containerRef.current as FullscreenElement
+    const doc = document as FullscreenDocument
+
+    // Check if already in fullscreen
+    const isFullscreenNow = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    )
+
+    if (!isFullscreenNow) {
+      // Enter fullscreen - try all APIs
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch((err: Error) => console.error('Fullscreen error:', err))
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen()
+      } else if (elem.webkitEnterFullscreen) {
+        elem.webkitEnterFullscreen()
+      } else if (elem.mozRequestFullScreen) {
+        elem.mozRequestFullScreen()
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen()
+      }
+    } else {
+      // Exit fullscreen - try all APIs
+      if (doc.exitFullscreen) {
+        doc.exitFullscreen().catch((err: Error) => console.error('Exit fullscreen error:', err))
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen()
+      } else if (doc.mozCancelFullScreen) {
+        doc.mozCancelFullScreen()
+      } else if (doc.msExitFullscreen) {
+        doc.msExitFullscreen()
+      }
+    }
+  }
+
+  // Helper function to seek with proper audio sync
+  const seekToTime = (time: number) => {
+    const video = videoRef.current
+    if (!video) return
+
+    // Pause playback during seek to prevent audio desync
+    const wasPlaying = !video.paused
+    if (wasPlaying) {
+      video.pause()
+    }
+
+    // Set the new time
+    video.currentTime = time
+
+    // Wait for seeked event to ensure both audio and video are at the correct position
+    const handleSeeked = () => {
+      if (wasPlaying) {
+        video.play().catch((e) => console.error('Failed to resume after seek:', e))
+      }
+      video.removeEventListener('seeked', handleSeeked)
+    }
+
+    video.addEventListener('seeked', handleSeeked)
+  }
+
+  // Handle skip with stacking - clicking multiple times accumulates the skip amount
+  const handleSkip = (direction: 'forward' | 'backward') => {
+    const video = videoRef.current
+    if (!video) return
+
+    const skipSeconds = 10
+    let newAmount = skipSeconds
+
+    // If same direction, stack the skip amount
+    if (skipAmount && skipAmount.direction === direction) {
+      newAmount = skipAmount.amount + skipSeconds
+    }
+
+    // Actually seek (but only by 10 seconds from current position each click)
+    const seekAmount = direction === 'forward'
+      ? Math.min(duration - video.currentTime, skipSeconds)
+      : Math.min(video.currentTime, skipSeconds)
+
+    if (seekAmount > 0) {
+      seekToTime(direction === 'forward'
+        ? video.currentTime + seekAmount
+        : video.currentTime - seekAmount
+      )
+    }
+
+    // Update visual indicator
+    setSkipAmount({ direction, amount: newAmount })
+
+    // Clear existing timeout
+    if (skipTimeoutRef.current) {
+      clearTimeout(skipTimeoutRef.current)
+    }
+
+    // Hide indicator after 800ms of no clicks
+    skipTimeoutRef.current = setTimeout(() => {
+      setSkipAmount(null)
+    }, 800)
+  }
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -629,91 +778,7 @@ export function VideoPlayer({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [duration, onNextEpisode, onPreviousEpisode])
-
-  // Control functions
-  const togglePlay = () => {
-    const video = videoRef.current
-    if (!video) return
-
-    if (video.paused) {
-      video.play()
-    } else {
-      video.pause()
-    }
-  }
-
-  const toggleMute = () => {
-    const video = videoRef.current
-    if (!video) return
-    video.muted = !video.muted
-  }
-
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return
-
-    const elem = containerRef.current as any
-    const doc = document as any
-
-    // Check if already in fullscreen
-    const isFullscreen = !!(
-      doc.fullscreenElement ||
-      doc.webkitFullscreenElement ||
-      doc.mozFullScreenElement ||
-      doc.msFullscreenElement
-    )
-
-    if (!isFullscreen) {
-      // Enter fullscreen - try all APIs
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch((err: Error) => console.error('Fullscreen error:', err))
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen()
-      } else if (elem.webkitEnterFullscreen) {
-        elem.webkitEnterFullscreen()
-      } else if (elem.mozRequestFullScreen) {
-        elem.mozRequestFullScreen()
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen()
-      }
-    } else {
-      // Exit fullscreen - try all APIs
-      if (doc.exitFullscreen) {
-        doc.exitFullscreen().catch((err: Error) => console.error('Exit fullscreen error:', err))
-      } else if (doc.webkitExitFullscreen) {
-        doc.webkitExitFullscreen()
-      } else if (doc.mozCancelFullScreen) {
-        doc.mozCancelFullScreen()
-      } else if (doc.msExitFullscreen) {
-        doc.msExitFullscreen()
-      }
-    }
-  }
-
-  // Helper function to seek with proper audio sync
-  const seekToTime = (targetTime: number) => {
-    const video = videoRef.current
-    if (!video) return
-
-    // Pause playback during seek to prevent audio desync
-    const wasPlaying = !video.paused
-    if (wasPlaying) {
-      video.pause()
-    }
-
-    // Set the new time
-    video.currentTime = targetTime
-
-    // Wait for seeked event to ensure both audio and video are at the correct position
-    const handleSeeked = () => {
-      if (wasPlaying) {
-        video.play().catch((e) => console.error('Failed to resume after seek:', e))
-      }
-      video.removeEventListener('seeked', handleSeeked)
-    }
-
-    video.addEventListener('seeked', handleSeeked)
-  }
+  }, [duration, onNextEpisode, onPreviousEpisode, handleSkip])
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current
@@ -801,63 +866,26 @@ export function VideoPlayer({
     }
   }, [])
 
-  // Handle skip with stacking - clicking multiple times accumulates the skip amount
-  const handleSkip = (direction: 'forward' | 'backward') => {
-    const video = videoRef.current
-    if (!video) return
-
-    const skipSeconds = 10
-    let newAmount = skipSeconds
-
-    // If same direction, stack the skip amount
-    if (skipAmount && skipAmount.direction === direction) {
-      newAmount = skipAmount.amount + skipSeconds
-    }
-
-    // Calculate target time
-    const targetTime = direction === 'forward'
-      ? Math.min(duration, video.currentTime + newAmount)
-      : Math.max(0, video.currentTime - newAmount)
-
-    // Actually seek (but only by 10 seconds from current position each click)
-    const seekAmount = direction === 'forward'
-      ? Math.min(duration - video.currentTime, skipSeconds)
-      : Math.min(video.currentTime, skipSeconds)
-
-    if (seekAmount > 0) {
-      seekToTime(direction === 'forward'
-        ? video.currentTime + seekAmount
-        : video.currentTime - seekAmount
-      )
-    }
-
-    // Update visual indicator
-    setSkipAmount({ direction, amount: newAmount })
-
-    // Clear existing timeout
-    if (skipTimeoutRef.current) {
-      clearTimeout(skipTimeoutRef.current)
-    }
-
-    // Hide indicator after 800ms of no clicks
-    skipTimeoutRef.current = setTimeout(() => {
-      setSkipAmount(null)
-    }, 800)
-  }
-
   // Auto-hide controls when entering fullscreen or resuming playback
   useEffect(() => {
+    let showControlsTimeout: ReturnType<typeof setTimeout> | null = null
+
     if (!isFullscreen || !isPlaying || isPiP) {
       // Clear timer when exiting fullscreen, pausing, or in PiP mode
       if (hideControlsTimerRef.current) {
         clearTimeout(hideControlsTimerRef.current)
         hideControlsTimerRef.current = null
       }
-      // Always show controls when not in fullscreen, when paused, or in PiP
-      setShowControls(true)
+      // Defer setState to avoid synchronous setState in effect body
+      showControlsTimeout = setTimeout(() => {
+        setShowControls(true)
+      }, 0)
     } else {
       // When entering fullscreen AND playing (not PiP), start auto-hide timer
-      setShowControls(true) // Show controls initially
+      // Defer setState to avoid synchronous setState in effect body
+      showControlsTimeout = setTimeout(() => {
+        setShowControls(true)
+      }, 0)
 
       // Clear any existing timer
       if (hideControlsTimerRef.current) {
@@ -868,6 +896,12 @@ export function VideoPlayer({
       hideControlsTimerRef.current = setTimeout(() => {
         setShowControls(false)
       }, 2000)
+    }
+
+    return () => {
+      if (showControlsTimeout) {
+        clearTimeout(showControlsTimeout)
+      }
     }
   }, [isFullscreen, isPlaying, isPiP])
 

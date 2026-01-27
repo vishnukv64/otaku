@@ -103,17 +103,23 @@ function StatsPage() {
     }
   }, [])
 
-  // Start polling
+  // Start polling - use setTimeout for initial fetch to avoid setState in effect body
   useEffect(() => {
-    fetchStats()
-    fetchStorageUsage()
+    // Use setTimeout to defer initial fetch, avoiding synchronous setState in effect
+    const initialFetchTimeout = setTimeout(() => {
+      fetchStats()
+      fetchStorageUsage()
+    }, 0)
 
-    if (!isPolling) return
+    if (!isPolling) {
+      return () => clearTimeout(initialFetchTimeout)
+    }
 
     const interval = setInterval(fetchStats, 1000)
     const storageInterval = setInterval(fetchStorageUsage, 5000)
 
     return () => {
+      clearTimeout(initialFetchTimeout)
       clearInterval(interval)
       clearInterval(storageInterval)
     }
