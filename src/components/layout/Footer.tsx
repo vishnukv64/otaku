@@ -4,12 +4,19 @@
  * Global footer displayed on all pages
  */
 
+import { useEffect, useState } from 'react'
 import { Heart } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
+import { getVersion } from '@tauri-apps/api/app'
 import logoImage from '@/assets/logo.png'
 
 export function Footer() {
   const currentYear = new Date().getFullYear()
+  const [appVersion, setAppVersion] = useState<string>('')
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(console.error)
+  }, [])
 
   return (
     <footer className="border-t border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -30,11 +37,16 @@ export function Footer() {
             </span>
           </Link>
 
-          {/* Copyright */}
-          <div className="flex items-center gap-1 text-sm text-[var(--color-text-tertiary)]">
-            <span>Made with</span>
-            <Heart size={14} className="text-[var(--color-accent-primary)] fill-current" />
-            <span>&copy; {currentYear} Otaku</span>
+          {/* Copyright and Version */}
+          <div className="flex items-center gap-4 text-sm text-[var(--color-text-tertiary)]">
+            <div className="flex items-center gap-1">
+              <span>Made with</span>
+              <Heart size={14} className="text-[var(--color-accent-primary)] fill-current" />
+              <span>&copy; {currentYear} Otaku</span>
+            </div>
+            {appVersion && (
+              <span className="font-mono text-xs opacity-75">v{appVersion}</span>
+            )}
           </div>
         </div>
 

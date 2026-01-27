@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useSettingsStore } from '../store/settingsStore'
 import { usePlayerStore } from '../store/playerStore'
 import { invoke } from '@tauri-apps/api/core'
+import { getVersion, getTauriVersion } from '@tauri-apps/api/app'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { SettingSection } from '../components/settings/SettingSection'
@@ -11,7 +12,7 @@ import { SettingSlider } from '../components/settings/SettingSlider'
 import { SettingDropdown } from '../components/settings/SettingDropdown'
 import { SettingFileInput } from '../components/settings/SettingFileInput'
 import { DangerButton } from '../components/settings/DangerButton'
-import { HardDrive, Activity, ChevronRight, FileText } from 'lucide-react'
+import { HardDrive, Activity, ChevronRight, FileText, Info } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/settings')({
@@ -30,11 +31,27 @@ function SettingsScreen() {
   const updatePlayerSettings = usePlayerStore((state) => state.updateSettings)
 
   const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [tauriVersion, setTauriVersion] = useState<string>('')
 
-  // Load storage usage on mount
+  // Load storage usage and version info on mount
   useEffect(() => {
     loadStorageUsage()
+    loadVersionInfo()
   }, [])
+
+  const loadVersionInfo = async () => {
+    try {
+      const [version, tauri] = await Promise.all([
+        getVersion(),
+        getTauriVersion(),
+      ])
+      setAppVersion(version)
+      setTauriVersion(tauri)
+    } catch (error) {
+      console.error('Failed to load version info:', error)
+    }
+  }
 
   const loadStorageUsage = async () => {
     try {
@@ -450,6 +467,56 @@ function SettingsScreen() {
             >
               Reset to Defaults
             </button>
+          </SettingRow>
+        </SettingSection>
+
+        {/* About Section */}
+        <SettingSection
+          title="About"
+          description="Application information and version details"
+        >
+          <SettingRow
+            label="Version"
+            description="Current application version"
+          >
+            <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+              <Info size={16} />
+              <span className="font-mono text-sm">
+                {appVersion ? `v${appVersion}` : 'Loading...'}
+              </span>
+            </div>
+          </SettingRow>
+
+          <SettingRow
+            label="Tauri Version"
+            description="Underlying Tauri framework version"
+          >
+            <span className="font-mono text-sm text-[var(--color-text-secondary)]">
+              {tauriVersion ? `v${tauriVersion}` : 'Loading...'}
+            </span>
+          </SettingRow>
+
+          <SettingRow
+            label="Source Code"
+            description="View the source code on GitHub"
+          >
+            <a
+              href="https://github.com/vishnukv64/otaku"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="
+                bg-[var(--color-surface-subtle)]
+                hover:bg-[var(--color-surface-hover)]
+                text-[var(--color-text-primary)]
+                rounded-lg
+                px-4
+                py-2
+                font-medium
+                transition-colors
+              "
+            >
+              View on GitHub
+            </a>
           </SettingRow>
         </SettingSection>
       </div>
