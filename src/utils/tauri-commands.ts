@@ -11,6 +11,8 @@ import type {
   SearchResults,
   MediaDetails,
   VideoSources,
+  MangaDetails,
+  ChapterImages,
 } from '@/types/extension'
 
 /**
@@ -27,25 +29,29 @@ export async function loadExtension(code: string): Promise<ExtensionMetadata> {
  * @param extensionId - Extension ID
  * @param query - Search query
  * @param page - Page number (1-indexed)
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
  * @returns Search results with pagination info
  */
 export async function searchAnime(
   extensionId: string,
   query: string,
-  page: number
+  page: number,
+  allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('search_anime', { extensionId, query, page })
+  return await invoke('search_anime', { extensionId, query, page, allowAdult })
 }
 
 /**
  * Get recommended anime (trending/latest)
  * @param extensionId - Extension ID
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
  * @returns Recommended anime list
  */
 export async function getRecommendations(
-  extensionId: string
+  extensionId: string,
+  allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('get_recommendations', { extensionId })
+  return await invoke('get_recommendations', { extensionId, allowAdult })
 }
 
 /**
@@ -80,15 +86,17 @@ export async function getVideoSources(
  * @param page - Page number (1-indexed)
  * @param sortType - Sort type: "score" (top rated), "update" (recently updated), "view" (trending)
  * @param genres - Array of genres to filter by
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
  * @returns Search results with pagination info
  */
 export async function discoverAnime(
   extensionId: string,
   page: number = 1,
   sortType?: string,
-  genres: string[] = []
+  genres: string[] = [],
+  allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('discover_anime', { extensionId, page, sortType, genres })
+  return await invoke('discover_anime', { extensionId, page, sortType, genres, allowAdult })
 }
 
 // Tag/Genre types
@@ -129,6 +137,94 @@ export async function getMediaDetails(
   mediaId: string
 ): Promise<MediaDetails> {
   return await getAnimeDetails(extensionId, mediaId)
+}
+
+// ==================== Manga Commands ====================
+
+/**
+ * Search for manga using a specific extension
+ * @param extensionId - Extension ID
+ * @param query - Search query
+ * @param page - Page number (1-indexed)
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
+ * @returns Search results with pagination info
+ */
+export async function searchManga(
+  extensionId: string,
+  query: string,
+  page: number,
+  allowAdult: boolean = false
+): Promise<SearchResults> {
+  return await invoke('search_manga', { extensionId, query, page, allowAdult })
+}
+
+/**
+ * Get detailed information about a manga
+ * @param extensionId - Extension ID
+ * @param mangaId - Manga ID from search results
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
+ * @returns Detailed manga information with chapters
+ */
+export async function getMangaDetails(
+  extensionId: string,
+  mangaId: string,
+  allowAdult: boolean = false
+): Promise<MangaDetails> {
+  return await invoke('get_manga_details', { extensionId, mangaId, allowAdult })
+}
+
+/**
+ * Get chapter images for reading
+ * @param extensionId - Extension ID
+ * @param chapterId - Chapter ID
+ * @returns Chapter images with total pages
+ */
+export async function getChapterImages(
+  extensionId: string,
+  chapterId: string
+): Promise<ChapterImages> {
+  return await invoke('get_chapter_images', { extensionId, chapterId })
+}
+
+/**
+ * Discover manga with filters (trending, top-rated, by genre)
+ * @param extensionId - Extension ID
+ * @param page - Page number (1-indexed)
+ * @param sortType - Sort type: "score" (top rated), "update" (recently updated)
+ * @param genres - Array of genres to filter by
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
+ * @returns Search results with pagination info
+ */
+export async function discoverManga(
+  extensionId: string,
+  page: number = 1,
+  sortType?: string,
+  genres: string[] = [],
+  allowAdult: boolean = false
+): Promise<SearchResults> {
+  return await invoke('discover_manga', { extensionId, page, sortType, genres, allowAdult })
+}
+
+/**
+ * Get available manga tags (genres)
+ * @param extensionId - Extension ID
+ * @param page - Page number (1-indexed)
+ * @returns Tags result with genres
+ */
+export async function getMangaTags(
+  extensionId: string,
+  page: number = 1
+): Promise<TagsResult> {
+  return await invoke('get_manga_tags', { extensionId, page })
+}
+
+/**
+ * Proxy an image request to avoid CORS issues (for manga pages)
+ * @param url - Image URL to proxy
+ * @returns Image bytes as Uint8Array
+ */
+export async function proxyImageRequest(url: string): Promise<Uint8Array> {
+  return await invoke('proxy_image_request', { url })
 }
 
 /**
@@ -364,9 +460,73 @@ export async function removeFromContinueWatching(mediaId: string): Promise<void>
   return await invoke('remove_from_continue_watching', { mediaId })
 }
 
+// ==================== Reading History Commands ====================
+
+export interface ReadingHistory {
+  id: number
+  media_id: string
+  chapter_id: string
+  chapter_number: number
+  current_page: number
+  total_pages?: number
+  completed: boolean
+  last_read: string
+  created_at: string
+}
+
+/**
+ * Save or update reading progress for a chapter
+ */
+export async function saveReadingProgress(
+  mediaId: string,
+  chapterId: string,
+  chapterNumber: number,
+  currentPage: number,
+  totalPages?: number,
+  completed: boolean = false
+): Promise<void> {
+  return await invoke('save_reading_progress', {
+    mediaId,
+    chapterId,
+    chapterNumber,
+    currentPage,
+    totalPages,
+    completed,
+  })
+}
+
+/**
+ * Get reading progress for a specific chapter
+ */
+export async function getReadingProgress(chapterId: string): Promise<ReadingHistory | null> {
+  return await invoke('get_reading_progress', { chapterId })
+}
+
+/**
+ * Get the most recent reading progress for a manga (for Resume Reading feature)
+ */
+export async function getLatestReadingProgressForMedia(mediaId: string): Promise<ReadingHistory | null> {
+  return await invoke('get_latest_reading_progress_for_media', { mediaId })
+}
+
+/**
+ * Get continue reading list (recently read chapters that aren't completed)
+ */
+export async function getContinueReading(limit: number = 20): Promise<ReadingHistory[]> {
+  return await invoke('get_continue_reading', { limit })
+}
+
+/**
+ * Remove manga from continue reading (deletes all reading history for that manga)
+ * @param mediaId - The media ID to remove
+ */
+export async function removeFromContinueReadingManga(mediaId: string): Promise<void> {
+  return await invoke('remove_from_continue_reading_manga', { mediaId })
+}
+
 // ==================== Library Commands ====================
 
-export type LibraryStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch'
+export type LibraryStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch' | 'reading' | 'plan_to_read'
 
 export interface LibraryEntry {
   id: number
@@ -477,6 +637,15 @@ export interface ContinueWatchingEntry {
   last_watched: string
 }
 
+export interface ContinueReadingEntry {
+  media: MediaEntry
+  chapter_id: string
+  chapter_number: number
+  current_page: number
+  total_pages?: number
+  last_read: string
+}
+
 /**
  * Save media details to database
  */
@@ -489,6 +658,13 @@ export async function saveMediaDetails(media: MediaEntry): Promise<void> {
  */
 export async function getContinueWatchingWithDetails(limit: number = 20): Promise<ContinueWatchingEntry[]> {
   return await invoke('get_continue_watching_with_details', { limit })
+}
+
+/**
+ * Get continue reading with full media details
+ */
+export async function getContinueReadingWithDetails(limit: number = 20): Promise<ContinueReadingEntry[]> {
+  return await invoke('get_continue_reading_with_details', { limit })
 }
 
 /**
@@ -641,5 +817,158 @@ export async function startLogsStream(): Promise<void> {
  */
 export async function stopLogsStream(): Promise<void> {
   return await invoke('stop_logs_stream')
+}
+
+// ==================== Chapter Download Commands ====================
+
+export interface ChapterDownloadProgress {
+  id: string
+  media_id: string
+  chapter_id: string
+  chapter_number: number
+  total_images: number
+  downloaded_images: number
+  percentage: number
+  status: 'queued' | 'downloading' | 'completed' | 'failed'
+  error_message?: string
+}
+
+/**
+ * Start downloading a manga chapter
+ * @param mediaId - Media ID
+ * @param mediaTitle - Manga title (for folder naming)
+ * @param chapterId - Chapter ID
+ * @param chapterNumber - Chapter number
+ * @param imageUrls - Array of image URLs to download
+ * @returns Download ID for tracking progress
+ */
+export async function startChapterDownload(
+  mediaId: string,
+  mediaTitle: string,
+  chapterId: string,
+  chapterNumber: number,
+  imageUrls: string[]
+): Promise<string> {
+  return await invoke('start_chapter_download', {
+    mediaId,
+    mediaTitle,
+    chapterId,
+    chapterNumber,
+    imageUrls,
+  })
+}
+
+/**
+ * Get chapter download progress
+ * @param downloadId - Download ID returned from startChapterDownload
+ */
+export async function getChapterDownloadProgress(
+  downloadId: string
+): Promise<ChapterDownloadProgress | null> {
+  return await invoke('get_chapter_download_progress', { downloadId })
+}
+
+/**
+ * Check if a chapter is downloaded
+ * @param mediaId - Media ID
+ * @param chapterId - Chapter ID
+ */
+export async function isChapterDownloaded(
+  mediaId: string,
+  chapterId: string
+): Promise<boolean> {
+  return await invoke('is_chapter_downloaded', { mediaId, chapterId })
+}
+
+/**
+ * Get downloaded chapter images (local paths)
+ * @param mediaId - Media ID
+ * @param chapterId - Chapter ID
+ * @returns Array of local file paths for the chapter images
+ */
+export async function getDownloadedChapterImages(
+  mediaId: string,
+  chapterId: string
+): Promise<string[]> {
+  return await invoke('get_downloaded_chapter_images', { mediaId, chapterId })
+}
+
+/**
+ * Delete a chapter download
+ * @param mediaId - Media ID
+ * @param chapterId - Chapter ID
+ */
+export async function deleteChapterDownload(
+  mediaId: string,
+  chapterId: string
+): Promise<void> {
+  return await invoke('delete_chapter_download', { mediaId, chapterId })
+}
+
+/**
+ * List all chapter downloads for a manga
+ * @param mediaId - Media ID
+ */
+export async function listChapterDownloads(
+  mediaId: string
+): Promise<ChapterDownloadProgress[]> {
+  return await invoke('list_chapter_downloads', { mediaId })
+}
+
+/**
+ * Downloaded manga with media details (for library display)
+ */
+export interface DownloadedMangaWithMedia {
+  media_id: string
+  title: string
+  cover_url?: string
+  chapter_count: number
+  total_images: number
+  total_size: number
+}
+
+/**
+ * Get all downloaded manga with chapter counts and media details
+ */
+export async function getDownloadedMangaWithMedia(): Promise<DownloadedMangaWithMedia[]> {
+  return await invoke('get_downloaded_manga')
+}
+
+/**
+ * Chapter download with media title (for Download Manager display)
+ */
+export interface ChapterDownloadWithTitle {
+  id: string
+  media_id: string
+  media_title: string
+  chapter_id: string
+  chapter_number: number
+  total_images: number
+  downloaded_images: number
+  percentage: number
+  status: 'queued' | 'downloading' | 'completed' | 'failed'
+  error_message?: string
+}
+
+/**
+ * Chapter download progress event payload (no media_title)
+ */
+export interface ChapterDownloadProgressEvent {
+  id: string
+  media_id: string
+  chapter_id: string
+  chapter_number: number
+  total_images: number
+  downloaded_images: number
+  percentage: number
+  status: 'queued' | 'downloading' | 'completed' | 'failed'
+  error_message?: string
+}
+
+/**
+ * List ALL chapter downloads across all manga (for Download Manager)
+ */
+export async function listAllChapterDownloads(): Promise<ChapterDownloadWithTitle[]> {
+  return await invoke('list_all_chapter_downloads')
 }
 

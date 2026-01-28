@@ -44,6 +44,16 @@ pub struct ContinueWatchingEntry {
     pub last_watched: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinueReadingEntry {
+    pub media: MediaEntry,
+    pub chapter_id: String,
+    pub chapter_number: f64,
+    pub current_page: i32,
+    pub total_pages: Option<i32>,
+    pub last_read: String,
+}
+
 /// Save or update media details
 pub async fn save_media(
     pool: &SqlitePool,
@@ -72,6 +82,7 @@ pub async fn save_media(
             year = ?,
             rating = ?,
             episode_count = ?,
+            genres = COALESCE(?, genres),
             updated_at = CURRENT_TIMESTAMP
         "#
     )
@@ -109,6 +120,7 @@ pub async fn save_media(
     .bind(media.year)
     .bind(media.rating)
     .bind(media.episode_count)
+    .bind(&media.genres)
     .execute(pool)
     .await?;
 
@@ -219,6 +231,88 @@ pub async fn get_continue_watching_with_media(
             progress_seconds: row.try_get("progress_seconds")?,
             duration: row.try_get("duration")?,
             last_watched: row.try_get("last_watched")?,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Get continue reading with media details
+/// Excludes manga where the final chapter is >= 90% read
+pub async fn get_continue_reading_with_media(
+    pool: &SqlitePool,
+    limit: i32,
+) -> Result<Vec<ContinueReadingEntry>> {
+    let entries = sqlx::query(
+        r#"
+        SELECT DISTINCT
+            m.id, m.extension_id, m.title, m.english_name, m.native_name, m.description,
+            m.cover_url, m.banner_url, m.trailer_url, m.media_type, m.content_type, m.status,
+            m.year, m.rating, m.episode_count, m.episode_duration,
+            m.season_quarter, m.season_year,
+            m.aired_start_year, m.aired_start_month, m.aired_start_date,
+            m.genres, m.created_at, m.updated_at,
+            r.chapter_id, r.chapter_number, r.current_page, r.total_pages, r.last_read
+        FROM reading_history r
+        INNER JOIN media m ON r.media_id = m.id
+        WHERE r.completed = 0
+          AND r.current_page > 0
+          -- Exclude if this is the final chapter AND progress >= 90%
+          AND NOT (
+            m.episode_count IS NOT NULL
+            AND r.chapter_number >= m.episode_count
+            AND r.total_pages IS NOT NULL
+            AND r.total_pages > 0
+            AND (CAST(r.current_page AS REAL) / CAST(r.total_pages AS REAL)) >= 0.9
+          )
+        GROUP BY r.media_id
+        HAVING MAX(r.last_read)
+        ORDER BY r.last_read DESC
+        LIMIT ?
+        "#
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let mut result = Vec::new();
+    for row in entries {
+        use sqlx::Row;
+
+        let media = MediaEntry {
+            id: row.try_get("id")?,
+            extension_id: row.try_get("extension_id")?,
+            title: row.try_get("title")?,
+            english_name: row.try_get("english_name")?,
+            native_name: row.try_get("native_name")?,
+            description: row.try_get("description")?,
+            cover_url: row.try_get("cover_url")?,
+            banner_url: row.try_get("banner_url")?,
+            trailer_url: row.try_get("trailer_url")?,
+            media_type: row.try_get("media_type")?,
+            content_type: row.try_get("content_type")?,
+            status: row.try_get("status")?,
+            year: row.try_get("year")?,
+            rating: row.try_get("rating")?,
+            episode_count: row.try_get("episode_count")?,
+            episode_duration: row.try_get("episode_duration")?,
+            season_quarter: row.try_get("season_quarter")?,
+            season_year: row.try_get("season_year")?,
+            aired_start_year: row.try_get("aired_start_year")?,
+            aired_start_month: row.try_get("aired_start_month")?,
+            aired_start_date: row.try_get("aired_start_date")?,
+            genres: row.try_get("genres")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        };
+
+        result.push(ContinueReadingEntry {
+            media,
+            chapter_id: row.try_get("chapter_id")?,
+            chapter_number: row.try_get("chapter_number")?,
+            current_page: row.try_get("current_page")?,
+            total_pages: row.try_get("total_pages")?,
+            last_read: row.try_get("last_read")?,
         });
     }
 

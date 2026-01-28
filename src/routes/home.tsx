@@ -4,7 +4,11 @@ import { Loader2, AlertCircle } from 'lucide-react'
 import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
+import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
+import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
+import { useSettingsStore } from '@/store/settingsStore'
 import type { SearchResult } from '@/types/extension'
 
 export const Route = createFileRoute('/home')({
@@ -31,19 +35,31 @@ interface CategoryContent {
 }
 
 function HomeScreen() {
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [extensionId, setExtensionId] = useState<string | null>(null)
+  const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
   const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
 
-  // Load extension on mount
+  // Load extensions on mount
   useEffect(() => {
-    const initExtension = async () => {
+    const initExtensions = async () => {
       try {
-        const metadata = await loadExtension(ALLANIME_EXTENSION)
-        setExtensionId(metadata.id)
+        // Load anime extension
+        const animeMetadata = await loadExtension(ALLANIME_EXTENSION)
+        setExtensionId(animeMetadata.id)
+
+        // Load manga extension (non-blocking)
+        try {
+          const mangaMetadata = await loadExtension(ALLANIME_MANGA_EXTENSION)
+          setMangaExtensionId(mangaMetadata.id)
+        } catch (mangaErr) {
+          console.error('Failed to load manga extension:', mangaErr)
+        }
+
         setLoading(false)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load extension')
@@ -51,7 +67,7 @@ function HomeScreen() {
       }
     }
 
-    initExtension()
+    initExtensions()
   }, [])
 
   // Load content for all categories
@@ -73,7 +89,8 @@ function HomeScreen() {
             extensionId,
             1,
             category.sortType,
-            category.genres
+            category.genres,
+            nsfwFilter
           )
 
           setCategories(prev => ({
@@ -106,7 +123,7 @@ function HomeScreen() {
 
     loadCategories()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensionId])
+  }, [extensionId, nsfwFilter])
 
   const handleWatch = () => {
     // TODO: Navigate to watch screen or show details
@@ -150,6 +167,16 @@ function HomeScreen() {
             onWatch={handleWatch}
             onMoreInfo={handleMoreInfo}
           />
+        )}
+
+        {/* Continue Watching Section */}
+        {extensionId && (
+          <ContinueWatchingSection extensionId={extensionId} />
+        )}
+
+        {/* Continue Reading Section */}
+        {mangaExtensionId && (
+          <ContinueReadingSection extensionId={mangaExtensionId} />
         )}
 
         {/* Content Carousels */}

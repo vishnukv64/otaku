@@ -7,10 +7,11 @@
 // due to QuickJS's thread-safety limitations. In production, we'd use a thread-local
 // runtime pool.
 
-use crate::extensions::{Extension, ExtensionMetadata, ExtensionRuntime, MediaDetails, SearchResults, TagsResult, VideoSources};
+use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, MangaDetails, MediaDetails, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
-use crate::downloads::{DownloadManager, DownloadProgress};
+use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
 use crate::VideoServerInfo;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 use sqlx;
@@ -63,6 +64,7 @@ pub async fn search_anime(
     extension_id: String,
     query: String,
     page: u32,
+    allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
@@ -75,8 +77,8 @@ pub async fn search_anime(
     // Release lock before creating runtime
     drop(extensions);
 
-    // Create runtime on-demand (not ideal for performance, but works for MVP)
-    let runtime = ExtensionRuntime::new(extension)
+    // Create runtime on-demand with NSFW setting
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
     runtime.search(&query, page)
@@ -139,6 +141,7 @@ pub async fn discover_anime(
     page: u32,
     sort_type: Option<String>,
     genres: Vec<String>,
+    allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
@@ -150,7 +153,7 @@ pub async fn discover_anime(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::new(extension)
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
     runtime.discover(page, sort_type, genres)
@@ -162,6 +165,7 @@ pub async fn discover_anime(
 pub async fn get_recommendations(
     state: State<'_, AppState>,
     extension_id: String,
+    allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
@@ -173,7 +177,7 @@ pub async fn get_recommendations(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::new(extension)
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
     runtime.get_recommendations()
@@ -217,6 +221,179 @@ pub async fn list_extensions(
         .collect();
 
     Ok(metadata)
+}
+
+// ==================== Manga Commands ====================
+
+/// Search for manga using a specific extension
+#[tauri::command]
+pub async fn search_manga(
+    state: State<'_, AppState>,
+    extension_id: String,
+    query: String,
+    page: u32,
+    allow_adult: Option<bool>,
+) -> Result<SearchResults, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    runtime.search(&query, page)
+        .map_err(|e| format!("Manga search failed: {}", e))
+}
+
+/// Get detailed information about a manga
+#[tauri::command]
+pub async fn get_manga_details(
+    state: State<'_, AppState>,
+    extension_id: String,
+    manga_id: String,
+    allow_adult: Option<bool>,
+) -> Result<MangaDetails, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    runtime.get_manga_details(&manga_id)
+        .map_err(|e| format!("Failed to get manga details: {}", e))
+}
+
+/// Get chapter images for reading
+#[tauri::command]
+pub async fn get_chapter_images(
+    state: State<'_, AppState>,
+    extension_id: String,
+    chapter_id: String,
+) -> Result<ChapterImages, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::new(extension)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    runtime.get_chapter_images(&chapter_id)
+        .map_err(|e| format!("Failed to get chapter images: {}", e))
+}
+
+/// Discover manga with filters (trending, top-rated, by genre)
+#[tauri::command]
+pub async fn discover_manga(
+    state: State<'_, AppState>,
+    extension_id: String,
+    page: u32,
+    sort_type: Option<String>,
+    genres: Vec<String>,
+    allow_adult: Option<bool>,
+) -> Result<SearchResults, String> {
+    log::debug!("[Manga] discover_manga called with genres: {:?}", genres);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let result = runtime.discover(page, sort_type, genres.clone())
+        .map_err(|e| format!("Manga discover failed: {}", e))?;
+
+    log::debug!("[Manga] discover_manga returned {} results for genres {:?}", result.results.len(), genres);
+
+    Ok(result)
+}
+
+/// Get available manga tags (genres)
+#[tauri::command]
+pub async fn get_manga_tags(
+    state: State<'_, AppState>,
+    extension_id: String,
+    page: u32,
+) -> Result<TagsResult, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::new(extension)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    runtime.get_tags(page)
+        .map_err(|e| format!("Get manga tags failed: {}", e))
+}
+
+/// Proxy image request to avoid CORS issues (for manga pages)
+#[tauri::command]
+pub async fn proxy_image_request(
+    url: String,
+) -> Result<Vec<u8>, String> {
+    log::debug!("Proxying image request");
+
+    use std::io::Read;
+
+    let request = ureq::get(&url)
+        .set("Referer", "https://allmanga.to")
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
+        .set("Origin", "https://allmanga.to");
+
+    match request.call() {
+        Ok(response) => {
+            let content_length = response.header("Content-Length")
+                .and_then(|v| v.parse::<usize>().ok());
+
+            // Pre-allocate based on content length, cap at 50MB for images
+            let initial_capacity = content_length
+                .map(|l| l.min(50 * 1024 * 1024))
+                .unwrap_or(1024 * 1024);
+
+            let mut bytes = Vec::with_capacity(initial_capacity);
+
+            response.into_reader()
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("Failed to read image: {}", e))?;
+
+            Ok(bytes)
+        }
+        Err(e) => {
+            log::error!("Image proxy error: {:?}", e);
+            Err(format!("Image proxy request failed: {}", e))
+        }
+    }
 }
 
 /// Proxy video request to avoid CORS issues
@@ -652,6 +829,90 @@ pub async fn remove_from_continue_watching(
     Ok(())
 }
 
+// ==================== Reading History Commands ====================
+
+/// Save or update reading progress for a chapter
+#[tauri::command]
+pub async fn save_reading_progress(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+    chapter_number: f64,
+    current_page: i32,
+    total_pages: Option<i32>,
+    completed: bool,
+) -> Result<(), String> {
+    use crate::database::reading_history::{save_reading_progress as save_progress, ReadingProgress};
+
+    let progress = ReadingProgress {
+        media_id,
+        chapter_id,
+        chapter_number,
+        current_page,
+        total_pages,
+        completed,
+    };
+
+    save_progress(state.database.pool(), &progress)
+        .await
+        .map_err(|e| format!("Failed to save reading progress: {}", e))
+}
+
+/// Get reading progress for a specific chapter
+#[tauri::command]
+pub async fn get_reading_progress(
+    state: State<'_, AppState>,
+    chapter_id: String,
+) -> Result<Option<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_reading_progress as get_progress;
+
+    get_progress(state.database.pool(), &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to get reading progress: {}", e))
+}
+
+/// Get the most recent reading progress for a manga (for Resume Reading feature)
+#[tauri::command]
+pub async fn get_latest_reading_progress_for_media(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_latest_reading_progress_for_media as get_latest;
+
+    get_latest(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get latest reading progress: {}", e))
+}
+
+/// Get continue reading list (recently read chapters that aren't completed)
+#[tauri::command]
+pub async fn get_continue_reading(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_continue_reading as get_continue;
+
+    get_continue(state.database.pool(), limit)
+        .await
+        .map_err(|e| format!("Failed to get continue reading: {}", e))
+}
+
+/// Remove manga from continue reading (deletes all reading history for that manga)
+#[tauri::command]
+pub async fn remove_from_continue_reading_manga(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<(), String> {
+    use crate::database::reading_history::delete_manga_reading_history;
+
+    delete_manga_reading_history(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to remove from continue reading: {}", e))?;
+
+    log::debug!("Removed manga {} from continue reading", media_id);
+    Ok(())
+}
+
 // ==================== Library Commands ====================
 
 /// Add media to library
@@ -791,6 +1052,19 @@ pub async fn get_continue_watching_with_details(
     get_continue_watching_with_media(state.database.pool(), limit)
         .await
         .map_err(|e| format!("Failed to get continue watching: {}", e))
+}
+
+/// Get continue reading with full media details
+#[tauri::command]
+pub async fn get_continue_reading_with_details(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::media::ContinueReadingEntry>, String> {
+    use crate::database::media::get_continue_reading_with_media;
+
+    get_continue_reading_with_media(state.database.pool(), limit)
+        .await
+        .map_err(|e| format!("Failed to get continue reading: {}", e))
 }
 
 /// Get downloads with full media details
@@ -1316,4 +1590,113 @@ pub async fn start_logs_stream(app: tauri::AppHandle) -> Result<(), String> {
 pub async fn stop_logs_stream() -> Result<(), String> {
     LOGS_STREAMING.store(false, Ordering::SeqCst);
     Ok(())
+}
+
+// ==================== Chapter Download Commands ====================
+
+/// Start downloading a manga chapter
+#[tauri::command]
+pub async fn start_chapter_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    download_manager: State<'_, DownloadManager>,
+    media_id: String,
+    media_title: String,
+    chapter_id: String,
+    chapter_number: f64,
+    image_urls: Vec<String>,
+) -> Result<String, String> {
+    // Use the same downloads directory as anime downloads
+    let downloads_dir = PathBuf::from(download_manager.get_downloads_directory());
+
+    chapter_downloads::start_chapter_download(
+        state.database.pool(),
+        app,
+        downloads_dir,
+        &media_id,
+        &media_title,
+        &chapter_id,
+        chapter_number,
+        image_urls,
+    )
+    .await
+    .map_err(|e| format!("Failed to start chapter download: {}", e))
+}
+
+/// Get chapter download progress
+#[tauri::command]
+pub async fn get_chapter_download_progress(
+    state: State<'_, AppState>,
+    download_id: String,
+) -> Result<Option<chapter_downloads::ChapterDownloadProgress>, String> {
+    chapter_downloads::get_chapter_download_progress(state.database.pool(), &download_id)
+        .await
+        .map_err(|e| format!("Failed to get chapter download progress: {}", e))
+}
+
+/// Check if a chapter is downloaded
+#[tauri::command]
+pub async fn is_chapter_downloaded(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<bool, String> {
+    chapter_downloads::is_chapter_downloaded(state.database.pool(), &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to check chapter download status: {}", e))
+}
+
+/// Get downloaded chapter images (local paths)
+#[tauri::command]
+pub async fn get_downloaded_chapter_images(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<Vec<String>, String> {
+    chapter_downloads::get_downloaded_chapter_images(state.database.pool(), &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to get downloaded chapter images: {}", e))
+}
+
+/// Delete a chapter download
+#[tauri::command]
+pub async fn delete_chapter_download(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<(), String> {
+    chapter_downloads::delete_chapter_download(state.database.pool(), &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to delete chapter download: {}", e))
+}
+
+/// List all chapter downloads for a manga
+#[tauri::command]
+pub async fn list_chapter_downloads(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Vec<chapter_downloads::ChapterDownloadProgress>, String> {
+    chapter_downloads::list_chapter_downloads(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to list chapter downloads: {}", e))
+}
+
+/// Get all downloaded manga with chapter counts
+#[tauri::command]
+pub async fn get_downloaded_manga(
+    state: State<'_, AppState>,
+) -> Result<Vec<chapter_downloads::DownloadedManga>, String> {
+    chapter_downloads::get_all_downloaded_manga(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get downloaded manga: {}", e))
+}
+
+/// List ALL chapter downloads across all manga (for Download Manager)
+#[tauri::command]
+pub async fn list_all_chapter_downloads(
+    state: State<'_, AppState>,
+) -> Result<Vec<chapter_downloads::ChapterDownloadWithTitle>, String> {
+    chapter_downloads::list_all_chapter_downloads(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to list all chapter downloads: {}", e))
 }

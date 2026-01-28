@@ -142,3 +142,60 @@ pub struct TagsResult {
     #[serde(alias = "hasNextPage")]
     pub has_next_page: bool,
 }
+
+// ==================== Manga Types ====================
+
+/// Chapter information for manga
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Chapter {
+    pub id: String,
+    pub number: f32,
+    pub title: Option<String>,
+    pub thumbnail: Option<String>,
+    #[serde(alias = "releaseDate")]
+    pub release_date: Option<String>,
+}
+
+/// Single page/image in a chapter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChapterImage {
+    pub url: String,
+    pub page: u32,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// Collection of images for a chapter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChapterImages {
+    pub images: Vec<ChapterImage>,
+    #[serde(alias = "totalPages")]
+    pub total_pages: u32,
+    pub title: Option<String>,
+}
+
+/// Manga details with chapters instead of episodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MangaDetails {
+    pub id: String,
+    pub title: String,
+    #[serde(alias = "english_name")]
+    pub english_name: Option<String>,
+    #[serde(alias = "native_name")]
+    pub native_name: Option<String>,
+    #[serde(alias = "coverUrl")]
+    pub cover_url: Option<String>,
+    #[serde(alias = "trailerUrl")]
+    pub trailer_url: Option<String>,
+    pub description: Option<String>,
+    pub genres: Vec<String>,
+    pub status: Option<String>,
+    pub year: Option<u32>,
+    pub rating: Option<f32>,
+    pub chapters: Vec<Chapter>,
+    #[serde(rename = "type")]
+    pub media_type: Option<String>,
+    pub season: Option<Season>,
+    #[serde(alias = "totalChapters")]
+    pub total_chapters: Option<u32>,
+}

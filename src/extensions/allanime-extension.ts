@@ -38,7 +38,7 @@ const extensionObject = {
     const searchQuery = \`query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name thumbnail availableEpisodes description status score season __typename } } }\`;
 
     const variables = {
-      search: { allowAdult: false, allowUnknown: false, query: query },
+      search: { allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false, allowUnknown: false, query: query },
       limit: 40,
       page: page,
       translationType: "sub",
@@ -97,7 +97,7 @@ const extensionObject = {
 
       const variables = {
         search: {
-          allowAdult: false,
+          allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false,
           allowUnknown: false,
           genres: genres
         },
@@ -159,7 +159,7 @@ const extensionObject = {
       size: 20,
       dateRange: dateRange,
       page: page || 1,
-      allowAdult: false,
+      allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false,
       allowUnknown: false
     };
 
@@ -386,7 +386,7 @@ const extensionObject = {
         type: "anime",
         allowSameShow: true,
         page: 1,
-        allowAdult: false,
+        allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false,
         allowUnknown: false,
         dateAgo: parseInt(dateStr)
       }
