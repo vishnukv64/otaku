@@ -1,6 +1,14 @@
+/**
+ * Application Logs Route
+ *
+ * Real-time log viewer for debugging.
+ * Uses SSE (Tauri events) instead of polling for auto-refresh.
+ */
+
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useEffect, useState, useRef } from 'react'
-import { getAppLogs, clearAppLogs, getLogFilePath, LogEntry } from '../utils/tauri-commands'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { getAppLogs, clearAppLogs, getLogFilePath, startLogsStream, stopLogsStream, APP_LOGS_EVENT, type LogEntry } from '../utils/tauri-commands'
 import { ArrowLeft, RefreshCw, Trash2, FolderOpen, Download, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { invoke } from '@tauri-apps/api/core'
@@ -19,7 +27,7 @@ function LogsScreen() {
   const [logFilePath, setLogFilePath] = useState<string>('')
   const logsEndRef = useRef<HTMLDivElement>(null)
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     try {
       const entries = await getAppLogs(500)
       setLogs(entries)
@@ -29,7 +37,7 @@ function LogsScreen() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   const loadLogFilePath = async () => {
     try {
@@ -40,17 +48,45 @@ function LogsScreen() {
     }
   }
 
+  // Initial load
   useEffect(() => {
     loadLogs()
     loadLogFilePath()
-  }, [])
+  }, [loadLogs])
 
-  // Auto-refresh every 2 seconds when enabled
+  // SSE-based auto-refresh
   useEffect(() => {
     if (!autoRefresh) return
 
-    const interval = setInterval(loadLogs, 2000)
-    return () => clearInterval(interval)
+    let unlisten: UnlistenFn | null = null
+    let isMounted = true
+
+    const setup = async () => {
+      // Set up event listener for log updates
+      unlisten = await listen<LogEntry[]>(APP_LOGS_EVENT, (event) => {
+        if (isMounted) {
+          setLogs(event.payload)
+        }
+      })
+
+      // Start the logs stream
+      try {
+        await startLogsStream()
+      } catch (err) {
+        console.error('Failed to start logs stream:', err)
+      }
+    }
+
+    setup()
+
+    return () => {
+      isMounted = false
+      if (unlisten) {
+        unlisten()
+      }
+      // Stop the stream when auto-refresh is disabled
+      stopLogsStream().catch(console.error)
+    }
   }, [autoRefresh])
 
   // Scroll to bottom when new logs arrive
@@ -146,7 +182,7 @@ function LogsScreen() {
                   Application Logs
                 </h1>
                 <p className="text-sm text-[var(--color-text-tertiary)]">
-                  {logFilePath || 'Loading...'}
+                  {logFilePath || 'Loading...'} {autoRefresh && '(SSE enabled)'}
                 </p>
               </div>
             </div>

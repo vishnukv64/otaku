@@ -1,106 +1,24 @@
 /**
  * Download Status Hook
  *
- * Tracks active downloads and provides toast notifications
+ * Tracks active downloads and provides toast notifications.
+ * Uses Tauri events for real-time updates instead of polling.
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { listDownloads, type DownloadProgress } from '@/utils/tauri-commands'
 import type { ToastProps } from '@/components/ui/Toast'
+
+const DOWNLOAD_PROGRESS_EVENT = 'download-progress'
 
 export function useDownloadStatus() {
   const [downloads, setDownloads] = useState<DownloadProgress[]>([])
   const [toasts, setToasts] = useState<ToastProps[]>([])
+  const downloadsRef = useRef<Map<string, DownloadProgress>>(new Map())
   const completedIdsRef = useRef(new Set<string>())
-  const intervalRef = useRef<number | null>(null)
+  const failedIdsRef = useRef(new Set<string>())
   const addToastRef = useRef<(toast: Omit<ToastProps, 'onClose'>) => void>()
-
-  // Poll for download updates
-  useEffect(() => {
-    let isMounted = true
-    let isFirstLoad = true
-
-    const pollDownloads = async () => {
-      try {
-        const result = await listDownloads()
-
-        if (!isMounted) return
-
-        // On first load, populate completedIds with already-completed downloads
-        // to prevent showing duplicate notifications
-        if (isFirstLoad) {
-          result.forEach((download) => {
-            if (download.status === 'completed' || download.status === 'failed') {
-              completedIdsRef.current?.add(download.id)
-            }
-          })
-          isFirstLoad = false
-        }
-
-        // Check for newly completed downloads
-        result.forEach((download) => {
-          if (
-            download.status === 'completed' &&
-            !completedIdsRef.current?.has(download.id)
-          ) {
-            // Show success toast
-            addToastRef.current?.({
-              id: `completed-${download.id}`,
-              type: 'success',
-              title: 'Download Complete',
-              message: download.filename,
-              duration: 5000,
-            })
-            completedIdsRef.current?.add(download.id)
-          }
-
-          if (
-            download.status === 'failed' &&
-            !completedIdsRef.current?.has(download.id)
-          ) {
-            // Show error toast
-            addToastRef.current?.({
-              id: `failed-${download.id}`,
-              type: 'error',
-              title: 'Download Failed',
-              message: download.filename,
-              duration: 6000,
-            })
-            completedIdsRef.current?.add(download.id)
-          }
-        })
-
-        setDownloads(result)
-
-        // Check if there are any active downloads
-        const hasActiveDownloads = result.some(
-          d => d.status === 'downloading' || d.status === 'queued'
-        )
-
-        // Stop polling if no active downloads
-        if (!hasActiveDownloads && intervalRef.current) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
-        }
-      } catch (error) {
-        console.error('Failed to poll downloads:', error)
-      }
-    }
-
-    // Initial fetch
-    pollDownloads()
-
-    // Set up polling interval (will be stopped if no active downloads)
-    intervalRef.current = setInterval(pollDownloads, 3000)
-
-    return () => {
-      isMounted = false
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
-  }, [])
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -117,6 +35,78 @@ export function useDownloadStatus() {
   useEffect(() => {
     addToastRef.current = addToast
   }, [addToast])
+
+  // Listen for download events
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null
+    let isMounted = true
+
+    const setupListener = async () => {
+      // Initial fetch to populate existing downloads and mark completed ones
+      try {
+        const existingDownloads = await listDownloads()
+        if (!isMounted) return
+
+        existingDownloads.forEach((download) => {
+          downloadsRef.current.set(download.id, download)
+          // Mark already completed/failed downloads to avoid duplicate toasts
+          if (download.status === 'completed') {
+            completedIdsRef.current.add(download.id)
+          }
+          if (download.status === 'failed') {
+            failedIdsRef.current.add(download.id)
+          }
+        })
+        setDownloads(existingDownloads)
+      } catch (error) {
+        console.error('Failed to fetch initial downloads:', error)
+      }
+
+      // Listen for real-time updates
+      unlisten = await listen<DownloadProgress>(DOWNLOAD_PROGRESS_EVENT, (event) => {
+        if (!isMounted) return
+
+        const progress = event.payload
+        downloadsRef.current.set(progress.id, progress)
+
+        // Show toast for newly completed downloads
+        if (progress.status === 'completed' && !completedIdsRef.current.has(progress.id)) {
+          completedIdsRef.current.add(progress.id)
+          addToastRef.current?.({
+            id: `completed-${progress.id}`,
+            type: 'success',
+            title: 'Download Complete',
+            message: `Episode ${progress.episode_number} downloaded`,
+            duration: 5000,
+          })
+        }
+
+        // Show toast for newly failed downloads
+        if (progress.status === 'failed' && !failedIdsRef.current.has(progress.id)) {
+          failedIdsRef.current.add(progress.id)
+          addToastRef.current?.({
+            id: `failed-${progress.id}`,
+            type: 'error',
+            title: 'Download Failed',
+            message: `Episode ${progress.episode_number}: ${progress.error_message || 'Unknown error'}`,
+            duration: 6000,
+          })
+        }
+
+        // Update state with all downloads
+        setDownloads(Array.from(downloadsRef.current.values()))
+      })
+    }
+
+    setupListener()
+
+    return () => {
+      isMounted = false
+      if (unlisten) {
+        unlisten()
+      }
+    }
+  }, [])
 
   const activeDownloads = downloads.filter(
     (d) => d.status === 'downloading' || d.status === 'queued'

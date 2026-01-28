@@ -16,6 +16,7 @@ use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sqlx::{SqlitePool, Row};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -45,12 +46,16 @@ pub struct DownloadProgress {
     pub error_message: Option<String>,
 }
 
+/// Event name for download progress updates
+pub const DOWNLOAD_PROGRESS_EVENT: &str = "download-progress";
+
 pub struct DownloadManager {
     downloads: Arc<RwLock<HashMap<String, DownloadProgress>>>,
     active_downloads: Arc<Mutex<usize>>,
     max_concurrent: usize,
     download_dir: PathBuf,
     db_pool: Option<Arc<SqlitePool>>,
+    app_handle: Option<AppHandle>,
 }
 
 impl DownloadManager {
@@ -61,6 +66,7 @@ impl DownloadManager {
             max_concurrent: 3,
             download_dir,
             db_pool: None,
+            app_handle: None,
         }
     }
 
@@ -68,6 +74,21 @@ impl DownloadManager {
     pub fn with_database(mut self, pool: Arc<SqlitePool>) -> Self {
         self.db_pool = Some(pool);
         self
+    }
+
+    /// Set the app handle for emitting events
+    pub fn with_app_handle(mut self, handle: AppHandle) -> Self {
+        self.app_handle = Some(handle);
+        self
+    }
+
+    /// Emit a download progress event to the frontend
+    fn emit_progress(&self, progress: &DownloadProgress) {
+        if let Some(ref handle) = self.app_handle {
+            if let Err(e) = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress) {
+                log::error!("Failed to emit download progress event: {}", e);
+            }
+        }
     }
 
     /// Load downloads from database on startup
@@ -259,6 +280,9 @@ impl DownloadManager {
         downloads.insert(id.clone(), progress.clone());
         drop(downloads);
 
+        // Emit queued event
+        self.emit_progress(&progress);
+
         log::debug!("Queued download: {}", id);
 
         // Start download task
@@ -273,6 +297,7 @@ impl DownloadManager {
         let active_downloads = self.active_downloads.clone();
         let max_concurrent = self.max_concurrent;
         let db_pool = self.db_pool.clone();
+        let app_handle = self.app_handle.clone();
 
         tokio::spawn(async move {
             // Wait for available slot
@@ -291,11 +316,16 @@ impl DownloadManager {
                 *active += 1;
             }
 
-            // Update status to downloading
+            // Update status to downloading and emit event
             {
                 let mut downloads_map = downloads.write().await;
                 if let Some(progress) = downloads_map.get_mut(&download_id) {
                     progress.status = DownloadStatus::Downloading;
+
+                    // Emit event
+                    if let Some(ref handle) = app_handle {
+                        let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
+                    }
 
                     // Save to database
                     if let Some(pool) = &db_pool {
@@ -305,7 +335,12 @@ impl DownloadManager {
             }
 
             // Perform download
-            let result = Self::perform_download(download_id.clone(), downloads.clone(), db_pool.clone()).await;
+            let result = Self::perform_download(
+                download_id.clone(),
+                downloads.clone(),
+                db_pool.clone(),
+                app_handle.clone(),
+            ).await;
 
             // Release slot
             {
@@ -313,7 +348,7 @@ impl DownloadManager {
                 *active -= 1;
             }
 
-            // Update final status
+            // Update final status and emit event
             {
                 let mut downloads_map = downloads.write().await;
                 if let Some(progress) = downloads_map.get_mut(&download_id) {
@@ -340,6 +375,11 @@ impl DownloadManager {
                             progress.error_message = Some(e.to_string());
                             log::error!("Download failed: {} - {}", download_id, e);
                         }
+                    }
+
+                    // Emit final status event
+                    if let Some(ref handle) = app_handle {
+                        let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
                     }
 
                     // Save final status to database
@@ -402,6 +442,7 @@ impl DownloadManager {
         download_id: String,
         downloads: Arc<RwLock<HashMap<String, DownloadProgress>>>,
         db_pool: Option<Arc<SqlitePool>>,
+        app_handle: Option<AppHandle>,
     ) -> Result<()> {
         // Get download info
         let (url, file_path) = {
@@ -448,7 +489,9 @@ impl DownloadManager {
         let mut downloaded: u64 = 0;
         let start_time = std::time::Instant::now();
         let mut last_db_save: u64 = 0;
+        let mut last_event_time = std::time::Instant::now();
         const DB_SAVE_INTERVAL: u64 = 5 * 1024 * 1024; // Save to DB every 5MB
+        const EVENT_THROTTLE_MS: u128 = 500; // Emit events at most every 500ms
 
         use futures_util::StreamExt;
 
@@ -479,6 +522,7 @@ impl DownloadManager {
 
             // Update progress
             let should_save_db = downloaded - last_db_save >= DB_SAVE_INTERVAL;
+            let should_emit_event = last_event_time.elapsed().as_millis() >= EVENT_THROTTLE_MS;
             {
                 let mut downloads_map = downloads.write().await;
                 if let Some(progress) = downloads_map.get_mut(&download_id) {
@@ -486,6 +530,14 @@ impl DownloadManager {
                     progress.speed = speed;
                     if total_bytes > 0 {
                         progress.percentage = (downloaded as f32 / total_bytes as f32) * 100.0;
+                    }
+
+                    // Emit progress event (throttled)
+                    if should_emit_event {
+                        if let Some(ref handle) = app_handle {
+                            let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
+                        }
+                        last_event_time = std::time::Instant::now();
                     }
 
                     // Periodically save to database
@@ -522,6 +574,9 @@ impl DownloadManager {
         if let Some(progress) = downloads.get_mut(download_id) {
             progress.status = DownloadStatus::Cancelled;
             log::debug!("Cancelled download: {}", download_id);
+
+            // Emit event
+            self.emit_progress(progress);
 
             // Save to database
             self.save_to_database(progress).await.ok();

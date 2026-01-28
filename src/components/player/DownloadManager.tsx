@@ -4,10 +4,13 @@
  * Modal displaying all active and completed downloads with progress tracking
  */
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy } from 'lucide-react'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { listDownloads, cancelDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, type DownloadProgress } from '@/utils/tauri-commands'
 import toast from 'react-hot-toast'
+
+const DOWNLOAD_PROGRESS_EVENT = 'download-progress'
 
 interface DownloadManagerProps {
   isOpen: boolean
@@ -26,7 +29,6 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
   const [totalStorage, setTotalStorage] = useState(0)
   const [downloadsPath, setDownloadsPath] = useState<string>('')
   const [activeTab, setActiveTab] = useState<string>('all')
-  const intervalRef = useRef<number | null>(null)
 
   // Load static data once on mount
   useEffect(() => {
@@ -48,32 +50,24 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     loadStaticData()
   }, [isOpen])
 
-  // Load downloads and set up polling
+  // Load downloads and listen for real-time events
   useEffect(() => {
     if (!isOpen) return
 
     let isMounted = true
+    let unlisten: UnlistenFn | null = null
+    const downloadsMap = new Map<string, DownloadProgress>()
 
-    const fetchDownloads = async () => {
+    const fetchInitialDownloads = async () => {
       try {
         const downloadsList = await listDownloads()
         if (isMounted) {
+          downloadsList.forEach(d => downloadsMap.set(d.id, d))
           setDownloads(downloadsList)
 
           if (downloadsList.length > 0) {
             const storage = await getTotalStorageUsed()
             if (isMounted) setTotalStorage(storage)
-          }
-
-          // Check if we need to poll
-          const hasActiveDownloads = downloadsList.some(
-            d => d.status === 'downloading' || d.status === 'queued'
-          )
-
-          // Stop polling if no active downloads
-          if (!hasActiveDownloads && intervalRef.current) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
           }
         }
       } catch (error) {
@@ -83,19 +77,33 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       }
     }
 
+    const setupEventListener = async () => {
+      unlisten = await listen<DownloadProgress>(DOWNLOAD_PROGRESS_EVENT, (event) => {
+        if (!isMounted) return
+
+        const progress = event.payload
+        downloadsMap.set(progress.id, progress)
+        setDownloads(Array.from(downloadsMap.values()))
+
+        // Update storage when a download completes
+        if (progress.status === 'completed') {
+          getTotalStorageUsed().then(storage => {
+            if (isMounted) setTotalStorage(storage)
+          })
+        }
+      })
+    }
+
     // Initial load
     setLoading(true)
-    fetchDownloads()
-
-    // Set up polling interval (will be stopped if no active downloads)
-    intervalRef.current = setInterval(fetchDownloads, 3000)
+    fetchInitialDownloads()
+    setupEventListener()
 
     // Cleanup
     return () => {
       isMounted = false
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
+      if (unlisten) {
+        unlisten()
       }
     }
   }, [isOpen])

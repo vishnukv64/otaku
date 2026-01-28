@@ -15,6 +15,7 @@ import toast from 'react-hot-toast'
 import type { SearchResult, MediaDetails } from '@/types/extension'
 import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, type MediaEntry, type WatchHistory } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
+import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { MediaCard } from './MediaCard'
 
 interface MediaDetailModalProps {
@@ -45,6 +46,20 @@ export function MediaDetailModal({
   const [_relatedLoading, setRelatedLoading] = useState(false)
   const [watchProgress, setWatchProgress] = useState<WatchHistory | null>(null)
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
+
+  // Use event-based download tracking instead of polling
+  // Note: Toast notifications are handled globally by TopNav's useDownloadStatus hook
+  const { downloadingEpisodes } = useDownloadEvents({
+    mediaId: media.id,
+    onComplete: (download) => {
+      // Add to downloaded episodes when a download completes
+      setDownloadedEpisodes(prev => {
+        const newSet = new Set(prev)
+        newSet.add(download.episode_number)
+        return newSet
+      })
+    },
+  })
 
   const handleWatch = (episodeId: string) => {
     // Close modal first, then navigate to watch page
@@ -836,8 +851,17 @@ export function MediaDetailModal({
                             EP {episode.number}
                           </div>
 
-                          {/* Downloaded badge */}
-                          {downloadedEpisodes.has(episode.number) && (
+                          {/* Download status badge - Downloading takes priority over Downloaded */}
+                          {downloadingEpisodes.has(episode.number) ? (
+                            <div className="absolute top-2 right-2 px-2.5 py-1 bg-blue-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1.5">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>
+                                {downloadingEpisodes.get(episode.number)!.status === 'queued'
+                                  ? 'Queued'
+                                  : `${Math.round(downloadingEpisodes.get(episode.number)!.percentage)}%`}
+                              </span>
+                            </div>
+                          ) : downloadedEpisodes.has(episode.number) && (
                             <div className="absolute top-2 right-2 px-2.5 py-1 bg-green-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1">
                               <CheckCircle className="w-3 h-3" />
                               Downloaded

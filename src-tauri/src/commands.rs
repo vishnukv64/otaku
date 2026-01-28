@@ -912,8 +912,19 @@ pub async fn get_proxy_video_url(
 
 // ==================== System Stats Commands ====================
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::Emitter;
+
+/// Event names for streaming
+pub const SYSTEM_STATS_EVENT: &str = "system-stats";
+pub const APP_LOGS_EVENT: &str = "app-logs";
+
+/// Global flags for streaming control
+static STATS_STREAMING: AtomicBool = AtomicBool::new(false);
+static LOGS_STREAMING: AtomicBool = AtomicBool::new(false);
+
 /// System statistics for developer debugging
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct SystemStats {
     // Memory (in bytes)
     pub memory_used: u64,
@@ -1012,10 +1023,106 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
     })
 }
 
+/// Start streaming system stats via events (emits every second)
+#[tauri::command]
+pub async fn start_stats_stream(app: tauri::AppHandle) -> Result<(), String> {
+    // Check if already streaming
+    if STATS_STREAMING.swap(true, Ordering::SeqCst) {
+        return Ok(()); // Already streaming
+    }
+
+    tokio::spawn(async move {
+        use sysinfo::{System, Pid, Disks};
+
+        while STATS_STREAMING.load(Ordering::SeqCst) {
+            // Collect stats
+            let mut sys = System::new();
+            sys.refresh_cpu_usage();
+            sys.refresh_memory();
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+            let cpu_usage = sys.cpus().iter()
+                .map(|cpu| cpu.cpu_usage())
+                .sum::<f32>() / sys.cpus().len().max(1) as f32;
+
+            let cpu_count = sys.cpus().len();
+            let memory_total = sys.total_memory();
+            let memory_used = sys.used_memory();
+            let memory_percent = if memory_total > 0 {
+                (memory_used as f32 / memory_total as f32) * 100.0
+            } else {
+                0.0
+            };
+
+            let current_pid = Pid::from_u32(std::process::id());
+            let (process_memory, process_cpu, thread_count) = if let Some(process) = sys.process(current_pid) {
+                (
+                    process.memory(),
+                    process.cpu_usage(),
+                    std::thread::available_parallelism()
+                        .map(|p| p.get())
+                        .unwrap_or(1)
+                )
+            } else {
+                (0, 0.0, 1)
+            };
+
+            let disks = Disks::new_with_refreshed_list();
+            let (disk_used, disk_total) = disks.iter()
+                .find(|d| d.mount_point() == std::path::Path::new("/"))
+                .or_else(|| disks.first())
+                .map(|d| {
+                    let total = d.total_space();
+                    let available = d.available_space();
+                    let used = total.saturating_sub(available);
+                    (used, total)
+                })
+                .unwrap_or((0, 0));
+
+            let disk_percent = if disk_total > 0 {
+                (disk_used as f32 / disk_total as f32) * 100.0
+            } else {
+                0.0
+            };
+
+            let stats = SystemStats {
+                memory_used,
+                memory_total,
+                memory_percent,
+                cpu_usage,
+                cpu_count,
+                process_memory,
+                process_cpu,
+                thread_count,
+                disk_used,
+                disk_total,
+                disk_percent,
+            };
+
+            // Emit event
+            if let Err(e) = app.emit(SYSTEM_STATS_EVENT, &stats) {
+                log::error!("Failed to emit stats event: {}", e);
+            }
+
+            // Wait 1 second before next update
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop streaming system stats
+#[tauri::command]
+pub async fn stop_stats_stream() -> Result<(), String> {
+    STATS_STREAMING.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
 // ==================== Log Commands ====================
 
 /// Log entry structure
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
@@ -1105,4 +1212,92 @@ pub async fn get_log_file_path(app: tauri::AppHandle) -> Result<String, String> 
 
     let log_file = log_dir.join("otaku.log");
     Ok(log_file.to_string_lossy().to_string())
+}
+
+/// Start streaming logs via events (emits every 2 seconds)
+#[tauri::command]
+pub async fn start_logs_stream(app: tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::AtomicUsize;
+
+    // Check if already streaming
+    if LOGS_STREAMING.swap(true, Ordering::SeqCst) {
+        return Ok(()); // Already streaming
+    }
+
+    // Track last known line count to detect new logs
+    static LAST_LINE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    tokio::spawn(async move {
+        use std::io::{BufRead, BufReader};
+        use std::fs::File;
+
+        let log_dir = match app.path().app_log_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::error!("Failed to get log directory: {}", e);
+                LOGS_STREAMING.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let log_file = log_dir.join("otaku.log");
+
+        while LOGS_STREAMING.load(Ordering::SeqCst) {
+            if log_file.exists() {
+                if let Ok(file) = File::open(&log_file) {
+                    let reader = BufReader::new(file);
+                    let all_lines: Vec<String> = reader.lines()
+                        .filter_map(|l| l.ok())
+                        .collect();
+
+                    let current_count = all_lines.len();
+                    let last_count = LAST_LINE_COUNT.load(Ordering::SeqCst);
+
+                    // Only emit if there are new logs or first run
+                    if current_count != last_count || last_count == 0 {
+                        LAST_LINE_COUNT.store(current_count, Ordering::SeqCst);
+
+                        // Get last 100 lines
+                        let start = current_count.saturating_sub(100);
+                        let recent_lines = &all_lines[start..];
+
+                        let entries: Vec<LogEntry> = recent_lines.iter()
+                            .map(|line| {
+                                if let Some(bracket_end) = line.find(']') {
+                                    let timestamp = line[1..bracket_end].to_string();
+                                    let rest = &line[bracket_end + 1..];
+
+                                    if let Some(level_end) = rest.find(']') {
+                                        let level = rest[1..level_end].to_string();
+                                        let message = rest[level_end + 1..].trim().to_string();
+                                        return LogEntry { timestamp, level, message };
+                                    }
+                                }
+                                LogEntry {
+                                    timestamp: String::new(),
+                                    level: "INFO".to_string(),
+                                    message: line.clone(),
+                                }
+                            })
+                            .collect();
+
+                        if let Err(e) = app.emit(APP_LOGS_EVENT, &entries) {
+                            log::error!("Failed to emit logs event: {}", e);
+                        }
+                    }
+                }
+            }
+
+            // Wait 2 seconds before checking again
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop streaming logs
+#[tauri::command]
+pub async fn stop_logs_stream() -> Result<(), String> {
+    LOGS_STREAMING.store(false, Ordering::SeqCst);
+    Ok(())
 }

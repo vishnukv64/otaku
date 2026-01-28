@@ -599,3 +599,39 @@ export async function getLogFilePath(): Promise<string> {
   return await invoke('get_log_file_path')
 }
 
+// ==================== Streaming Commands ====================
+
+/** Event name for system stats stream */
+export const SYSTEM_STATS_EVENT = 'system-stats'
+
+/** Event name for app logs stream */
+export const APP_LOGS_EVENT = 'app-logs'
+
+/**
+ * Start streaming system stats via events (emits every second)
+ */
+export async function startStatsStream(): Promise<void> {
+  return await invoke('start_stats_stream')
+}
+
+/**
+ * Stop streaming system stats
+ */
+export async function stopStatsStream(): Promise<void> {
+  return await invoke('stop_stats_stream')
+}
+
+/**
+ * Start streaming logs via events (emits every 2 seconds)
+ */
+export async function startLogsStream(): Promise<void> {
+  return await invoke('start_logs_stream')
+}
+
+/**
+ * Stop streaming logs
+ */
+export async function stopLogsStream(): Promise<void> {
+  return await invoke('stop_logs_stream')
+}
+

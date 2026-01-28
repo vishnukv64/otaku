@@ -6,11 +6,14 @@
  * - Memory usage (system & app)
  * - Storage usage
  * - Thread count
+ *
+ * Uses SSE (Tauri events) instead of polling for real-time updates.
  */
 
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, useCallback } from 'react'
-import { getSystemStats, type SystemStats } from '@/utils/tauri-commands'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { startStatsStream, stopStatsStream, SYSTEM_STATS_EVENT, type SystemStats } from '@/utils/tauri-commands'
 import { invoke } from '@tauri-apps/api/core'
 import {
   Cpu,
@@ -53,7 +56,7 @@ function StatsPage() {
     diskPercent: [],
   })
   const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
-  const [isPolling, setIsPolling] = useState(true)
+  const [isStreaming, setIsStreaming] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // Format bytes to human readable
@@ -65,35 +68,7 @@ function StatsPage() {
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }, [])
 
-  // Fetch stats
-  const fetchStats = useCallback(async () => {
-    try {
-      const newStats = await getSystemStats()
-      setStats(newStats)
-      setError(null)
-
-      // Update history (keep last HISTORY_SIZE entries)
-      setHistory((prev) => ({
-        cpuUsage: [...prev.cpuUsage, newStats.cpu_usage].slice(-HISTORY_SIZE),
-        memoryPercent: [...prev.memoryPercent, newStats.memory_percent].slice(
-          -HISTORY_SIZE
-        ),
-        processMemory: [...prev.processMemory, newStats.process_memory].slice(
-          -HISTORY_SIZE
-        ),
-        processCpu: [...prev.processCpu, newStats.process_cpu].slice(
-          -HISTORY_SIZE
-        ),
-        diskPercent: [...prev.diskPercent, newStats.disk_percent].slice(
-          -HISTORY_SIZE
-        ),
-      }))
-    } catch (err) {
-      setError(`Failed to fetch stats: ${err}`)
-    }
-  }, [])
-
-  // Fetch storage usage
+  // Fetch storage usage (less frequent, can stay as simple call)
   const fetchStorageUsage = useCallback(async () => {
     try {
       const usage = await invoke<StorageUsage>('get_storage_usage')
@@ -103,27 +78,78 @@ function StatsPage() {
     }
   }, [])
 
-  // Start polling - use setTimeout for initial fetch to avoid setState in effect body
-  useEffect(() => {
-    // Use setTimeout to defer initial fetch, avoiding synchronous setState in effect
-    const initialFetchTimeout = setTimeout(() => {
-      fetchStats()
-      fetchStorageUsage()
-    }, 0)
+  // Handle incoming stats from SSE
+  const handleStatsUpdate = useCallback((newStats: SystemStats) => {
+    setStats(newStats)
+    setError(null)
 
-    if (!isPolling) {
-      return () => clearTimeout(initialFetchTimeout)
+    // Update history (keep last HISTORY_SIZE entries)
+    setHistory((prev) => ({
+      cpuUsage: [...prev.cpuUsage, newStats.cpu_usage].slice(-HISTORY_SIZE),
+      memoryPercent: [...prev.memoryPercent, newStats.memory_percent].slice(-HISTORY_SIZE),
+      processMemory: [...prev.processMemory, newStats.process_memory].slice(-HISTORY_SIZE),
+      processCpu: [...prev.processCpu, newStats.process_cpu].slice(-HISTORY_SIZE),
+      diskPercent: [...prev.diskPercent, newStats.disk_percent].slice(-HISTORY_SIZE),
+    }))
+  }, [])
+
+  // Set up SSE listener for stats
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null
+    let isMounted = true
+    let storageInterval: ReturnType<typeof setInterval> | null = null
+
+    const setup = async () => {
+      // Fetch initial storage usage
+      fetchStorageUsage()
+
+      // Set up event listener
+      unlisten = await listen<SystemStats>(SYSTEM_STATS_EVENT, (event) => {
+        if (isMounted) {
+          handleStatsUpdate(event.payload)
+        }
+      })
+
+      // Start the stream if enabled
+      if (isStreaming) {
+        try {
+          await startStatsStream()
+        } catch (err) {
+          if (isMounted) {
+            setError(`Failed to start stats stream: ${err}`)
+          }
+        }
+      }
+
+      // Poll storage usage every 5 seconds (small data, doesn't need SSE)
+      storageInterval = setInterval(fetchStorageUsage, 5000)
     }
 
-    const interval = setInterval(fetchStats, 1000)
-    const storageInterval = setInterval(fetchStorageUsage, 5000)
+    setup()
 
     return () => {
-      clearTimeout(initialFetchTimeout)
-      clearInterval(interval)
-      clearInterval(storageInterval)
+      isMounted = false
+      if (unlisten) {
+        unlisten()
+      }
+      if (storageInterval) {
+        clearInterval(storageInterval)
+      }
+      // Stop the stream when component unmounts
+      stopStatsStream().catch(console.error)
     }
-  }, [fetchStats, fetchStorageUsage, isPolling])
+  }, [fetchStorageUsage, handleStatsUpdate, isStreaming])
+
+  // Toggle streaming on/off
+  const toggleStreaming = async () => {
+    if (isStreaming) {
+      await stopStatsStream()
+      setIsStreaming(false)
+    } else {
+      await startStatsStream()
+      setIsStreaming(true)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[var(--color-background)] px-4 py-8">
@@ -142,17 +168,17 @@ function StatsPage() {
                 Developer Stats
               </h1>
               <p className="text-[var(--color-text-secondary)] mt-1">
-                Real-time system metrics for debugging
+                Real-time system metrics via SSE
               </p>
             </div>
           </div>
 
           <button
-            onClick={() => setIsPolling(!isPolling)}
+            onClick={toggleStreaming}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors
               ${
-                isPolling
+                isStreaming
                   ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                   : 'bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
               }
@@ -160,9 +186,9 @@ function StatsPage() {
           >
             <RefreshCw
               size={16}
-              className={isPolling ? 'animate-spin' : ''}
+              className={isStreaming ? 'animate-spin' : ''}
             />
-            {isPolling ? 'Live' : 'Paused'}
+            {isStreaming ? 'Live' : 'Paused'}
           </button>
         </div>
 

@@ -216,7 +216,8 @@ pub fn run() {
         }
 
         let download_manager = DownloadManager::new(downloads_dir.clone())
-          .with_database(db_pool);
+          .with_database(db_pool)
+          .with_app_handle(app_handle.clone());
 
         // Load downloads from database (non-fatal if fails)
         if let Err(e) = download_manager.load_from_database().await {
@@ -299,10 +300,14 @@ pub fn run() {
       commands::get_proxy_video_url,
       // System Stats
       commands::get_system_stats,
+      commands::start_stats_stream,
+      commands::stop_stats_stream,
       // Logs
       commands::get_app_logs,
       commands::clear_app_logs,
       commands::get_log_file_path,
+      commands::start_logs_stream,
+      commands::stop_logs_stream,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
