@@ -8,6 +8,7 @@ import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
+import { useMediaStatus } from '@/hooks/useMediaStatus'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -24,6 +25,7 @@ const EXTENSION_CODE = ALLANIME_EXTENSION
 function AnimeScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
+  const { getStatus, refresh: refreshStatus } = useMediaStatus()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
@@ -319,6 +321,7 @@ function AnimeScreen() {
                     key={item.id}
                     media={item}
                     onClick={() => setSelectedMedia(item)}
+                    status={getStatus(item.id)}
                   />
                 ))}
               </div>
@@ -370,6 +373,7 @@ function AnimeScreen() {
                     key={item.id}
                     media={item}
                     onClick={() => setSelectedMedia(item)}
+                    status={getStatus(item.id)}
                   />
                 ))}
               </div>
@@ -402,7 +406,11 @@ function AnimeScreen() {
           media={selectedMedia}
           extensionId={extensionId}
           isOpen={true}
-          onClose={() => setSelectedMedia(null)}
+          onClose={() => {
+            setSelectedMedia(null)
+            // Refresh status to update badges if user changed library/favorite status
+            refreshStatus()
+          }}
           onMediaChange={setSelectedMedia}
         />
       )}

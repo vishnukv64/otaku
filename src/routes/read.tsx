@@ -250,6 +250,8 @@ function ReadPage() {
             _chapterTitle={chapterImages.title}
             currentChapter={currentChapter?.number}
             totalChapters={details?.chapters.length}
+            hasNextChapter={currentChapterIndex >= 0 && currentChapterIndex < (details?.chapters.length ?? 0) - 1}
+            hasPreviousChapter={currentChapterIndex > 0}
             chapters={details?.chapters}
             onNextChapter={handleNextChapter}
             onPreviousChapter={handlePreviousChapter}

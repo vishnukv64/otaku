@@ -504,28 +504,6 @@ function SettingsScreen() {
             </span>
           </SettingRow>
 
-          <SettingRow
-            label="Source Code"
-            description="View the source code on GitHub"
-          >
-            <a
-              href="https://github.com/vishnukv64/otaku"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="
-                bg-[var(--color-surface-subtle)]
-                hover:bg-[var(--color-surface-hover)]
-                text-[var(--color-text-primary)]
-                rounded-lg
-                px-4
-                py-2
-                font-medium
-                transition-colors
-              "
-            >
-              View on GitHub
-            </a>
-          </SettingRow>
         </SettingSection>
       </div>
     </div>

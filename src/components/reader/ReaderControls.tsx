@@ -39,6 +39,7 @@ interface ReaderControlsProps {
   onGoBack: () => void
 
   // Display options
+  readingMode?: 'single' | 'double' | 'vertical' | 'webtoon'
   readingDirection?: 'ltr' | 'rtl'
   showControls: boolean
   className?: string
@@ -60,11 +61,15 @@ export function ReaderControls({
   onOpenSettings,
   onOpenChapterList,
   onGoBack,
+  readingMode = 'single',
   readingDirection = 'ltr',
   showControls,
   className,
 }: ReaderControlsProps) {
   if (!showControls) return null
+
+  // In vertical/webtoon mode, page buttons are disabled (user scrolls instead)
+  const isScrollMode = readingMode === 'vertical' || readingMode === 'webtoon'
 
   return (
     <>
@@ -90,27 +95,35 @@ export function ReaderControls({
 
           {/* Center: Chapter info */}
           <div className="flex items-center gap-4 text-white">
-            {hasPreviousChapter && (
-              <button
-                onClick={onPreviousChapter}
-                className="p-2 rounded-md hover:bg-white/20 transition-colors"
-                title="Previous Chapter"
-              >
-                <SkipBack className="w-5 h-5" />
-              </button>
-            )}
+            <button
+              onClick={hasPreviousChapter ? onPreviousChapter : undefined}
+              disabled={!hasPreviousChapter}
+              className={cn(
+                'p-2 rounded-md transition-colors',
+                hasPreviousChapter
+                  ? 'hover:bg-white/20'
+                  : 'opacity-40 cursor-not-allowed'
+              )}
+              title={hasPreviousChapter ? 'Previous Chapter' : 'No previous chapter'}
+            >
+              <SkipBack className="w-5 h-5" />
+            </button>
             <span className="text-sm font-medium">
               Chapter {currentChapterNumber || '-'}
             </span>
-            {hasNextChapter && (
-              <button
-                onClick={onNextChapter}
-                className="p-2 rounded-md hover:bg-white/20 transition-colors"
-                title="Next Chapter"
-              >
-                <SkipForward className="w-5 h-5" />
-              </button>
-            )}
+            <button
+              onClick={hasNextChapter ? onNextChapter : undefined}
+              disabled={!hasNextChapter}
+              className={cn(
+                'p-2 rounded-md transition-colors',
+                hasNextChapter
+                  ? 'hover:bg-white/20'
+                  : 'opacity-40 cursor-not-allowed'
+              )}
+              title={hasNextChapter ? 'Next Chapter' : 'No next chapter'}
+            >
+              <SkipForward className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Right: Actions */}
@@ -166,32 +179,37 @@ export function ReaderControls({
           {/* Page navigation buttons */}
           <div className="flex items-center justify-between">
             <button
-              onClick={readingDirection === 'rtl' ? onNextPage : onPreviousPage}
-              disabled={readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1}
+              onClick={isScrollMode ? undefined : (readingDirection === 'rtl' ? onNextPage : onPreviousPage)}
+              disabled={isScrollMode || (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)}
               className={cn(
                 'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
-                (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)
+                isScrollMode || (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)
                   ? 'opacity-50 cursor-not-allowed'
                   : 'hover:bg-white/20'
               )}
+              title={isScrollMode ? 'Scroll to navigate' : 'Previous page'}
             >
               <ChevronLeft className="w-5 h-5" />
               <span className="text-sm hidden sm:inline">Previous</span>
             </button>
 
-            <div className="text-white text-sm font-medium">
-              Page {currentPage} of {totalPages}
+            <div className="text-white text-sm font-medium flex flex-col items-center">
+              <span>Page {currentPage} of {totalPages}</span>
+              {isScrollMode && (
+                <span className="text-xs text-white/60">Scroll to read</span>
+              )}
             </div>
 
             <button
-              onClick={readingDirection === 'rtl' ? onPreviousPage : onNextPage}
-              disabled={readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages}
+              onClick={isScrollMode ? undefined : (readingDirection === 'rtl' ? onPreviousPage : onNextPage)}
+              disabled={isScrollMode || (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)}
               className={cn(
                 'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
-                (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)
+                isScrollMode || (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)
                   ? 'opacity-50 cursor-not-allowed'
                   : 'hover:bg-white/20'
               )}
+              title={isScrollMode ? 'Scroll to navigate' : 'Next page'}
             >
               <span className="text-sm hidden sm:inline">Next</span>
               <ChevronRight className="w-5 h-5" />

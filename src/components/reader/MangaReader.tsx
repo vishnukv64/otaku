@@ -30,6 +30,8 @@ interface MangaReaderProps {
   _chapterTitle?: string // For display purposes (future use)
   currentChapter?: number
   totalChapters?: number
+  hasNextChapter?: boolean
+  hasPreviousChapter?: boolean
   chapters?: Chapter[]
   onNextChapter?: () => void
   onPreviousChapter?: () => void
@@ -45,6 +47,8 @@ export function MangaReader({
   chapterId,
   currentChapter,
   totalChapters,
+  hasNextChapter = false,
+  hasPreviousChapter = false,
   chapters = [],
   onNextChapter,
   onPreviousChapter,
@@ -95,9 +99,9 @@ export function MangaReader({
   const [chapterListOpen, setChapterListOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Check if we can navigate to adjacent chapters
-  const canGoToPreviousChapter = !!(onPreviousChapter && currentChapter && currentChapter > 1)
-  const canGoToNextChapter = !!(onNextChapter && currentChapter && totalChapters && currentChapter < totalChapters)
+  // Check if we can navigate to adjacent chapters (use props passed from parent)
+  const canGoToPreviousChapter = !!(onPreviousChapter && hasPreviousChapter)
+  const canGoToNextChapter = !!(onNextChapter && hasNextChapter)
 
   // Wrapper for next page that handles chapter boundary
   const handleNextPage = useCallback(() => {
@@ -237,13 +241,13 @@ export function MangaReader({
           break
         case 'n':
         case 'N':
-          if (onNextChapter && currentChapter && totalChapters && currentChapter < totalChapters) {
+          if (canGoToNextChapter && onNextChapter) {
             onNextChapter()
           }
           break
         case 'p':
         case 'P':
-          if (onPreviousChapter && currentChapter && currentChapter > 1) {
+          if (canGoToPreviousChapter && onPreviousChapter) {
             onPreviousChapter()
           }
           break
@@ -271,8 +275,8 @@ export function MangaReader({
     showControls,
     isFullscreen,
     totalPages,
-    currentChapter,
-    totalChapters,
+    canGoToNextChapter,
+    canGoToPreviousChapter,
     handleNextPage,
     handlePreviousPage,
     setCurrentPage,
@@ -356,10 +360,8 @@ export function MangaReader({
     if (
       settings.autoAdvanceChapter &&
       currentPage >= totalPages &&
-      onNextChapter &&
-      currentChapter &&
-      totalChapters &&
-      currentChapter < totalChapters
+      canGoToNextChapter &&
+      onNextChapter
     ) {
       // Add a small delay before advancing
       const timeoutId = setTimeout(() => {
@@ -367,7 +369,7 @@ export function MangaReader({
       }, 1500)
       return () => clearTimeout(timeoutId)
     }
-  }, [currentPage, totalPages, settings.autoAdvanceChapter, onNextChapter, currentChapter, totalChapters])
+  }, [currentPage, totalPages, settings.autoAdvanceChapter, onNextChapter, canGoToNextChapter])
 
   // Render current reading mode
   const renderContent = () => {
@@ -472,8 +474,8 @@ export function MangaReader({
         onPreviousPage={previousPage}
         onNextPage={nextPage}
         currentChapterNumber={currentChapter}
-        hasNextChapter={!!(currentChapter && totalChapters && currentChapter < totalChapters)}
-        hasPreviousChapter={!!(currentChapter && currentChapter > 1)}
+        hasNextChapter={hasNextChapter}
+        hasPreviousChapter={hasPreviousChapter}
         onNextChapter={() => onNextChapter?.()}
         onPreviousChapter={() => onPreviousChapter?.()}
         isFullscreen={isFullscreen}
@@ -487,6 +489,7 @@ export function MangaReader({
           setShowControls(true)
         }}
         onGoBack={() => onGoBack?.()}
+        readingMode={settings.readingMode}
         readingDirection={settings.readingDirection}
         showControls={showControls}
       />

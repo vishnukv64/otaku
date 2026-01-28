@@ -10,6 +10,10 @@
 use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeContent, MangaDetails, MediaDetails, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
+use crate::cache::{
+    self, SEARCH_CACHE, DISCOVER_CACHE, ANIME_DETAILS_CACHE, MANGA_DETAILS_CACHE,
+    VIDEO_SOURCES_CACHE, CHAPTER_IMAGES_CACHE, TAGS_CACHE, HOME_CONTENT_CACHE, RECOMMENDATIONS_CACHE,
+};
 use crate::VideoServerInfo;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -66,6 +70,15 @@ pub async fn search_anime(
     page: u32,
     allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::search_key(&extension_id, &query, page, allow_adult);
+    if let Some(cached) = SEARCH_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for search: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -78,11 +91,17 @@ pub async fn search_anime(
     drop(extensions);
 
     // Create runtime on-demand with NSFW setting
-    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.search(&query, page)
-        .map_err(|e| format!("Search failed: {}", e))
+    let results = runtime.search(&query, page)
+        .map_err(|e| format!("Search failed: {}", e))?;
+
+    // Cache the results
+    SEARCH_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached search results");
+
+    Ok(results)
 }
 
 /// Get detailed information about an anime
@@ -92,6 +111,13 @@ pub async fn get_anime_details(
     extension_id: String,
     anime_id: String,
 ) -> Result<MediaDetails, String> {
+    // Check cache first
+    let cache_key = cache::details_key(&extension_id, &anime_id);
+    if let Some(cached) = ANIME_DETAILS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for anime details: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -105,8 +131,14 @@ pub async fn get_anime_details(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_details(&anime_id)
-        .map_err(|e| format!("Failed to get details: {}", e))
+    let details = runtime.get_details(&anime_id)
+        .map_err(|e| format!("Failed to get details: {}", e))?;
+
+    // Cache the results
+    ANIME_DETAILS_CACHE.insert(cache_key, details.clone());
+    log::debug!("Cached anime details");
+
+    Ok(details)
 }
 
 /// Get video sources for an episode
@@ -116,6 +148,13 @@ pub async fn get_video_sources(
     extension_id: String,
     episode_id: String,
 ) -> Result<VideoSources, String> {
+    // Check cache first
+    let cache_key = cache::sources_key(&extension_id, &episode_id);
+    if let Some(cached) = VIDEO_SOURCES_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for video sources: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -129,8 +168,14 @@ pub async fn get_video_sources(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_sources(&episode_id)
-        .map_err(|e| format!("Failed to get sources: {}", e))
+    let sources = runtime.get_sources(&episode_id)
+        .map_err(|e| format!("Failed to get sources: {}", e))?;
+
+    // Cache the results
+    VIDEO_SOURCES_CACHE.insert(cache_key, sources.clone());
+    log::debug!("Cached video sources");
+
+    Ok(sources)
 }
 
 /// Discover anime with filters (trending, top-rated, by genre, etc.)
@@ -143,6 +188,15 @@ pub async fn discover_anime(
     genres: Vec<String>,
     allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult);
+    if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for discover: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -153,11 +207,17 @@ pub async fn discover_anime(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.discover(page, sort_type, genres)
-        .map_err(|e| format!("Discover failed: {}", e))
+    let results = runtime.discover(page, sort_type, genres)
+        .map_err(|e| format!("Discover failed: {}", e))?;
+
+    // Cache the results
+    DISCOVER_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached discover results");
+
+    Ok(results)
 }
 
 /// Get home page content with all categories in a single call
@@ -168,6 +228,15 @@ pub async fn get_home_content(
     extension_id: String,
     allow_adult: Option<bool>,
 ) -> Result<HomeContent, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::home_content_key(&extension_id, allow_adult);
+    if let Some(cached) = HOME_CONTENT_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for home content: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -178,12 +247,18 @@ pub async fn get_home_content(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
     // Fetch 5 pages (100 items) and categorize
-    runtime.get_home_content(5)
-        .map_err(|e| format!("Failed to get home content: {}", e))
+    let content = runtime.get_home_content(5)
+        .map_err(|e| format!("Failed to get home content: {}", e))?;
+
+    // Cache the results
+    HOME_CONTENT_CACHE.insert(cache_key, content.clone());
+    log::debug!("Cached home content");
+
+    Ok(content)
 }
 
 /// Get anime recommendations (trending/latest)
@@ -193,6 +268,15 @@ pub async fn get_recommendations(
     extension_id: String,
     allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::recommendations_key(&extension_id, allow_adult);
+    if let Some(cached) = RECOMMENDATIONS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for recommendations: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -203,11 +287,17 @@ pub async fn get_recommendations(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_recommendations()
-        .map_err(|e| format!("Get recommendations failed: {}", e))
+    let results = runtime.get_recommendations()
+        .map_err(|e| format!("Get recommendations failed: {}", e))?;
+
+    // Cache the results
+    RECOMMENDATIONS_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached recommendations");
+
+    Ok(results)
 }
 
 /// Get available tags (genres and studios)
@@ -217,6 +307,13 @@ pub async fn get_tags(
     extension_id: String,
     page: u32,
 ) -> Result<TagsResult, String> {
+    // Check cache first
+    let cache_key = cache::tags_key(&extension_id, page);
+    if let Some(cached) = TAGS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for tags: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -230,8 +327,14 @@ pub async fn get_tags(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_tags(page)
-        .map_err(|e| format!("Get tags failed: {}", e))
+    let tags = runtime.get_tags(page)
+        .map_err(|e| format!("Get tags failed: {}", e))?;
+
+    // Cache the results
+    TAGS_CACHE.insert(cache_key, tags.clone());
+    log::debug!("Cached tags");
+
+    Ok(tags)
 }
 
 /// List all loaded extensions
@@ -260,6 +363,15 @@ pub async fn search_manga(
     page: u32,
     allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first (use manga: prefix to differentiate from anime)
+    let cache_key = format!("manga:{}", cache::search_key(&extension_id, &query, page, allow_adult));
+    if let Some(cached) = SEARCH_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga search: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -270,11 +382,17 @@ pub async fn search_manga(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.search(&query, page)
-        .map_err(|e| format!("Manga search failed: {}", e))
+    let results = runtime.search(&query, page)
+        .map_err(|e| format!("Manga search failed: {}", e))?;
+
+    // Cache the results
+    SEARCH_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached manga search results");
+
+    Ok(results)
 }
 
 /// Get detailed information about a manga
@@ -285,6 +403,13 @@ pub async fn get_manga_details(
     manga_id: String,
     allow_adult: Option<bool>,
 ) -> Result<MangaDetails, String> {
+    // Check cache first
+    let cache_key = cache::details_key(&extension_id, &manga_id);
+    if let Some(cached) = MANGA_DETAILS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga details: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -298,8 +423,14 @@ pub async fn get_manga_details(
     let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_manga_details(&manga_id)
-        .map_err(|e| format!("Failed to get manga details: {}", e))
+    let details = runtime.get_manga_details(&manga_id)
+        .map_err(|e| format!("Failed to get manga details: {}", e))?;
+
+    // Cache the results
+    MANGA_DETAILS_CACHE.insert(cache_key, details.clone());
+    log::debug!("Cached manga details");
+
+    Ok(details)
 }
 
 /// Get chapter images for reading
@@ -309,6 +440,13 @@ pub async fn get_chapter_images(
     extension_id: String,
     chapter_id: String,
 ) -> Result<ChapterImages, String> {
+    // Check cache first
+    let cache_key = cache::chapter_images_key(&extension_id, &chapter_id);
+    if let Some(cached) = CHAPTER_IMAGES_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for chapter images: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -322,8 +460,14 @@ pub async fn get_chapter_images(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_chapter_images(&chapter_id)
-        .map_err(|e| format!("Failed to get chapter images: {}", e))
+    let images = runtime.get_chapter_images(&chapter_id)
+        .map_err(|e| format!("Failed to get chapter images: {}", e))?;
+
+    // Cache the results
+    CHAPTER_IMAGES_CACHE.insert(cache_key, images.clone());
+    log::debug!("Cached chapter images");
+
+    Ok(images)
 }
 
 /// Discover manga with filters (trending, top-rated, by genre)
@@ -336,6 +480,15 @@ pub async fn discover_manga(
     genres: Vec<String>,
     allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first (use manga: prefix to differentiate from anime)
+    let cache_key = format!("manga:{}", cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult));
+    if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga discover: {}", cache_key);
+        return Ok(cached);
+    }
+
     log::debug!("[Manga] discover_manga called with genres: {:?}", genres);
 
     let extensions = state.extensions.lock()
@@ -348,13 +501,17 @@ pub async fn discover_manga(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
     let result = runtime.discover(page, sort_type, genres.clone())
         .map_err(|e| format!("Manga discover failed: {}", e))?;
 
     log::debug!("[Manga] discover_manga returned {} results for genres {:?}", result.results.len(), genres);
+
+    // Cache the results
+    DISCOVER_CACHE.insert(cache_key, result.clone());
+    log::debug!("Cached manga discover results");
 
     Ok(result)
 }
@@ -366,6 +523,13 @@ pub async fn get_manga_tags(
     extension_id: String,
     page: u32,
 ) -> Result<TagsResult, String> {
+    // Check cache first (use manga: prefix to differentiate from anime)
+    let cache_key = format!("manga:{}", cache::tags_key(&extension_id, page));
+    if let Some(cached) = TAGS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga tags: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -379,8 +543,14 @@ pub async fn get_manga_tags(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_tags(page)
-        .map_err(|e| format!("Get manga tags failed: {}", e))
+    let tags = runtime.get_tags(page)
+        .map_err(|e| format!("Get manga tags failed: {}", e))?;
+
+    // Cache the results
+    TAGS_CACHE.insert(cache_key, tags.clone());
+    log::debug!("Cached manga tags");
+
+    Ok(tags)
 }
 
 /// Proxy image request to avoid CORS issues (for manga pages)
@@ -1725,4 +1895,19 @@ pub async fn list_all_chapter_downloads(
     chapter_downloads::list_all_chapter_downloads(state.database.pool())
         .await
         .map_err(|e| format!("Failed to list all chapter downloads: {}", e))
+}
+
+// ==================== Cache Management Commands ====================
+
+/// Get cache statistics
+#[tauri::command]
+pub async fn get_cache_stats() -> Result<cache::CacheStats, String> {
+    Ok(cache::get_cache_stats())
+}
+
+/// Clear all API caches
+#[tauri::command]
+pub async fn clear_api_cache() -> Result<(), String> {
+    cache::clear_all_caches();
+    Ok(())
 }

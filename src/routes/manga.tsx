@@ -13,6 +13,7 @@ import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
+import { useMediaStatus } from '@/hooks/useMediaStatus'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -26,6 +27,7 @@ export const Route = createFileRoute('/manga')({
 function MangaScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
+  const { getStatus, refresh: refreshStatus } = useMediaStatus()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
@@ -323,6 +325,7 @@ function MangaScreen() {
                     key={item.id}
                     media={item}
                     onClick={() => setSelectedManga(item)}
+                    status={getStatus(item.id)}
                   />
                 ))}
               </div>
@@ -365,6 +368,7 @@ function MangaScreen() {
                     key={item.id}
                     media={item}
                     onClick={() => setSelectedManga(item)}
+                    status={getStatus(item.id)}
                   />
                 ))}
               </div>
@@ -396,7 +400,11 @@ function MangaScreen() {
         <MangaDetailModal
           manga={selectedManga}
           extensionId={extensionId}
-          onClose={() => setSelectedManga(null)}
+          onClose={() => {
+            setSelectedManga(null)
+            // Refresh status to update badges if user changed library/favorite status
+            refreshStatus()
+          }}
         />
       )}
     </div>

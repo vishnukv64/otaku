@@ -336,6 +336,9 @@ pub fn run() {
       commands::get_log_file_path,
       commands::start_logs_stream,
       commands::stop_logs_stream,
+      // Cache Management
+      commands::get_cache_stats,
+      commands::clear_api_cache,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -9,7 +9,6 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { BookOpen, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { getContinueReadingWithDetails, removeFromContinueReadingManga, type ContinueReadingEntry } from '@/utils/tauri-commands'
-import { MediaCard } from './MediaCard'
 import type { SearchResult } from '@/types/extension'
 import toast from 'react-hot-toast'
 
@@ -175,34 +174,70 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
               : `Page ${entry.current_page}`
 
             return (
-              <div key={entry.media.id} className="flex-shrink-0 w-[180px] relative group/card">
-                <MediaCard
-                  media={media}
-                  onClick={() => handleContinueReading(entry)}
-                />
-                {/* Progress badge */}
-                <div className="absolute bottom-2 left-2 right-2 bg-black/80 rounded px-2 py-1 text-xs text-white">
-                  <div className="flex justify-between items-center">
-                    <span>Ch. {entry.chapter_number}</span>
-                    <span className="text-[var(--color-text-muted)]">{pageProgress}</span>
-                  </div>
-                  {entry.total_pages && (
-                    <div className="mt-1 h-1 bg-white/20 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all"
-                        style={{ width: `${(entry.current_page / entry.total_pages) * 100}%` }}
-                      />
+              <div key={entry.media.id} className="flex-shrink-0 w-[180px] group/card">
+                {/* Image container - for positioning badges inside the image area */}
+                <div className="relative">
+                  {/* Cover Image */}
+                  <button
+                    onClick={() => handleContinueReading(entry)}
+                    className="w-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-md"
+                  >
+                    <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] animate-scale-hover">
+                      {media.cover_url ? (
+                        <img
+                          src={media.cover_url}
+                          alt={media.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-4xl">
+                          📖
+                        </div>
+                      )}
+
+                      {/* Progress badge - inside image at bottom */}
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent pt-6 pb-2 px-2">
+                        <div className="flex justify-between items-center text-xs text-white">
+                          <span className="font-semibold">Ch. {entry.chapter_number}</span>
+                          <span className="text-white/70">{pageProgress}</span>
+                        </div>
+                        {entry.total_pages && (
+                          <div className="mt-1.5 h-1 bg-white/20 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all"
+                              style={{ width: `${(entry.current_page / entry.total_pages) * 100}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Resume overlay on hover */}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity bg-black/50">
+                        <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent-primary)] rounded-lg">
+                          <BookOpen className="w-5 h-5" />
+                          <span className="text-sm font-bold">RESUME</span>
+                        </div>
+                      </div>
                     </div>
-                  )}
+                  </button>
+
+                  {/* Remove button */}
+                  <button
+                    onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
+                    className="absolute top-2 right-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                    title="Remove from Continue Reading"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                {/* Remove button */}
-                <button
-                  onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                  className="absolute top-2 right-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
-                  title="Remove from Continue Reading"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+
+                {/* Title - Below Image */}
+                <div className="mt-2 px-1">
+                  <h3 className="text-sm font-semibold text-white line-clamp-2 leading-tight">
+                    {media.title}
+                  </h3>
+                </div>
               </div>
             )
           })}
