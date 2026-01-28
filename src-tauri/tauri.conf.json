@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "otaku",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "identifier": "com.otaku.player",
   "build": {
     "frontendDist": "../dist",
@@ -41,6 +41,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
