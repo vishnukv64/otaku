@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Loader2, AlertCircle } from 'lucide-react'
-import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
+import { loadExtension, getHomeContent, type HomeCategory } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
@@ -15,34 +15,16 @@ export const Route = createFileRoute('/home')({
   component: HomeScreen,
 })
 
-// Content categories for the home page
-const CATEGORIES = [
-  { id: 'trending', title: 'Trending Now', sortType: 'view', genres: [] },
-  { id: 'top-rated', title: 'Top Rated Anime', sortType: 'score', genres: [] },
-  { id: 'recently-updated', title: 'Recently Updated', sortType: 'update', genres: [] },
-  { id: 'action', title: 'Action & Adventure', sortType: 'score', genres: ['Action'] },
-  { id: 'romance', title: 'Romance', sortType: 'score', genres: ['Romance'] },
-  { id: 'comedy', title: 'Comedy', sortType: 'score', genres: ['Comedy'] },
-  { id: 'thriller', title: 'Thriller & Mystery', sortType: 'score', genres: ['Thriller', 'Mystery'] },
-  { id: 'fantasy', title: 'Fantasy & Magic', sortType: 'score', genres: ['Fantasy'] },
-]
-
-interface CategoryContent {
-  id: string
-  items: SearchResult[]
-  loading: boolean
-  error: string | null
-}
-
 function HomeScreen() {
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [contentLoading, setContentLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
-  const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
+  const [categories, setCategories] = useState<HomeCategory[]>([])
 
   // Load extensions on mount
   useEffect(() => {
@@ -70,59 +52,26 @@ function HomeScreen() {
     initExtensions()
   }, [])
 
-  // Load content for all categories
+  // Load all home content in a single call
   useEffect(() => {
     if (!extensionId) return
 
-    const loadCategories = async () => {
-      // Initialize categories state
-      const initialState: Record<string, CategoryContent> = {}
-      CATEGORIES.forEach(cat => {
-        initialState[cat.id] = { id: cat.id, items: [], loading: true, error: null }
-      })
-      setCategories(initialState)
+    const loadHomeContent = async () => {
+      setContentLoading(true)
+      try {
+        // Single API call that fetches and categorizes content in Rust
+        const content = await getHomeContent(extensionId, nsfwFilter)
 
-      // Load each category
-      for (const category of CATEGORIES) {
-        try {
-          const results = await discoverAnime(
-            extensionId,
-            1,
-            category.sortType,
-            category.genres,
-            nsfwFilter
-          )
-
-          setCategories(prev => ({
-            ...prev,
-            [category.id]: {
-              id: category.id,
-              items: results.results,
-              loading: false,
-              error: null,
-            },
-          }))
-
-          // Use first result from trending as featured
-          if (category.id === 'trending' && results.results.length > 0 && !featuredAnime) {
-            setFeaturedAnime(results.results[0])
-          }
-        } catch (err) {
-          setCategories(prev => ({
-            ...prev,
-            [category.id]: {
-              id: category.id,
-              items: [],
-              loading: false,
-              error: err instanceof Error ? err.message : 'Failed to load',
-            },
-          }))
-        }
+        setCategories(content.categories)
+        setFeaturedAnime(content.featured)
+        setContentLoading(false)
+      } catch (err) {
+        console.error('Failed to load home content:', err)
+        setContentLoading(false)
       }
     }
 
-    loadCategories()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadHomeContent()
   }, [extensionId, nsfwFilter])
 
   const handleWatch = () => {
@@ -181,20 +130,28 @@ function HomeScreen() {
 
         {/* Content Carousels */}
         <div className="space-y-8">
-          {CATEGORIES.map(category => {
-            const content = categories[category.id]
-            if (!content) return null
-
-            return (
+          {contentLoading ? (
+            // Show loading skeletons for 3 categories
+            Array.from({ length: 3 }).map((_, i) => (
+              <MediaCarousel
+                key={`skeleton-${i}`}
+                title="Loading..."
+                items={[]}
+                loading={true}
+                onItemClick={handleMediaClick}
+              />
+            ))
+          ) : (
+            categories.map(category => (
               <MediaCarousel
                 key={category.id}
                 title={category.title}
-                items={content.items}
-                loading={content.loading}
+                items={category.items}
+                loading={false}
                 onItemClick={handleMediaClick}
               />
-            )
-          })}
+            ))
+          )}
         </div>
       </div>
     </div>

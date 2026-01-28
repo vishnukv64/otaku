@@ -7,7 +7,7 @@
 // due to QuickJS's thread-safety limitations. In production, we'd use a thread-local
 // runtime pool.
 
-use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, MangaDetails, MediaDetails, SearchResults, TagsResult, VideoSources};
+use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeContent, MangaDetails, MediaDetails, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
 use crate::VideoServerInfo;
@@ -158,6 +158,32 @@ pub async fn discover_anime(
 
     runtime.discover(page, sort_type, genres)
         .map_err(|e| format!("Discover failed: {}", e))
+}
+
+/// Get home page content with all categories in a single call
+/// This is more efficient than multiple discover calls
+#[tauri::command]
+pub async fn get_home_content(
+    state: State<'_, AppState>,
+    extension_id: String,
+    allow_adult: Option<bool>,
+) -> Result<HomeContent, String> {
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    // Fetch 5 pages (100 items) and categorize
+    runtime.get_home_content(5)
+        .map_err(|e| format!("Failed to get home content: {}", e))
 }
 
 /// Get anime recommendations (trending/latest)

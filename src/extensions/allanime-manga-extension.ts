@@ -143,7 +143,9 @@ const extensionObject = {
       }
     }
 
-    // No genres - use the popular query with type: "manga"
+    // Use the popular query with type: "manga"
+    // For 'score' sortType: use dateRange 30 to get monthly popular, then sort by score
+    // For other sortTypes: use dateRange 1 for daily trending
     const dateRange = sortType === 'score' ? 30 : 1;
 
     const variables = {
@@ -177,7 +179,7 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const recommendations = data?.data?.queryPopular?.recommendations || [];
 
-      const results = recommendations.map((rec) => {
+      let results = recommendations.map((rec) => {
         const manga = rec.anyCard;
 
         let coverUrl = null;
@@ -199,6 +201,15 @@ const extensionObject = {
           rating: manga.score ? parseFloat(manga.score) : null
         };
       });
+
+      // For 'score' sortType, sort results by rating (highest first)
+      if (sortType === 'score') {
+        results = results.sort((a, b) => {
+          const ratingA = a.rating || 0;
+          const ratingB = b.rating || 0;
+          return ratingB - ratingA;
+        });
+      }
 
       return {
         results: results,

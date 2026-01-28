@@ -143,6 +143,23 @@ pub struct TagsResult {
     pub has_next_page: bool,
 }
 
+// ==================== Home Content Types ====================
+
+/// A category of content for the home page
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomeCategory {
+    pub id: String,
+    pub title: String,
+    pub items: Vec<SearchResult>,
+}
+
+/// Home page content with all categories
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomeContent {
+    pub featured: Option<SearchResult>,
+    pub categories: Vec<HomeCategory>,
+}
+
 // ==================== Manga Types ====================
 
 /// Chapter information for manga

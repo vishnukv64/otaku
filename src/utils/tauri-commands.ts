@@ -99,6 +99,32 @@ export async function discoverAnime(
   return await invoke('discover_anime', { extensionId, page, sortType, genres, allowAdult })
 }
 
+// Home Content types
+export interface HomeCategory {
+  id: string
+  title: string
+  items: SearchResults['results']
+}
+
+export interface HomeContent {
+  featured: SearchResults['results'][0] | null
+  categories: HomeCategory[]
+}
+
+/**
+ * Get home page content with all categories in a single call
+ * More efficient than making multiple discover calls
+ * @param extensionId - Extension ID
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
+ * @returns Home content with featured anime and categorized lists
+ */
+export async function getHomeContent(
+  extensionId: string,
+  allowAdult: boolean = false
+): Promise<HomeContent> {
+  return await invoke('get_home_content', { extensionId, allowAdult })
+}
+
 // Tag/Genre types
 export interface Tag {
   name: string

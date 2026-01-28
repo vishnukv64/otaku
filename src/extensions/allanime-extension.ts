@@ -91,7 +91,6 @@ const extensionObject = {
 
   discover: (page, sortType, genres) => {
     // If genres are provided, use the shows query with genre filtering
-    // The queryPopular persisted query doesn't support genre filtering
     if (genres && genres.length > 0) {
       const searchQuery = \`query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name thumbnail availableEpisodes description status score season __typename } } }\`;
 
@@ -150,8 +149,9 @@ const extensionObject = {
       }
     }
 
-    // No genres - use the persisted query for popular anime (queryPopular)
-    // dateRange: 1 = daily (trending/recently updated), 30 = monthly (top rated)
+    // Use the persisted query for popular anime (queryPopular)
+    // For 'score' sortType: use dateRange 30 to get monthly popular, then sort by score
+    // For other sortTypes: use dateRange 1 for daily trending
     const dateRange = sortType === 'score' ? 30 : 1;
 
     const variables = {
@@ -185,7 +185,7 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const recommendations = data?.data?.queryPopular?.recommendations || [];
 
-      const results = recommendations.map((rec) => {
+      let results = recommendations.map((rec) => {
         const show = rec.anyCard;
 
         let coverUrl = null;
@@ -207,6 +207,15 @@ const extensionObject = {
           rating: show.score ? parseFloat(show.score) : null
         };
       });
+
+      // For 'score' sortType, sort results by rating (highest first)
+      if (sortType === 'score') {
+        results = results.sort((a, b) => {
+          const ratingA = a.rating || 0;
+          const ratingB = b.rating || 0;
+          return ratingB - ratingA;
+        });
+      }
 
       return {
         results: results,
