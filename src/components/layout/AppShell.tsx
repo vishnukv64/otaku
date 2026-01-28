@@ -1,7 +1,8 @@
 import { ReactNode } from 'react'
 import { TopNav } from './TopNav'
 import { Footer } from './Footer'
-import { SpotlightSearch, useSpotlightSearch } from '@/components/search/SpotlightSearch'
+import { SpotlightSearch } from '@/components/search/SpotlightSearch'
+import { useSpotlightSearch } from '@/hooks/useSpotlightSearch'
 
 interface AppShellProps {
   children: ReactNode

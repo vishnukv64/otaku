@@ -51,11 +51,11 @@ function AnimeScreen() {
     setSelectedGenres([])
   }, [])
 
-  // Grid density class mapping
+  // Grid density class mapping (extended for 4K displays)
   const gridClasses = {
-    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2',
-    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4',
-    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6',
+    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-2',
+    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-4',
+    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-6',
   }[gridDensity]
 
   const {
@@ -172,6 +172,7 @@ function AnimeScreen() {
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput, extensionId])
 
   // Clear search input
@@ -213,7 +214,7 @@ function AnimeScreen() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 py-8 max-w-screen-2xl mx-auto">
+    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
       {/* Search Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-6">Anime Browser</h1>

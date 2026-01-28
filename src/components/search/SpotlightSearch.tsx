@@ -10,7 +10,6 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Loader2, X, Star, Play, ChevronRight } from 'lucide-react'
-import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { loadExtension, searchAnime } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
@@ -85,6 +84,12 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     return () => clearTimeout(timer)
   }, [query, extensionId])
 
+  const handleSelectResult = (result: SearchResult) => {
+    setSelectedMedia(result)
+    // Close spotlight immediately when selecting a result
+    onClose()
+  }
+
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -100,7 +105,8 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
         case 'Enter':
           e.preventDefault()
           if (results[selectedIndex]) {
-            handleSelectResult(results[selectedIndex])
+            setSelectedMedia(results[selectedIndex])
+            onClose()
           }
           break
         case 'Escape':
@@ -119,12 +125,6 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
       selectedElement.scrollIntoView({ block: 'nearest' })
     }
   }, [selectedIndex])
-
-  const handleSelectResult = (result: SearchResult) => {
-    setSelectedMedia(result)
-    // Close spotlight immediately when selecting a result
-    onClose()
-  }
 
   const handleCloseMediaModal = () => {
     setSelectedMedia(null)
@@ -296,29 +296,4 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
       )}
     </>
   )
-}
-
-/**
- * Hook to manage spotlight search state globally
- */
-export function useSpotlightSearch() {
-  const [isOpen, setIsOpen] = useState(false)
-
-  const open = useCallback(() => setIsOpen(true), [])
-  const close = useCallback(() => setIsOpen(false), [])
-  const toggle = useCallback(() => setIsOpen((prev) => !prev), [])
-
-  // Global keyboard shortcut for Cmd+K
-  useKeyboardShortcut(
-    {
-      'ctrl+k': (e) => {
-        e.preventDefault()
-        toggle()
-      },
-    },
-    [toggle],
-    { allowInInputs: true }
-  )
-
-  return { isOpen, open, close, toggle }
 }

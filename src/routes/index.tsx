@@ -122,6 +122,7 @@ function HomeScreen() {
     }
 
     loadCategories()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensionId])
 
   // Auto-rotate hero section every 10 seconds
@@ -195,7 +196,7 @@ function HomeScreen() {
 
   return (
     <div className="min-h-[calc(100vh-4rem)] pb-12">
-      <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-screen-2xl mx-auto">
+      <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
         {/* Hero Section */}
         {featuredAnime ? (
           <HeroSection

@@ -82,7 +82,7 @@ export function useUpdater() {
                 percentage: 0,
               })
               break
-            case 'Progress':
+            case 'Progress': {
               downloaded += event.data.chunkLength
               const total = useUpdateStore.getState().progress.total
               const percentage = total ? Math.round((downloaded / total) * 100) : 0
@@ -91,6 +91,7 @@ export function useUpdater() {
                 percentage,
               })
               break
+            }
             case 'Finished':
               setProgress({ percentage: 100 })
               setStatus('ready')

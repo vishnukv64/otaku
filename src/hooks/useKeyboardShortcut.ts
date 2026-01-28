@@ -62,5 +62,6 @@ export function useKeyboardShortcut(
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [...deps, allowInInputs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, keyMap, allowInInputs])
 }

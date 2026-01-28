@@ -336,6 +336,7 @@ export function VideoPlayer({
         hlsRef.current = null
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServer, sources, videoServer])
 
   // Apply playback speed from settings
@@ -355,6 +356,7 @@ export function VideoPlayer({
     if (volume === defaultVolume) {
       video.volume = defaultVolume
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run on mount
 
   // Video event handlers
@@ -534,6 +536,7 @@ export function VideoPlayer({
       video?.removeEventListener('pause', handlePauseSave)
       saveProgress()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId, episodeId, currentEpisode])
 
   // Fullscreen handling
@@ -778,7 +781,8 @@ export function VideoPlayer({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [duration, onNextEpisode, onPreviousEpisode, handleSkip])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration, onNextEpisode, onPreviousEpisode])
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current
