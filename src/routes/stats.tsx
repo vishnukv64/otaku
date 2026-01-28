@@ -153,7 +153,7 @@ function StatsPage() {
 
   return (
     <div className="min-h-screen bg-[var(--color-background)] px-4 py-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-4k mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
@@ -199,7 +199,7 @@ function StatsPage() {
         )}
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 3xl:grid-cols-4 4xl:grid-cols-5 5xl:grid-cols-6 gap-6">
           {/* CPU Usage */}
           <StatCard
             icon={<Cpu size={24} />}

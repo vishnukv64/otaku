@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "otaku",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "identifier": "com.otaku.player",
   "build": {
     "frontendDist": "../dist",
@@ -35,7 +35,7 @@
       "endpoints": [
         "https://github.com/vishnukv64/otaku/releases/latest/download/latest.json"
       ],
-      "pubkey": "$TAURI_SIGNING_PUBLIC_KEY"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVBMzBGQjM1NTM4Mjk1OEEKUldTS2xZSlROZnN3V2xyelcyU2RBTkdEODlJNGxKbCtzTG1pOEJHL2NwY0tiSHhPa3kxWk51QkMK"
     }
   },
   "bundle": {

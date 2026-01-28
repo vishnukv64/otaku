@@ -168,7 +168,7 @@ function LogsScreen() {
     <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
       {/* Header */}
       <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+        <div className="max-w-4k mx-auto px-4 3xl:px-12 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Link
@@ -316,7 +316,7 @@ function LogsScreen() {
 
       {/* Log Stats */}
       <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-subtle)]">
-        <div className="max-w-7xl mx-auto px-4 py-2">
+        <div className="max-w-4k mx-auto px-4 3xl:px-12 py-2">
           <div className="flex items-center gap-4 text-sm">
             <span className="text-[var(--color-text-tertiary)]">
               {filteredLogs.length} {filter === 'all' ? 'entries' : `${filter} entries`}
@@ -334,7 +334,7 @@ function LogsScreen() {
 
       {/* Logs Container */}
       <div className="flex-1 overflow-auto">
-        <div className="max-w-7xl mx-auto p-4">
+        <div className="max-w-4k mx-auto p-4 3xl:px-12">
           {loading && logs.length === 0 ? (
             <div className="flex items-center justify-center py-20">
               <RefreshCw size={24} className="animate-spin text-[var(--color-text-tertiary)]" />

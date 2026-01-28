@@ -37,7 +37,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
     return (
       <div className="mb-12">
         <h2 className="text-xl font-semibold mb-4">{title}</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <MediaCardSkeleton key={i} />
           ))}
@@ -85,7 +85,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
             {items.map((item) => (
               <div
                 key={item.id}
-                className="flex-[0_0_calc(50%-0.375rem)] sm:flex-[0_0_calc(33.333%-0.5rem)] md:flex-[0_0_calc(25%-0.5625rem)] lg:flex-[0_0_calc(20%-0.6rem)] xl:flex-[0_0_calc(16.666%-0.625rem)]"
+                className="flex-[0_0_calc(50%-0.375rem)] sm:flex-[0_0_calc(33.333%-0.5rem)] md:flex-[0_0_calc(25%-0.5625rem)] lg:flex-[0_0_calc(20%-0.6rem)] xl:flex-[0_0_calc(16.666%-0.625rem)] 3xl:flex-[0_0_calc(12.5%-0.656rem)] 4xl:flex-[0_0_calc(10%-0.675rem)] 5xl:flex-[0_0_calc(8.333%-0.69rem)]"
               >
                 <MediaCard media={item} onClick={() => onItemClick?.(item)} />
               </div>

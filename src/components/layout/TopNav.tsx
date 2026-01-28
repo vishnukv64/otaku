@@ -40,7 +40,7 @@ export function TopNav({ onSearchClick }: TopNavProps) {
         scrolled ? 'bg-[var(--color-bg-primary)]' : 'bg-gradient-to-b from-black/80 to-transparent'
       }`}
     >
-      <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4k mx-auto px-4 sm:px-6 lg:px-8 3xl:px-12">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-8">
