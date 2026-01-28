@@ -155,7 +155,8 @@ function WatchPage() {
 
         if (filePath && videoServerInfo) {
           // Use video server for local file (proper Range request support for large files)
-          const filename = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+          // Split on both forward and backslashes to handle Windows and Unix paths
+          const filename = filePath.split(/[/\\]/).pop() || filePath
           const localUrl = `http://127.0.0.1:${videoServerInfo.port}/files/${encodeURIComponent(filename)}?token=${videoServerInfo.token}`
           setSources({
             sources: [{
@@ -169,7 +170,7 @@ function WatchPage() {
         } else if (filePath) {
           // Fallback: Try getLocalVideoUrl command
           try {
-            const filename = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+            const filename = filePath.split(/[/\\]/).pop() || filePath
             const localUrl = await getLocalVideoUrl(filename)
             setSources({
               sources: [{
