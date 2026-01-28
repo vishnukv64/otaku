@@ -356,6 +356,14 @@ export async function getContinueWatching(limit: number = 20): Promise<WatchHist
   return await invoke('get_continue_watching', { limit })
 }
 
+/**
+ * Remove media from continue watching (deletes all watch history for that media)
+ * @param mediaId - The media ID to remove
+ */
+export async function removeFromContinueWatching(mediaId: string): Promise<void> {
+  return await invoke('remove_from_continue_watching', { mediaId })
+}
+
 // ==================== Library Commands ====================
 
 export type LibraryStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch'

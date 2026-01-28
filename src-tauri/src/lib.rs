@@ -277,6 +277,7 @@ pub fn run() {
       commands::get_watch_progress,
       commands::get_latest_watch_progress_for_media,
       commands::get_continue_watching,
+      commands::remove_from_continue_watching,
       // Library
       commands::add_to_library,
       commands::remove_from_library,

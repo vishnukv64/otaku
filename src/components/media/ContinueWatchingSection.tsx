@@ -7,10 +7,11 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Play, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
-import { getContinueWatchingWithDetails, type ContinueWatchingEntry } from '@/utils/tauri-commands'
+import { Play, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { getContinueWatchingWithDetails, removeFromContinueWatching, type ContinueWatchingEntry } from '@/utils/tauri-commands'
 import { MediaCard } from './MediaCard'
 import type { SearchResult } from '@/types/extension'
+import toast from 'react-hot-toast'
 
 interface ContinueWatchingSectionProps {
   extensionId: string
@@ -86,6 +87,18 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     })
   }
 
+  const handleRemove = async (e: React.MouseEvent, mediaId: string, title: string) => {
+    e.stopPropagation() // Prevent card click
+    try {
+      await removeFromContinueWatching(mediaId)
+      setContinueWatching(prev => prev.filter(entry => entry.media.id !== mediaId))
+      toast.success(`Removed "${title}" from Continue Watching`)
+    } catch (error) {
+      console.error('Failed to remove from continue watching:', error)
+      toast.error('Failed to remove from Continue Watching')
+    }
+  }
+
   if (loading) {
     return (
       <div className="mb-8">
@@ -157,7 +170,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
             }
 
             return (
-              <div key={entry.media.id} className="flex-shrink-0 w-[180px]">
+              <div key={entry.media.id} className="flex-shrink-0 w-[180px] relative group/card">
                 <MediaCard
                   media={media}
                   onClick={() => handleContinueWatching(entry)}
@@ -167,6 +180,14 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                     episodeNumber: entry.episode_number,
                   }}
                 />
+                {/* Remove button */}
+                <button
+                  onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
+                  className="absolute top-2 right-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                  title="Remove from Continue Watching"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             )
           })}

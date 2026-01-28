@@ -636,6 +636,22 @@ pub async fn get_continue_watching(
         .map_err(|e| format!("Failed to get continue watching: {}", e))
 }
 
+/// Remove media from continue watching (deletes all watch history for that media)
+#[tauri::command]
+pub async fn remove_from_continue_watching(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<(), String> {
+    use crate::database::watch_history::delete_media_watch_history;
+
+    delete_media_watch_history(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to remove from continue watching: {}", e))?;
+
+    log::debug!("Removed media {} from continue watching", media_id);
+    Ok(())
+}
+
 // ==================== Library Commands ====================
 
 /// Add media to library

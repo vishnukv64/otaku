@@ -215,7 +215,6 @@ pub async fn mark_episode_completed(
 }
 
 /// Delete watch history for a media
-#[allow(dead_code)]
 pub async fn delete_media_watch_history(
     pool: &SqlitePool,
     media_id: &str,
