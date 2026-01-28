@@ -327,6 +327,15 @@ Before downloading, determine whether your Mac uses Apple Silicon or Intel:
 
 On first launch, macOS may display a security warning because the application is not signed with an Apple Developer certificate.
 
+**If you see "otaku is damaged and can't be opened" (most common on Apple Silicon Macs):**
+
+Open Terminal and run:
+```bash
+xattr -cr /Applications/otaku.app
+```
+
+This removes the quarantine attribute that macOS adds to downloaded applications. After running this command, the app will open normally.
+
 **If you see "Otaku cannot be opened because it is from an unidentified developer":**
 
 1. Open System Preferences (or System Settings on macOS Ventura and later)
