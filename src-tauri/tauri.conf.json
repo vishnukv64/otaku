@@ -30,6 +30,12 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/vishnukv64/otaku/releases/latest/download/latest.json"
+      ],
+      "pubkey": "$TAURI_SIGNING_PUBLIC_KEY"
     }
   },
   "bundle": {

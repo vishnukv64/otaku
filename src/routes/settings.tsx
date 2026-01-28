@@ -12,6 +12,7 @@ import { SettingSlider } from '../components/settings/SettingSlider'
 import { SettingDropdown } from '../components/settings/SettingDropdown'
 import { SettingFileInput } from '../components/settings/SettingFileInput'
 import { DangerButton } from '../components/settings/DangerButton'
+import { UpdateSection } from '../components/settings/UpdateSection'
 import { HardDrive, Activity, ChevronRight, FileText, Info } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 
@@ -473,6 +474,9 @@ function SettingsScreen() {
             </button>
           </SettingRow>
         </SettingSection>
+
+        {/* Updates Section */}
+        <UpdateSection />
 
         {/* About Section */}
         <SettingSection
