@@ -10,10 +10,10 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, toggleFavorite, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
@@ -35,11 +35,12 @@ export function MediaDetailModal({
   onMediaChange,
 }: MediaDetailModalProps) {
   const navigate = useNavigate()
-  const { refresh: refreshMediaStatus } = useMediaStatusContext()
+  const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
+  const [isFavorite, setIsFavorite] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
@@ -287,6 +288,7 @@ export function MediaDetailModal({
     try {
       await removeFromLibrary(media.id)
       setInLibrary(false)
+      setIsFavorite(false)
       notifySuccess(media.title, 'Removed from your library')
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
@@ -295,6 +297,26 @@ export function MediaDetailModal({
       notifyError('Library Error', `Failed to remove "${media.title}" from library`)
     } finally {
       setLibraryLoading(false)
+    }
+  }
+
+  const handleToggleFavorite = async () => {
+    if (!details) return
+
+    try {
+      // If not in library, add first
+      if (!inLibrary) {
+        await addToLibrary(media.id, 'plan_to_watch')
+        setInLibrary(true)
+      }
+      const newFavorite = await toggleFavorite(media.id)
+      setIsFavorite(newFavorite)
+      notifySuccess(media.title, newFavorite ? 'Added to your favorites' : 'Removed from your favorites')
+      // Refresh media status context so badges update across the app
+      refreshMediaStatus()
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error)
+      notifyError('Favorites Error', `Failed to update favorites for "${media.title}"`)
     }
   }
 
@@ -365,7 +387,7 @@ export function MediaDetailModal({
     loadDetails()
   }, [isOpen, extensionId, media.id])
 
-  // Check if media is in library
+  // Check if media is in library and favorite status
   useEffect(() => {
     if (!isOpen) return
 
@@ -373,13 +395,16 @@ export function MediaDetailModal({
       try {
         const status = await isInLibrary(media.id)
         setInLibrary(status)
+        // Get favorite status from context
+        const mediaStatus = getStatus(media.id)
+        setIsFavorite(mediaStatus.isFavorite)
       } catch (error) {
         console.error('Failed to check library status:', error)
       }
     }
 
     checkLibrary()
-  }, [isOpen, media.id])
+  }, [isOpen, media.id, getStatus])
 
   // Load watch progress for Resume Watching feature
   useEffect(() => {
@@ -717,6 +742,18 @@ export function MediaDetailModal({
                             </div>
                           </div>
                         )}
+                        {/* Favorite button */}
+                        <button
+                          onClick={handleToggleFavorite}
+                          className={`flex items-center justify-center w-12 h-12 rounded-lg transition-all border ${
+                            isFavorite
+                              ? 'bg-red-500 text-white border-red-500 hover:bg-red-600'
+                              : 'bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20'
+                          }`}
+                          aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                        >
+                          <Heart className={`w-6 h-6 ${isFavorite ? 'fill-current' : ''}`} />
+                        </button>
                         <button
                           className="flex items-center justify-center w-12 h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
                           aria-label="More info"
@@ -990,6 +1027,7 @@ export function MediaDetailModal({
                         <MediaCard
                           key={anime.id}
                           media={anime}
+                          status={getStatus(anime.id)}
                           onClick={() => {
                             // Change the media being displayed
                             onMediaChange?.(anime)
