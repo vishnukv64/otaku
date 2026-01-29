@@ -5,6 +5,25 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2026-01-30
+
+### Added
+- **Custom 404 Page** - Friendly "Page Not Found" page with navigation options
+- **Individual Episode Downloads** - Download button on hover for each episode card
+- **Clear Cancelled Downloads** - Button to clear all cancelled downloads at once
+- **Dismiss Cancelled Downloads** - X button on each cancelled download to remove from list
+
+### Fixed
+- **Release Notifications Not Working** - Fixed status filter to include 'Releasing' anime/manga (was only checking 'Ongoing')
+- **Release Tracking Initialization** - Now properly initializes tracking when adding media to library
+- **Existing Library Items** - Uses upsert pattern to create tracking records for existing items
+- **Manga Notification Links** - Fixed "Read Now" button navigating to wrong route
+- **Old Notification Routes** - Added migration handler for legacy notification routes
+
+### Changed
+- Episode cards now show small download/delete buttons at top-right on hover
+- Downloaded badge fades on hover to reveal delete button
+
 ## [0.1.10] - 2026-01-30
 
 ### Added
