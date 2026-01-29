@@ -5,7 +5,7 @@
  * Handles: checking for updates, download progress, changelog display, and restart.
  */
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { Update } from '@tauri-apps/plugin-updater'
 import { useUpdater } from '@/hooks/useUpdater'
 import { SettingSection } from './SettingSection'
@@ -34,6 +34,23 @@ export function UpdateSection() {
 
   const [showChangelog, setShowChangelog] = useState(false)
   const updateRef = useRef<Update | null>(null)
+  const autoCheckTriggeredRef = useRef(false)
+
+  // If status is 'available' but we don't have the Update object
+  // (e.g., when navigating from notification after auto-check),
+  // automatically re-check to get the Update object for downloading
+  useEffect(() => {
+    if (status === 'available' && !updateRef.current && !autoCheckTriggeredRef.current) {
+      autoCheckTriggeredRef.current = true
+      checkForUpdates()
+        .then((update) => {
+          updateRef.current = update
+        })
+        .catch((err) => {
+          console.error('Failed to re-check for updates:', err)
+        })
+    }
+  }, [status, checkForUpdates])
 
   const handleCheckForUpdates = async () => {
     try {
