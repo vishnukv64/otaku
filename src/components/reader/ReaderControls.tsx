@@ -167,54 +167,60 @@ export function ReaderControls({
         )}
       >
         <div className="p-4 space-y-3">
-          {/* Page slider */}
-          <PageSlider
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={onPageChange}
-            direction={readingDirection}
-            className="text-white"
-          />
+          {/* Page slider - only show in paged modes */}
+          {!isScrollMode && (
+            <PageSlider
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={onPageChange}
+              direction={readingDirection}
+              className="text-white"
+            />
+          )}
 
-          {/* Page navigation buttons */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={isScrollMode ? undefined : (readingDirection === 'rtl' ? onNextPage : onPreviousPage)}
-              disabled={isScrollMode || (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)}
-              className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
-                isScrollMode || (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)
-                  ? 'opacity-50 cursor-not-allowed'
-                  : 'hover:bg-white/20'
-              )}
-              title={isScrollMode ? 'Scroll to navigate' : 'Previous page'}
-            >
-              <ChevronLeft className="w-5 h-5" />
-              <span className="text-sm hidden sm:inline">Previous</span>
-            </button>
+          {/* Page navigation buttons - only show in paged modes */}
+          {!isScrollMode ? (
+            <div className="flex items-center justify-between">
+              <button
+                onClick={readingDirection === 'rtl' ? onNextPage : onPreviousPage}
+                disabled={readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
+                  (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:bg-white/20'
+                )}
+                title="Previous page"
+              >
+                <ChevronLeft className="w-5 h-5" />
+                <span className="text-sm hidden sm:inline">Previous</span>
+              </button>
 
-            <div className="text-white text-sm font-medium flex flex-col items-center">
-              <span>Page {currentPage} of {totalPages}</span>
-              {isScrollMode && (
-                <span className="text-xs text-white/60">Scroll to read</span>
-              )}
+              <div className="text-white text-sm font-medium">
+                <span>Page {currentPage} of {totalPages}</span>
+              </div>
+
+              <button
+                onClick={readingDirection === 'rtl' ? onPreviousPage : onNextPage}
+                disabled={readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
+                  (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:bg-white/20'
+                )}
+                title="Next page"
+              >
+                <span className="text-sm hidden sm:inline">Next</span>
+                <ChevronRight className="w-5 h-5" />
+              </button>
             </div>
-
-            <button
-              onClick={isScrollMode ? undefined : (readingDirection === 'rtl' ? onPreviousPage : onNextPage)}
-              disabled={isScrollMode || (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)}
-              className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
-                isScrollMode || (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)
-                  ? 'opacity-50 cursor-not-allowed'
-                  : 'hover:bg-white/20'
-              )}
-              title={isScrollMode ? 'Scroll to navigate' : 'Next page'}
-            >
-              <span className="text-sm hidden sm:inline">Next</span>
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
+          ) : (
+            /* Scroll mode indicator */
+            <div className="flex items-center justify-center py-2">
+              <span className="text-white/70 text-sm">{totalPages} pages • Scroll to read</span>
+            </div>
+          )}
         </div>
       </div>
     </>

@@ -218,6 +218,9 @@ export function MangaReader({
     }
   }, [refreshMediaStatus]) // Include refreshMediaStatus in deps
 
+  // Check if current mode is vertical scroll (webtoon or vertical)
+  const isVerticalScrollMode = settings.readingMode === 'vertical' || settings.readingMode === 'webtoon'
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -232,6 +235,8 @@ export function MangaReader({
 
       switch (e.key) {
         case 'ArrowLeft':
+          // In vertical/webtoon mode, don't intercept arrow keys - let browser handle scroll
+          if (isVerticalScrollMode) break
           if (settings.readingDirection === 'rtl') {
             handleNextPage()
           } else {
@@ -239,6 +244,8 @@ export function MangaReader({
           }
           break
         case 'ArrowRight':
+          // In vertical/webtoon mode, don't intercept arrow keys - let browser handle scroll
+          if (isVerticalScrollMode) break
           if (settings.readingDirection === 'rtl') {
             handlePreviousPage()
           } else {
@@ -246,9 +253,13 @@ export function MangaReader({
           }
           break
         case 'ArrowUp':
+          // In vertical/webtoon mode, don't intercept arrow keys - let browser handle scroll
+          if (isVerticalScrollMode) break
           handlePreviousPage()
           break
         case 'ArrowDown':
+          // In vertical/webtoon mode, don't intercept arrow keys - let browser handle scroll
+          if (isVerticalScrollMode) break
           handleNextPage()
           break
         case 'PageUp':
@@ -318,6 +329,7 @@ export function MangaReader({
     onPreviousChapter,
     onGoBack,
     toggleFullscreen,
+    isVerticalScrollMode,
   ])
 
   // Auto-hide controls
