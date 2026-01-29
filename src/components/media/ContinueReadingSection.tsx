@@ -7,10 +7,11 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { BookOpen, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { BookOpen, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
 import { getContinueReadingWithDetails, removeFromContinueReadingManga, type ContinueReadingEntry } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
+import { MangaDetailModal } from './MangaDetailModal'
 import type { SearchResult } from '@/types/extension'
 import { notifySuccess, notifyError } from '@/utils/notify'
 
@@ -24,6 +25,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
   const [loading, setLoading] = useState(true)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+  const [selectedManga, setSelectedManga] = useState<SearchResult | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
@@ -232,6 +234,17 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                     </div>
                   </button>
 
+                  {/* Info button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedManga(media)
+                    }}
+                    className="absolute top-2 left-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                    title="View Details"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
                   {/* Remove button */}
                   <button
                     onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
@@ -253,6 +266,15 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
           })}
         </div>
       </div>
+
+      {/* Manga Detail Modal */}
+      {selectedManga && (
+        <MangaDetailModal
+          manga={selectedManga}
+          extensionId={extensionId}
+          onClose={() => setSelectedManga(null)}
+        />
+      )}
     </div>
   )
 }
