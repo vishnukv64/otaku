@@ -165,6 +165,99 @@ export async function onHomeContentCategory(
   })
 }
 
+// ==================== Anime/Manga Discover Streaming (SSE) ====================
+
+/** Event name for anime discover streaming */
+export const ANIME_DISCOVER_EVENT = 'anime-discover-results'
+
+/** Event name for manga discover streaming */
+export const MANGA_DISCOVER_EVENT = 'manga-discover-results'
+
+/** Event payload for streaming discover results */
+export interface DiscoverResultsEvent {
+  results: SearchResults['results']
+  page: number
+  has_next_page: boolean
+  is_last: boolean
+  total_results: number
+}
+
+/**
+ * Start streaming anime discover results via SSE
+ * Results are emitted progressively as pages load
+ * @param extensionId - Extension ID
+ * @param sortType - Sort type: "score", "update", "view"
+ * @param genres - Array of genres to filter by
+ * @param allowAdult - Whether to include adult content
+ * @param pagesToFetch - Number of pages to fetch (default 3)
+ */
+export async function streamDiscoverAnime(
+  extensionId: string,
+  sortType?: string,
+  genres: string[] = [],
+  allowAdult: boolean = false,
+  pagesToFetch: number = 3
+): Promise<void> {
+  return await invoke('stream_discover_anime', {
+    extensionId,
+    sortType,
+    genres,
+    allowAdult,
+    pagesToFetch,
+  })
+}
+
+/**
+ * Listen for anime discover results events
+ * @param callback - Called when results are received
+ * @returns Unsubscribe function
+ */
+export async function onAnimeDiscoverResults(
+  callback: (event: DiscoverResultsEvent) => void
+): Promise<UnlistenFn> {
+  return await listen<DiscoverResultsEvent>(ANIME_DISCOVER_EVENT, (event) => {
+    callback(event.payload)
+  })
+}
+
+/**
+ * Start streaming manga discover results via SSE
+ * Results are emitted progressively as pages load
+ * @param extensionId - Extension ID
+ * @param sortType - Sort type: "score", "update", "view"
+ * @param genres - Array of genres to filter by
+ * @param allowAdult - Whether to include adult content
+ * @param pagesToFetch - Number of pages to fetch (default 3)
+ */
+export async function streamDiscoverManga(
+  extensionId: string,
+  sortType?: string,
+  genres: string[] = [],
+  allowAdult: boolean = false,
+  pagesToFetch: number = 3
+): Promise<void> {
+  return await invoke('stream_discover_manga', {
+    extensionId,
+    sortType,
+    genres,
+    allowAdult,
+    pagesToFetch,
+  })
+}
+
+/**
+ * Listen for manga discover results events
+ * @param callback - Called when results are received
+ * @returns Unsubscribe function
+ */
+export async function onMangaDiscoverResults(
+  callback: (event: DiscoverResultsEvent) => void
+): Promise<UnlistenFn> {
+  return await listen<DiscoverResultsEvent>(MANGA_DISCOVER_EVENT, (event) => {
+    callback(event.payload)
+  })
+}
+
 // Tag/Genre types
 export interface Tag {
   name: string

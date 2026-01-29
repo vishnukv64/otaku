@@ -1,6 +1,7 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router'
 import { Toaster } from 'react-hot-toast'
 import { AppShell } from '@/components/layout/AppShell'
+import { MediaStatusProvider } from '@/contexts/MediaStatusContext'
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -8,7 +9,7 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <>
+    <MediaStatusProvider>
       <AppShell>
         <Outlet />
       </AppShell>
@@ -45,6 +46,6 @@ function RootComponent() {
           },
         }}
       />
-    </>
+    </MediaStatusProvider>
   )
 }

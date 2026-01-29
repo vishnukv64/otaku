@@ -92,6 +92,9 @@ function HomeScreen() {
 
     let unsubscribe: (() => void) | null = null
 
+    // Track mounted state for safe async cleanup
+    let isMounted = true
+
     const startStreaming = async () => {
       streamingRef.current = true
       setCategories([])
@@ -99,15 +102,30 @@ function HomeScreen() {
 
       try {
         // Set up event listener FIRST
-        unsubscribe = await onHomeContentCategory(handleCategoryEvent)
+        const unsub = await onHomeContentCategory((event) => {
+          // Only process events if still mounted
+          if (isMounted) {
+            handleCategoryEvent(event)
+          }
+        })
         console.log('[SSE] Listener set up, starting stream...')
+
+        // Store unsubscribe if still mounted, otherwise cleanup immediately
+        if (isMounted) {
+          unsubscribe = unsub
+        } else {
+          unsub()
+          return
+        }
 
         // Then start streaming
         await streamHomeContent(extensionId, nsfwFilter)
         console.log('[SSE] Stream command completed')
       } catch (err) {
         console.error('Failed to stream home content:', err)
-        setStreamComplete(true)
+        if (isMounted) {
+          setStreamComplete(true)
+        }
       }
     }
 
@@ -115,12 +133,15 @@ function HomeScreen() {
 
     // Cleanup on unmount
     return () => {
+      isMounted = false
       if (unsubscribe) {
         unsubscribe()
       }
       streamingRef.current = false
     }
-  }, [extensionId, nsfwFilter, handleCategoryEvent])
+    // Note: handleCategoryEvent is stable (empty deps) and used inside closure, so not needed in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extensionId, nsfwFilter])
 
   const handleWatch = () => {
     // TODO: Navigate to watch screen or show details

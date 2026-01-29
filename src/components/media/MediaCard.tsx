@@ -7,8 +7,8 @@
  */
 
 import type { SearchResult } from '@/types/extension'
-import type { MediaStatus } from '@/hooks/useMediaStatus'
-import { getShortStatusLabel, getStatusColor } from '@/hooks/useMediaStatus'
+import type { MediaStatus } from '@/contexts/MediaStatusContext'
+import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
 import { Heart, BookmarkCheck } from 'lucide-react'
 
 interface MediaCardProps {

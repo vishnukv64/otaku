@@ -12,7 +12,7 @@ import useEmblaCarousel from 'embla-carousel-react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { MediaCard, MediaCardSkeleton } from './MediaCard'
 import { useSettingsStore } from '@/store/settingsStore'
-import { useMediaStatus } from '@/hooks/useMediaStatus'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { SearchResult } from '@/types/extension'
 
 interface MediaCarouselProps {
@@ -49,7 +49,7 @@ const skeletonGridClasses = {
 
 export function MediaCarousel({ title, items, loading = false, onItemClick }: MediaCarouselProps) {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
-  const { getStatus } = useMediaStatus()
+  const { getStatus } = useMediaStatusContext()
 
   const [emblaRef, emblaApi] = useEmblaCarousel({
     align: 'start',

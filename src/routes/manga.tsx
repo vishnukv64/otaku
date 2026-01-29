@@ -7,13 +7,21 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Loader2, AlertCircle, X, BookOpen, Sparkles } from 'lucide-react'
-import { loadExtension, discoverManga, searchManga, getContinueReadingWithDetails } from '@/utils/tauri-commands'
+import {
+  loadExtension,
+  discoverManga,
+  searchManga,
+  getContinueReadingWithDetails,
+  streamDiscoverManga,
+  onMangaDiscoverResults,
+  type DiscoverResultsEvent,
+} from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
-import { useMediaStatus } from '@/hooks/useMediaStatus'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -27,7 +35,7 @@ export const Route = createFileRoute('/manga')({
 function MangaScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
-  const { getStatus, refresh: refreshStatus } = useMediaStatus()
+  const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
@@ -118,53 +126,103 @@ function MangaScreen() {
     loadUserGenres()
   }, [])
 
-  // Load recommendations based on reading history genres
+  // Track seen IDs to avoid duplicates across SSE events
+  const seenIdsRef = useRef<Set<string>>(new Set())
+
+  // Handle SSE discover results
+  const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
+    // Deduplicate results using ref to track seen IDs
+    const newUniqueResults = event.results.filter(item => {
+      if (seenIdsRef.current.has(item.id)) return false
+      seenIdsRef.current.add(item.id)
+      return true
+    })
+
+    if (newUniqueResults.length > 0) {
+      setRecommendations(prev => [...prev, ...newUniqueResults])
+    }
+
+    // Update pagination state
+    setCurrentPage(event.page)
+    setHasNextPage(event.has_next_page)
+
+    // Mark loading complete when last page is received
+    if (event.is_last) {
+      setRecommendationsLoading(false)
+    }
+  }, [])
+
+  // Load recommendations via SSE (streams 3 pages progressively)
   useEffect(() => {
-    const loadManga = async () => {
-      if (!extensionId) return
+    if (!extensionId) return
 
-      setRecommendationsLoading(true)
-      setCurrentPage(1)
-      setHasNextPage(true)
+    // Reset state for new stream
+    setRecommendationsLoading(true)
+    setRecommendations([])
+    seenIdsRef.current.clear()
+    setCurrentPage(1)
+    setHasNextPage(true)
+
+    // Track mounted state to handle async cleanup properly
+    let isMounted = true
+    let unsubscribe: (() => void) | null = null
+
+    const startStreaming = async () => {
       try {
-        // Use user's reading genres for recommendations
-        console.log('[Manga] Calling discoverManga with genres:', userReadingGenres)
-
-        const results = await discoverManga(extensionId, 1, 'score', userReadingGenres, nsfwFilter)
-        console.log('[Manga] Discover results count:', results.results.length)
-
-        // Deduplicate results by ID
-        const uniqueResults = results.results.reduce((acc, item) => {
-          if (!acc.find(existing => existing.id === item.id)) {
-            acc.push(item)
+        // Set up listener first
+        const unsub = await onMangaDiscoverResults((event) => {
+          // Only process events if still mounted
+          if (isMounted) {
+            handleDiscoverResults(event)
           }
-          return acc
-        }, [] as SearchResult[])
+        })
 
-        setRecommendations(uniqueResults)
-        setHasNextPage(results.has_next_page)
+        // Store unsubscribe if still mounted, otherwise cleanup immediately
+        if (isMounted) {
+          unsubscribe = unsub
+        } else {
+          unsub()
+          return
+        }
+
+        // Start streaming (fetches 3 pages progressively)
+        console.log('[Manga] Starting SSE streaming with genres:', userReadingGenres)
+        await streamDiscoverManga(extensionId, 'score', userReadingGenres, nsfwFilter, 3)
       } catch (err) {
-        console.error('Failed to load manga:', err)
-      } finally {
-        setRecommendationsLoading(false)
+        console.error('Failed to stream manga:', err)
+        if (isMounted) {
+          setRecommendationsLoading(false)
+        }
       }
     }
 
-    loadManga()
+    startStreaming()
+
+    return () => {
+      isMounted = false
+      unsubscribe?.()
+    }
+    // Note: handleDiscoverResults is stable (empty deps) and used inside closure, so not needed in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensionId, userReadingGenres, nsfwFilter])
 
   // Load more recommendations when scrolling to bottom
+  // SSE loads pages 1-3 initially, so infinite scroll starts from page 4
   const loadMoreRecommendations = useCallback(async () => {
     if (!extensionId || loadingMore || !hasNextPage || searchInput) return
 
     setLoadingMore(true)
     try {
-      const nextPage = currentPage + 1
+      // Start from page after SSE (which loads pages 1-3)
+      const nextPage = Math.max(currentPage + 1, 4)
       const results = await discoverManga(extensionId, nextPage, 'score', userReadingGenres, nsfwFilter)
 
-      // Deduplicate and append to existing results
-      const existingIds = new Set(recommendations.map(r => r.id))
-      const newResults = results.results.filter(item => !existingIds.has(item.id))
+      // Deduplicate using the seenIds ref
+      const newResults = results.results.filter(item => {
+        if (seenIdsRef.current.has(item.id)) return false
+        seenIdsRef.current.add(item.id)
+        return true
+      })
 
       setRecommendations(prev => [...prev, ...newResults])
       setCurrentPage(nextPage)
@@ -174,7 +232,7 @@ function MangaScreen() {
     } finally {
       setLoadingMore(false)
     }
-  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userReadingGenres, nsfwFilter, recommendations])
+  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userReadingGenres, nsfwFilter])
 
   // Intersection observer for infinite scroll
   useEffect(() => {

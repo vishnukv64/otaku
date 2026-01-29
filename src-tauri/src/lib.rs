@@ -253,6 +253,7 @@ pub fn run() {
       commands::load_extension,
       commands::search_anime,
       commands::discover_anime,
+      commands::stream_discover_anime,
       commands::get_home_content,
       commands::stream_home_content,
       commands::get_recommendations,
@@ -267,6 +268,7 @@ pub fn run() {
       commands::get_manga_details,
       commands::get_chapter_images,
       commands::discover_manga,
+      commands::stream_discover_manga,
       commands::get_manga_tags,
       commands::proxy_image_request,
       // Chapter Downloads

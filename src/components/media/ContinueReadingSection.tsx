@@ -9,6 +9,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { BookOpen, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { getContinueReadingWithDetails, removeFromContinueReadingManga, type ContinueReadingEntry } from '@/utils/tauri-commands'
+import { useSettingsStore } from '@/store/settingsStore'
+import { filterNsfwContent } from '@/utils/nsfw-filter'
 import type { SearchResult } from '@/types/extension'
 import toast from 'react-hot-toast'
 
@@ -17,6 +19,7 @@ interface ContinueReadingSectionProps {
 }
 
 export function ContinueReadingSection({ extensionId }: ContinueReadingSectionProps) {
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [continueReading, setContinueReading] = useState<ContinueReadingEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -28,7 +31,13 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
     const loadContinueReading = async () => {
       try {
         const results = await getContinueReadingWithDetails(20)
-        setContinueReading(results)
+        // Filter out NSFW content if filter is enabled
+        const filtered = filterNsfwContent(
+          results,
+          entry => entry.media.genres,
+          nsfwFilter
+        )
+        setContinueReading(filtered)
       } catch (error) {
         console.error('Failed to load continue reading:', error)
       } finally {
@@ -37,7 +46,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
     }
 
     loadContinueReading()
-  }, [])
+  }, [nsfwFilter])
 
   // Check scroll position and update arrow visibility
   const checkScrollPosition = () => {

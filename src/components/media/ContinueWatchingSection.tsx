@@ -9,6 +9,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Play, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { getContinueWatchingWithDetails, removeFromContinueWatching, type ContinueWatchingEntry } from '@/utils/tauri-commands'
+import { useSettingsStore } from '@/store/settingsStore'
+import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from './MediaCard'
 import type { SearchResult } from '@/types/extension'
 import toast from 'react-hot-toast'
@@ -18,6 +20,7 @@ interface ContinueWatchingSectionProps {
 }
 
 export function ContinueWatchingSection({ extensionId }: ContinueWatchingSectionProps) {
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -29,7 +32,13 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     const loadContinueWatching = async () => {
       try {
         const results = await getContinueWatchingWithDetails(20)
-        setContinueWatching(results)
+        // Filter out NSFW content if filter is enabled
+        const filtered = filterNsfwContent(
+          results,
+          entry => entry.media.genres,
+          nsfwFilter
+        )
+        setContinueWatching(filtered)
       } catch (error) {
         console.error('Failed to load continue watching:', error)
       } finally {
@@ -38,7 +47,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     }
 
     loadContinueWatching()
-  }, [])
+  }, [nsfwFilter])
 
   // Check scroll position and update arrow visibility
   const checkScrollPosition = () => {

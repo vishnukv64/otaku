@@ -2,13 +2,20 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Loader2, AlertCircle, X, Sparkles } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
-import { loadExtension, discoverAnime, getContinueWatchingWithDetails } from '@/utils/tauri-commands'
+import {
+  loadExtension,
+  discoverAnime,
+  getContinueWatchingWithDetails,
+  streamDiscoverAnime,
+  onAnimeDiscoverResults,
+  type DiscoverResultsEvent,
+} from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
-import { useMediaStatus } from '@/hooks/useMediaStatus'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -25,7 +32,7 @@ const EXTENSION_CODE = ALLANIME_EXTENSION
 function AnimeScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
-  const { getStatus, refresh: refreshStatus } = useMediaStatus()
+  const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
@@ -123,49 +130,102 @@ function AnimeScreen() {
     loadUserGenres()
   }, [])
 
-  // Load recommendations based on watch history genres
+  // Track seen IDs to avoid duplicates across SSE events
+  const seenIdsRef = useRef<Set<string>>(new Set())
+
+  // Handle SSE discover results
+  const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
+    // Deduplicate results using ref to track seen IDs
+    const newUniqueResults = event.results.filter(item => {
+      if (seenIdsRef.current.has(item.id)) return false
+      seenIdsRef.current.add(item.id)
+      return true
+    })
+
+    if (newUniqueResults.length > 0) {
+      setRecommendations(prev => [...prev, ...newUniqueResults])
+    }
+
+    // Update pagination state
+    setCurrentPage(event.page)
+    setHasNextPage(event.has_next_page)
+
+    // Mark loading complete when last page is received
+    if (event.is_last) {
+      setRecommendationsLoading(false)
+    }
+  }, [])
+
+  // Load recommendations via SSE (streams 3 pages progressively)
   useEffect(() => {
-    const loadAnime = async () => {
-      if (!extensionId) return
+    if (!extensionId) return
 
-      setRecommendationsLoading(true)
-      setCurrentPage(1)
-      setHasNextPage(true)
+    // Reset state for new stream
+    setRecommendationsLoading(true)
+    setRecommendations([])
+    seenIdsRef.current.clear()
+    setCurrentPage(1)
+    setHasNextPage(true)
+
+    // Track mounted state to handle async cleanup properly
+    let isMounted = true
+    let unsubscribe: (() => void) | null = null
+
+    const startStreaming = async () => {
       try {
-        const results = await discoverAnime(extensionId, 1, 'score', userWatchingGenres, nsfwFilter)
-
-        // Deduplicate results by ID to avoid React key warnings
-        const uniqueResults = results.results.reduce((acc, item) => {
-          if (!acc.find(existing => existing.id === item.id)) {
-            acc.push(item)
+        // Set up listener first
+        const unsub = await onAnimeDiscoverResults((event) => {
+          // Only process events if still mounted
+          if (isMounted) {
+            handleDiscoverResults(event)
           }
-          return acc
-        }, [] as SearchResult[])
+        })
 
-        setRecommendations(uniqueResults)
-        setHasNextPage(results.has_next_page)
+        // Store unsubscribe if still mounted, otherwise cleanup immediately
+        if (isMounted) {
+          unsubscribe = unsub
+        } else {
+          unsub()
+          return
+        }
+
+        // Start streaming (fetches 3 pages progressively)
+        await streamDiscoverAnime(extensionId, 'score', userWatchingGenres, nsfwFilter, 3)
       } catch (err) {
-        console.error('Failed to load anime:', err)
-      } finally {
-        setRecommendationsLoading(false)
+        console.error('Failed to stream anime:', err)
+        if (isMounted) {
+          setRecommendationsLoading(false)
+        }
       }
     }
 
-    loadAnime()
+    startStreaming()
+
+    return () => {
+      isMounted = false
+      unsubscribe?.()
+    }
+    // Note: handleDiscoverResults is stable (empty deps) and used inside closure, so not needed in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensionId, userWatchingGenres, nsfwFilter])
 
   // Load more recommendations when scrolling to bottom
+  // SSE loads pages 1-3 initially, so infinite scroll starts from page 4
   const loadMoreRecommendations = useCallback(async () => {
     if (!extensionId || loadingMore || !hasNextPage || searchInput) return
 
     setLoadingMore(true)
     try {
-      const nextPage = currentPage + 1
+      // Start from page after SSE (which loads pages 1-3)
+      const nextPage = Math.max(currentPage + 1, 4)
       const results = await discoverAnime(extensionId, nextPage, 'score', userWatchingGenres, nsfwFilter)
 
-      // Deduplicate and append to existing results
-      const existingIds = new Set(recommendations.map(r => r.id))
-      const newResults = results.results.filter(item => !existingIds.has(item.id))
+      // Deduplicate using the seenIds ref
+      const newResults = results.results.filter(item => {
+        if (seenIdsRef.current.has(item.id)) return false
+        seenIdsRef.current.add(item.id)
+        return true
+      })
 
       setRecommendations(prev => [...prev, ...newResults])
       setCurrentPage(nextPage)
@@ -175,7 +235,7 @@ function AnimeScreen() {
     } finally {
       setLoadingMore(false)
     }
-  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userWatchingGenres, nsfwFilter, recommendations])
+  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userWatchingGenres, nsfwFilter])
 
   // Intersection observer for infinite scroll
   useEffect(() => {

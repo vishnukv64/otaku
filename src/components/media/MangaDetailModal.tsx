@@ -29,6 +29,8 @@ import {
 } from 'lucide-react'
 import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { hasNsfwGenres } from '@/utils/nsfw-filter'
 import type { SearchResult, MangaDetails, Chapter } from '@/types/extension'
 import toast from 'react-hot-toast'
 
@@ -38,13 +40,11 @@ interface MangaDetailModalProps {
   onClose: () => void
 }
 
-// NSFW genres that should be blocked when filter is enabled
-const NSFW_GENRES = ['hentai', 'ecchi', 'adult', 'mature', 'erotica', 'smut', 'adult cast', 'sexual violence']
-
 export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailModalProps) {
   const navigate = useNavigate()
   const maxConcurrentDownloads = useSettingsStore((state) => state.maxConcurrentDownloads)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
+  const { refresh: refreshMediaStatus } = useMediaStatusContext()
   const [details, setDetails] = useState<MangaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -79,11 +79,8 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         setDetails(result)
 
         // Check if content is NSFW and should be blocked
-        if (nsfwFilter && result.genres) {
-          const hasNsfwGenre = result.genres.some(genre =>
-            NSFW_GENRES.includes(genre.toLowerCase())
-          )
-          setIsNsfwBlocked(hasNsfwGenre)
+        if (nsfwFilter) {
+          setIsNsfwBlocked(hasNsfwGenres(result.genres))
         } else {
           setIsNsfwBlocked(false)
         }
@@ -243,6 +240,8 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       await addToLibrary(details.id, status)
       setInLibrary(true)
       toast.success(`Added to ${status.replace('_', ' ')}`)
+      // Refresh media status context so badges update across the app
+      refreshMediaStatus()
     } catch (err) {
       toast.error('Failed to add to library')
       console.error(err)
@@ -257,6 +256,8 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       setInLibrary(false)
       setIsFavorite(false)
       toast.success('Removed from library')
+      // Refresh media status context so badges update across the app
+      refreshMediaStatus()
     } catch (err) {
       toast.error('Failed to remove from library')
       console.error(err)
@@ -277,6 +278,8 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       const newFavorite = await toggleFavorite(details.id)
       setIsFavorite(newFavorite)
       toast.success(newFavorite ? 'Added to favorites' : 'Removed from favorites')
+      // Refresh media status context so badges update across the app
+      refreshMediaStatus()
     } catch (err) {
       toast.error('Failed to toggle favorite')
       console.error(err)

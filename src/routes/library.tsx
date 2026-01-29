@@ -11,6 +11,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Loader2, AlertCircle, BookMarked, Download, Tv, BookOpen } from 'lucide-react'
 import { getLibraryWithMedia, loadExtension, getDownloadsWithMedia, getDownloadedMangaWithMedia, type LibraryEntryWithMedia, type LibraryStatus, type DownloadWithMedia, type DownloadedMangaWithMedia } from '@/utils/tauri-commands'
+import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
@@ -47,6 +48,7 @@ const MANGA_TABS: { id: LibraryStatus | 'all' | 'downloaded'; label: string }[] 
 
 function LibraryScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('anime')
@@ -118,10 +120,17 @@ function LibraryScreen() {
           const results = await getLibraryWithMedia(activeTab === 'all' ? undefined : activeTab)
 
           // Filter by media type
-          const filtered = results.filter(entry => {
+          let filtered = results.filter(entry => {
             if (mediaFilter === 'all') return true
             return entry.media.media_type === mediaFilter
           })
+
+          // Filter out NSFW content if filter is enabled
+          filtered = filterNsfwContent(
+            filtered,
+            entry => entry.media.genres,
+            nsfwFilter
+          )
 
           setLibrary(filtered)
         }
@@ -133,7 +142,7 @@ function LibraryScreen() {
     }
 
     loadLibrary()
-  }, [activeTab, mediaFilter])
+  }, [activeTab, mediaFilter, nsfwFilter])
 
   const handleMediaClick = (entry: LibraryEntryWithMedia) => {
     // Convert to SearchResult for modal
@@ -187,10 +196,16 @@ function LibraryScreen() {
           }
         } else {
           const results = await getLibraryWithMedia(activeTab === 'all' ? undefined : activeTab)
-          const filtered = results.filter(entry => {
+          let filtered = results.filter(entry => {
             if (mediaFilter === 'all') return true
             return entry.media.media_type === mediaFilter
           })
+          // Filter out NSFW content if filter is enabled
+          filtered = filterNsfwContent(
+            filtered,
+            entry => entry.media.genres,
+            nsfwFilter
+          )
           setLibrary(filtered)
         }
       } catch (err) {

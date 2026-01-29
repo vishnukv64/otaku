@@ -179,6 +179,192 @@ pub async fn get_video_sources(
     Ok(sources)
 }
 
+/// Event name for anime discover streaming
+pub const ANIME_DISCOVER_EVENT: &str = "anime-discover-results";
+
+/// Event name for manga discover streaming
+pub const MANGA_DISCOVER_EVENT: &str = "manga-discover-results";
+
+/// Event payload for streaming discover results
+#[derive(Clone, serde::Serialize)]
+pub struct DiscoverResultsEvent {
+    pub results: Vec<SearchResult>,
+    pub page: u32,
+    pub has_next_page: bool,
+    pub is_last: bool,
+    pub total_results: usize,
+}
+
+/// Stream anime discover results via SSE (Server-Sent Events)
+/// Emits results progressively as each page loads
+#[tauri::command]
+pub async fn stream_discover_anime(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    sort_type: Option<String>,
+    genres: Vec<String>,
+    allow_adult: Option<bool>,
+    pages_to_fetch: Option<u32>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+    let pages_to_fetch = pages_to_fetch.unwrap_or(3);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut has_more_pages = true;
+
+    // Fetch pages progressively and emit results
+    for page in 1..=pages_to_fetch {
+        if !has_more_pages {
+            break;
+        }
+
+        // Check cache for this page
+        let cache_key = cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult);
+
+        let page_results = if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+            log::debug!("Cache hit for stream discover page {}: {}", page, cache_key);
+            cached
+        } else {
+            let results = runtime.discover(page, sort_type.clone(), genres.clone())
+                .map_err(|e| format!("Discover failed: {}", e))?;
+
+            // Cache this page's results
+            DISCOVER_CACHE.insert(cache_key, results.clone());
+            results
+        };
+
+        has_more_pages = page_results.has_next_page;
+
+        // Deduplicate and collect new results
+        let mut new_results: Vec<SearchResult> = Vec::new();
+        for item in page_results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                new_results.push(item.clone());
+                all_results.push(item);
+            }
+        }
+
+        let is_last = page == pages_to_fetch || !has_more_pages;
+        let new_count = new_results.len();
+
+        // Emit this page's results
+        if !new_results.is_empty() || is_last {
+            let _ = app.emit(ANIME_DISCOVER_EVENT, DiscoverResultsEvent {
+                results: new_results,
+                page,
+                has_next_page: has_more_pages,
+                is_last,
+                total_results: all_results.len(),
+            });
+            log::debug!("Emitted anime discover page {} ({} new results, {} total)", page, new_count, all_results.len());
+        }
+    }
+
+    log::info!("Streamed {} pages of anime discover results ({} total items)", pages_to_fetch.min(3), all_results.len());
+    Ok(())
+}
+
+/// Stream manga discover results via SSE (Server-Sent Events)
+/// Emits results progressively as each page loads
+#[tauri::command]
+pub async fn stream_discover_manga(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    sort_type: Option<String>,
+    genres: Vec<String>,
+    allow_adult: Option<bool>,
+    pages_to_fetch: Option<u32>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+    let pages_to_fetch = pages_to_fetch.unwrap_or(3);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut has_more_pages = true;
+
+    // Fetch pages progressively and emit results
+    for page in 1..=pages_to_fetch {
+        if !has_more_pages {
+            break;
+        }
+
+        // Check cache for this page (use manga: prefix)
+        let cache_key = format!("manga:{}", cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult));
+
+        let page_results = if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+            log::debug!("Cache hit for stream manga discover page {}: {}", page, cache_key);
+            cached
+        } else {
+            let results = runtime.discover(page, sort_type.clone(), genres.clone())
+                .map_err(|e| format!("Manga discover failed: {}", e))?;
+
+            // Cache this page's results
+            DISCOVER_CACHE.insert(cache_key, results.clone());
+            results
+        };
+
+        has_more_pages = page_results.has_next_page;
+
+        // Deduplicate and collect new results
+        let mut new_results: Vec<SearchResult> = Vec::new();
+        for item in page_results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                new_results.push(item.clone());
+                all_results.push(item);
+            }
+        }
+
+        let is_last = page == pages_to_fetch || !has_more_pages;
+        let new_count = new_results.len();
+
+        // Emit this page's results
+        if !new_results.is_empty() || is_last {
+            let _ = app.emit(MANGA_DISCOVER_EVENT, DiscoverResultsEvent {
+                results: new_results,
+                page,
+                has_next_page: has_more_pages,
+                is_last,
+                total_results: all_results.len(),
+            });
+            log::debug!("Emitted manga discover page {} ({} new results, {} total)", page, new_count, all_results.len());
+        }
+    }
+
+    log::info!("Streamed {} pages of manga discover results ({} total items)", pages_to_fetch.min(3), all_results.len());
+    Ok(())
+}
+
 /// Discover anime with filters (trending, top-rated, by genre, etc.)
 #[tauri::command]
 pub async fn discover_anime(

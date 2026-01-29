@@ -14,6 +14,7 @@ import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useReaderStore } from '@/store/readerStore'
 import { saveReadingProgress } from '@/utils/tauri-commands'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { ChapterImage, Chapter } from '@/types/extension'
 
 import { PageView } from './PageView'
@@ -59,6 +60,7 @@ export function MangaReader({
 }: MangaReaderProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const hideControlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
+  const { refresh: refreshMediaStatus } = useMediaStatusContext()
 
   // Refs for unmount save (to avoid stale closures)
   const mangaIdRef = useRef(mangaId)
@@ -147,11 +149,21 @@ export function MangaReader({
     setIsLoading(false)
   }, [images, initialPage, setTotalPages, setCurrentPage])
 
+  // Track if we've marked this chapter as completed (to avoid multiple refreshes)
+  const [wasMarkedComplete, setWasMarkedComplete] = useState(false)
+
+  // Reset completion tracking when chapter changes
+  useEffect(() => {
+    setWasMarkedComplete(false)
+  }, [chapterId])
+
   // Save reading progress when page changes
   useEffect(() => {
     // Check for undefined/null explicitly (not !currentChapter, which would be true for chapter 0)
     if (!mangaId || !chapterId || currentChapter === undefined || currentChapter === null) return
     if (totalPages === 0) return // Don't save if no pages loaded yet
+
+    const isCompleted = currentPage >= totalPages * (settings.markReadThreshold / 100)
 
     const saveProgress = async () => {
       try {
@@ -161,8 +173,14 @@ export function MangaReader({
           currentChapter,
           currentPage,
           totalPages,
-          currentPage >= totalPages * (settings.markReadThreshold / 100)
+          isCompleted
         )
+
+        // Refresh media status when chapter is marked as completed (only once per chapter)
+        if (isCompleted && !wasMarkedComplete) {
+          setWasMarkedComplete(true)
+          refreshMediaStatus()
+        }
       } catch (error) {
         console.error('Failed to save reading progress:', error)
       }
@@ -171,7 +189,7 @@ export function MangaReader({
     // Debounce save to avoid too many writes
     const timeoutId = setTimeout(saveProgress, 500) // Reduced to 500ms for faster saves
     return () => clearTimeout(timeoutId)
-  }, [mangaId, chapterId, currentChapter, currentPage, totalPages, settings.markReadThreshold])
+  }, [mangaId, chapterId, currentChapter, currentPage, totalPages, settings.markReadThreshold, wasMarkedComplete, refreshMediaStatus])
 
   // Save progress immediately when component unmounts
   useEffect(() => {
@@ -194,8 +212,11 @@ export function MangaReader({
           cPage >= tPages * (threshold / 100)
         ).catch(err => console.error('Failed to save reading progress on unmount:', err))
       }
+
+      // Refresh media status when leaving reader so badges update
+      refreshMediaStatus()
     }
-  }, []) // Empty deps is correct - we use refs to get current values
+  }, [refreshMediaStatus]) // Include refreshMediaStatus in deps
 
   // Keyboard navigation
   useEffect(() => {

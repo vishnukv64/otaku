@@ -16,6 +16,7 @@ import type { SearchResult, MediaDetails } from '@/types/extension'
 import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, type MediaEntry, type WatchHistory } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { MediaCard } from './MediaCard'
 
 interface MediaDetailModalProps {
@@ -34,6 +35,7 @@ export function MediaDetailModal({
   onMediaChange,
 }: MediaDetailModalProps) {
   const navigate = useNavigate()
+  const { refresh: refreshMediaStatus } = useMediaStatusContext()
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -278,6 +280,8 @@ export function MediaDetailModal({
         setInLibrary(true)
         toast.success('Added to My List')
       }
+      // Refresh media status context so badges update across the app
+      refreshMediaStatus()
     } catch (error) {
       console.error('Failed to toggle library:', error)
       toast.error('Failed to update My List')
