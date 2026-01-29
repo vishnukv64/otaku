@@ -5,6 +5,28 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-01-29
+
+### Added
+- **Winter 2026 Season Tab** on Anime page with full season listing
+  - Sorted by rating (highest to lowest)
+  - Infinite scroll pagination
+  - SSE streaming for progressive loading
+- **Season anime caching** (15-minute TTL) for improved performance
+- **"Last Aired" display** on media cards and detail modal for airing anime
+- Favorite toggle button in media detail modal
+
+### Fixed
+- **Home page categories now show correct content**:
+  - "Hot Today" - Daily trending anime (was showing same data as other sections)
+  - "New Episodes" - Actually recently updated anime with new episode releases
+  - "All-Time Classics" - Top-rated anime sorted by score
+- Winter 2026 tab loading issue caused by SSE listener being prematurely unsubscribed
+
+### Changed
+- Removed Winter 2026 preview from Browse tab (now has dedicated tab)
+- Home page section titles updated for clarity
+
 ## [0.1.8] - 2026-01-29
 
 ### Added

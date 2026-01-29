@@ -100,10 +100,17 @@ A cross-platform desktop application for streaming anime and reading manga, buil
 
 - Real-time search with instant results as you type
 - Browse anime and manga separately with dedicated pages
+- **Current Season Tab** — Dedicated view for seasonal anime (e.g., Winter 2026)
+  - Full listing sorted by rating
+  - Infinite scroll pagination
+- **Enhanced Home Page** categories:
+  - **Hot Today** — Daily trending anime
+  - **New Episodes** — Recently updated anime with new releases
+  - **All-Time Classics** — Top-rated anime sorted by score
+- **Last Aired Date** display on media cards for airing anime
 - Dynamic genre filtering with count indicators
 - Browse over 100 genres and tags fetched from sources
 - Multi-genre filtering support for refined searches
-- Trending and recommended sections
 - Related anime/manga suggestions on detail pages
 
 ### Download Manager
