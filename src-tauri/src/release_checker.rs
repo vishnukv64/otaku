@@ -192,10 +192,12 @@ pub async fn initialize_tracking(
     Ok(())
 }
 
-/// Update tracking after checking
+/// Update tracking after checking (uses upsert to handle items without tracking records)
 async fn update_tracking(
     pool: &SqlitePool,
     media_id: &str,
+    extension_id: &str,
+    media_type: &str,
     current_count: i32,
     notified: bool,
 ) -> Result<()> {
@@ -204,28 +206,39 @@ async fn update_tracking(
     if notified {
         sqlx::query(
             r#"
-            UPDATE release_tracking
-            SET last_known_count = ?, last_checked_at = ?, last_notified_count = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE media_id = ?
+            INSERT INTO release_tracking (media_id, extension_id, media_type, last_known_count, last_checked_at, last_notified_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(media_id) DO UPDATE SET
+                last_known_count = excluded.last_known_count,
+                last_checked_at = excluded.last_checked_at,
+                last_notified_count = excluded.last_notified_count,
+                updated_at = CURRENT_TIMESTAMP
             "#
         )
+        .bind(media_id)
+        .bind(extension_id)
+        .bind(media_type)
         .bind(current_count)
         .bind(now)
         .bind(current_count)
-        .bind(media_id)
         .execute(pool)
         .await?;
     } else {
         sqlx::query(
             r#"
-            UPDATE release_tracking
-            SET last_known_count = ?, last_checked_at = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE media_id = ?
+            INSERT INTO release_tracking (media_id, extension_id, media_type, last_known_count, last_checked_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(media_id) DO UPDATE SET
+                last_known_count = excluded.last_known_count,
+                last_checked_at = excluded.last_checked_at,
+                updated_at = CURRENT_TIMESTAMP
             "#
         )
+        .bind(media_id)
+        .bind(extension_id)
+        .bind(media_type)
         .bind(current_count)
         .bind(now)
-        .bind(media_id)
         .execute(pool)
         .await?;
     }
@@ -250,7 +263,7 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
         FROM media m
         INNER JOIN library l ON m.id = l.media_id
         LEFT JOIN release_tracking rt ON m.id = rt.media_id
-        WHERE m.status = 'Ongoing'
+        WHERE m.status IN ('Ongoing', 'Releasing')
             AND (
                 l.status IN ('watching', 'reading', 'plan_to_watch', 'plan_to_read')
                 OR l.favorite = 1
@@ -377,7 +390,7 @@ pub async fn run_full_release_check(
                 );
 
                 // Update tracking
-                if let Err(e) = update_tracking(pool, &result.media_id, result.current_count, true).await {
+                if let Err(e) = update_tracking(pool, &result.media_id, &result.extension_id, &result.media_type, result.current_count, true).await {
                     log::error!("Failed to update tracking for {}: {}", result.media_id, e);
                 }
 
@@ -390,7 +403,7 @@ pub async fn run_full_release_check(
             }
             Ok(None) => {
                 // No new releases, update last checked time
-                if let Err(e) = update_tracking(pool, &media.media_id, media.last_known_count, false).await {
+                if let Err(e) = update_tracking(pool, &media.media_id, &media.extension_id, &media.media_type, media.last_known_count, false).await {
                     log::error!("Failed to update tracking for {}: {}", media.media_id, e);
                 }
             }
@@ -464,8 +477,8 @@ async fn emit_release_notification(
         )
     } else {
         format!(
-            "/manga/{}?extensionId={}",
-            result.media_id, result.extension_id
+            "/read?extensionId={}&mangaId={}",
+            result.extension_id, result.media_id
         )
     };
 
@@ -616,7 +629,7 @@ pub async fn get_release_check_status(pool: &SqlitePool) -> Result<ReleaseCheckS
         SELECT COUNT(*)
         FROM media m
         INNER JOIN library l ON m.id = l.media_id
-        WHERE m.status = 'Ongoing'
+        WHERE m.status IN ('Ongoing', 'Releasing')
             AND (
                 l.status IN ('watching', 'reading', 'plan_to_watch', 'plan_to_read')
                 OR l.favorite = 1

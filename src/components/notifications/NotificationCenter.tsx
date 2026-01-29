@@ -136,7 +136,16 @@ export function NotificationCenter() {
   const handleAction = useCallback(
     (notification: Notification) => {
       if (notification.action?.route) {
-        navigate({ to: notification.action.route })
+        let route = notification.action.route
+
+        // Migrate old manga routes: /manga/{id}?extensionId={ext} -> /read?extensionId={ext}&mangaId={id}
+        const oldMangaRouteMatch = route.match(/^\/manga\/([^?]+)\?extensionId=(.+)$/)
+        if (oldMangaRouteMatch) {
+          const [, mangaId, extensionId] = oldMangaRouteMatch
+          route = `/read?extensionId=${extensionId}&mangaId=${mangaId}`
+        }
+
+        navigate({ to: route })
       }
       markAsRead(notification.id)
     },

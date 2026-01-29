@@ -27,7 +27,7 @@ import {
   CheckCircle,
   Trash2,
 } from 'lucide-react'
-import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
+import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { useChapterDownloadEvents } from '@/hooks/useChapterDownloadEvents'
@@ -261,6 +261,14 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       await addToLibrary(details.id, status)
       setInLibrary(true)
       notifySuccess(details.title, `Added to "${statusLabels[status]}" list`)
+      // Initialize release tracking for ongoing manga
+      if (details.chapters.length > 0) {
+        try {
+          await initializeReleaseTracking(details.id, extensionId, 'manga', details.chapters.length)
+        } catch (trackingError) {
+          console.error('Failed to initialize release tracking:', trackingError)
+        }
+      }
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
@@ -295,6 +303,14 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       if (!inLibrary) {
         await addToLibrary(details.id, 'plan_to_read')
         setInLibrary(true)
+        // Initialize release tracking for ongoing manga
+        if (details.chapters.length > 0) {
+          try {
+            await initializeReleaseTracking(details.id, extensionId, 'manga', details.chapters.length)
+          } catch (trackingError) {
+            console.error('Failed to initialize release tracking:', trackingError)
+          }
+        }
       }
       const newFavorite = await toggleFavorite(details.id)
       setIsFavorite(newFavorite)

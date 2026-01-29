@@ -325,6 +325,7 @@ pub fn run() {
       commands::delete_episode_download,
       commands::clear_completed_downloads,
       commands::clear_failed_downloads,
+      commands::clear_cancelled_downloads,
       // Watch History
       commands::save_watch_progress,
       commands::get_watch_progress,

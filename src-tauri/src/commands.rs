@@ -1498,6 +1498,17 @@ pub async fn clear_failed_downloads(
         .map_err(|e| format!("Failed to clear failed downloads: {}", e))
 }
 
+/// Clear cancelled downloads from list
+#[tauri::command]
+pub async fn clear_cancelled_downloads(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<(), String> {
+    download_manager
+        .clear_cancelled()
+        .await
+        .map_err(|e| format!("Failed to clear cancelled downloads: {}", e))
+}
+
 
 // ==================== Watch History Commands ====================
 

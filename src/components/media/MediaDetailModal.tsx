@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, toggleFavorite, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, toggleFavorite, initializeReleaseTracking, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
@@ -158,6 +158,42 @@ export function MediaDetailModal({
     }
   }
 
+  const handleDownloadEpisode = async (episodeId: string, episodeNumber: number) => {
+    if (!details) return
+
+    // Skip if already downloaded or downloading
+    if (downloadedEpisodes.has(episodeNumber) || downloadingEpisodes.has(episodeNumber)) {
+      return
+    }
+
+    try {
+      // Get video sources
+      const videoSources = await getVideoSources(extensionId, episodeId)
+      if (!videoSources || !videoSources.sources || videoSources.sources.length === 0) {
+        notifyError('Download Failed', `No video sources found for Episode ${episodeNumber}`)
+        return
+      }
+
+      // Find best quality source
+      const source = videoSources.sources[0]
+      const videoUrl = source.url
+      if (!videoUrl) {
+        notifyError('Download Failed', `No video URL found for Episode ${episodeNumber}`)
+        return
+      }
+
+      // Generate filename
+      const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episodeNumber}.mp4`
+
+      // Start download with custom path if set
+      await startDownload(media.id, episodeId, episodeNumber, videoUrl, filename, customDownloadLocation || undefined)
+      notifySuccess(media.title, `Started downloading Episode ${episodeNumber}`)
+    } catch (error) {
+      console.error(`Failed to download episode ${episodeNumber}:`, error)
+      notifyError('Download Failed', `Failed to download Episode ${episodeNumber}`)
+    }
+  }
+
   const handleDownloadAll = async () => {
     if (!details) return
 
@@ -298,6 +334,14 @@ export function MediaDetailModal({
       await addToLibrary(media.id, status)
       setInLibrary(true)
       notifySuccess(media.title, `Added to "${statusLabels[status]}" list`)
+      // Initialize release tracking for ongoing anime
+      if (details && details.episodes.length > 0) {
+        try {
+          await initializeReleaseTracking(media.id, extensionId, 'anime', details.episodes.length)
+        } catch (trackingError) {
+          console.error('Failed to initialize release tracking:', trackingError)
+        }
+      }
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (error) {
@@ -333,6 +377,14 @@ export function MediaDetailModal({
       if (!inLibrary) {
         await addToLibrary(media.id, 'plan_to_watch')
         setInLibrary(true)
+        // Initialize release tracking for ongoing anime
+        if (details && details.episodes.length > 0) {
+          try {
+            await initializeReleaseTracking(media.id, extensionId, 'anime', details.episodes.length)
+          } catch (trackingError) {
+            console.error('Failed to initialize release tracking:', trackingError)
+          }
+        }
       }
       const newFavorite = await toggleFavorite(media.id)
       setIsFavorite(newFavorite)
@@ -955,22 +1007,36 @@ export function MediaDetailModal({
                             </div>
                           )}
 
-                          {/* Action buttons overlay on hover (only in normal mode) */}
+                          {/* Play button overlay on hover (only in normal mode) */}
                           {!selectionMode && (
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
-                              {/* Play button */}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleWatch(episode.id)
-                                }}
-                                className="w-12 h-12 rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center transform hover:scale-110 transition-transform"
-                                title="Play episode"
-                              >
+                            <div
+                              className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                              onClick={() => handleWatch(episode.id)}
+                            >
+                              <div className="w-12 h-12 rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center transform group-hover:scale-110 transition-transform">
                                 <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M8 5v14l11-7z" />
                                 </svg>
-                              </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Small download/delete button at top right on hover (only in normal mode, not downloading) */}
+                          {!selectionMode && !downloadingEpisodes.has(episode.number) && (
+                            <>
+                              {/* Download button (only for non-downloaded episodes) */}
+                              {!downloadedEpisodes.has(episode.number) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDownloadEpisode(episode.id, episode.number)
+                                  }}
+                                  className="absolute top-2 right-2 w-7 h-7 rounded-md bg-black/70 hover:bg-[var(--color-accent-primary)] backdrop-blur-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10"
+                                  title="Download episode"
+                                >
+                                  <Download size={14} />
+                                </button>
+                              )}
 
                               {/* Delete button (only for downloaded episodes) */}
                               {downloadedEpisodes.has(episode.number) && (
@@ -979,13 +1045,13 @@ export function MediaDetailModal({
                                     e.stopPropagation()
                                     handleDeleteEpisode(episode.number)
                                   }}
-                                  className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center transform hover:scale-110 transition-transform"
+                                  className="absolute top-2 right-2 w-7 h-7 rounded-md bg-black/70 hover:bg-red-600 backdrop-blur-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10"
                                   title="Delete downloaded episode"
                                 >
-                                  <Trash2 size={20} />
+                                  <Trash2 size={14} />
                                 </button>
                               )}
-                            </div>
+                            </>
                           )}
 
                           {/* Selection checkbox (only in selection mode) */}
@@ -1015,7 +1081,7 @@ export function MediaDetailModal({
                               </span>
                             </div>
                           ) : downloadedEpisodes.has(episode.number) && (
-                            <div className="absolute top-2 right-2 px-2.5 py-1 bg-green-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1">
+                            <div className="absolute top-2 right-2 px-2.5 py-1 bg-green-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1 group-hover:opacity-0 transition-opacity">
                               <CheckCircle className="w-3 h-3" />
                               Downloaded
                             </div>

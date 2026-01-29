@@ -629,6 +629,13 @@ export async function clearFailedDownloads(): Promise<void> {
   return await invoke('clear_failed_downloads')
 }
 
+/**
+ * Clear cancelled downloads from list
+ */
+export async function clearCancelledDownloads(): Promise<void> {
+  return await invoke('clear_cancelled_downloads')
+}
+
 // Download types
 export interface DownloadProgress {
   id: string

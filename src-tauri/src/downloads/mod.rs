@@ -896,6 +896,36 @@ impl DownloadManager {
         Ok(())
     }
 
+    /// Clear cancelled downloads from list
+    pub async fn clear_cancelled(&self) -> Result<()> {
+        // Get IDs of cancelled downloads
+        let cancelled_ids: Vec<String> = {
+            let downloads = self.downloads.read().await;
+            downloads
+                .iter()
+                .filter(|(_, d)| d.status == DownloadStatus::Cancelled)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+
+        // Delete from database
+        if let Some(pool) = &self.db_pool {
+            for id in &cancelled_ids {
+                sqlx::query("DELETE FROM downloads WHERE id = ?")
+                    .bind(id)
+                    .execute(pool.as_ref())
+                    .await
+                    .ok();
+            }
+        }
+
+        // Remove from memory
+        let mut downloads = self.downloads.write().await;
+        downloads.retain(|_, d| d.status != DownloadStatus::Cancelled);
+        log::debug!("Cleared {} cancelled downloads from list", cancelled_ids.len());
+        Ok(())
+    }
+
     /// Delete a downloaded file and remove from list
     pub async fn delete_download(&self, download_id: &str) -> Result<()> {
         let file_path = {

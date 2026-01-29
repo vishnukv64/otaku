@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy, BookOpen, Tv, Pause, Play } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
+import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, clearCancelledDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -291,6 +291,24 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     } catch (error) {
       console.error('Failed to clear failed downloads:', error)
       notifyError('Clear Failed', 'Failed to clear failed downloads')
+    }
+  }
+
+  const handleClearCancelled = async () => {
+    const cancelledCount = downloads.filter(d => d.status === 'cancelled').length
+    if (cancelledCount === 0) {
+      notifyError('No Downloads', 'No cancelled downloads to clear')
+      return
+    }
+
+    try {
+      await clearCancelledDownloads()
+      const result = await listDownloads()
+      setDownloads(result)
+      notifySuccess('Downloads Cleared', `Cleared ${cancelledCount} cancelled download(s)`)
+    } catch (error) {
+      console.error('Failed to clear cancelled downloads:', error)
+      notifyError('Clear Failed', 'Failed to clear cancelled downloads')
     }
   }
 
@@ -603,6 +621,15 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                   className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
                 >
                   Clear Failed
+                </button>
+              )}
+
+              {downloads.filter(d => d.status === 'cancelled').length > 0 && (
+                <button
+                  onClick={handleClearCancelled}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 rounded-lg transition-colors text-sm font-medium"
+                >
+                  Clear Cancelled
                 </button>
               )}
             </div>
@@ -949,6 +976,17 @@ function DownloadItem({
                 <Trash2 size={16} />
               </button>
             </>
+          )}
+
+          {/* Dismiss button for cancelled downloads */}
+          {download.status === 'cancelled' && (
+            <button
+              onClick={() => onDelete(download.id, download.filename)}
+              className="w-8 h-8 flex items-center justify-center hover:bg-red-500/20 text-red-400 rounded transition-colors"
+              title="Remove from list"
+            >
+              <X size={16} />
+            </button>
           )}
         </div>
       </div>
