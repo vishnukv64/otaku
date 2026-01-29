@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
 import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, toggleFavorite, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
@@ -18,6 +18,29 @@ import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { MediaCard } from './MediaCard'
+
+/** Format episode date for display */
+function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
+  const now = new Date()
+  const episodeDate = new Date(epDate.year, epDate.month, epDate.date)
+  const diffTime = now.getTime() - episodeDate.getTime()
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7) return `${diffDays} days ago`
+
+  // Format as "Jan 22, 2026"
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[epDate.month]} ${epDate.date}, ${epDate.year}`
+}
+
+/** Check if anime is currently airing */
+function isAiring(status?: string): boolean {
+  if (!status) return false
+  const s = status.toLowerCase()
+  return s === 'releasing' || s === 'ongoing' || s === 'airing' || s === 'currently airing'
+}
 
 interface MediaDetailModalProps {
   media: SearchResult
@@ -586,6 +609,16 @@ export function MediaDetailModal({
                             </span>
                           </>
                         )}
+                        {/* Latest Episode Badge for airing anime */}
+                        {isAiring(details.status) && media.latest_episode && media.latest_episode_date && (
+                          <>
+                            <span className="text-[var(--color-text-muted)]">•</span>
+                            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-full text-sm font-medium flex items-center gap-1.5">
+                              <Radio className="w-3 h-3" />
+                              EP {media.latest_episode} • {formatEpisodeDate(media.latest_episode_date)}
+                            </span>
+                          </>
+                        )}
                       </div>
 
                       {/* Metadata Row 2 - Additional Details */}
@@ -797,6 +830,21 @@ export function MediaDetailModal({
                     <div className="text-[var(--color-text-muted)] text-sm mb-1">Year</div>
                     <div className="text-2xl font-bold">{details.year || 'N/A'}</div>
                   </div>
+                  {/* Last Aired - show for currently airing anime with episode date */}
+                  {isAiring(details.status) && media.latest_episode_date && (
+                    <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                      <div className="text-[var(--color-text-muted)] text-sm mb-1 flex items-center gap-1">
+                        <Radio className="w-3 h-3 text-emerald-400" />
+                        Last Aired
+                      </div>
+                      <div className="text-lg font-bold text-emerald-400">
+                        EP {media.latest_episode}
+                      </div>
+                      <div className="text-sm text-[var(--color-text-secondary)]">
+                        {formatEpisodeDate(media.latest_episode_date)}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Description */}

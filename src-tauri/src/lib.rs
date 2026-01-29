@@ -278,6 +278,8 @@ pub fn run() {
       commands::load_extension,
       commands::search_anime,
       commands::discover_anime,
+      commands::get_current_season_anime,
+      commands::stream_current_season_anime,
       commands::stream_discover_anime,
       commands::get_home_content,
       commands::stream_home_content,

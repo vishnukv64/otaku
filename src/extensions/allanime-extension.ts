@@ -35,17 +35,23 @@ const extensionObject = {
   },
 
   search: (query, page) => {
-    const searchQuery = \`query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name thumbnail availableEpisodes description status score season __typename } } }\`;
-
+    // Use persisted query for richer data including lastEpisodeDate
     const variables = {
-      search: { allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false, allowUnknown: false, query: query },
-      limit: 40,
-      page: page,
+      search: { query: query },
+      limit: 26,
+      page: page || 1,
       translationType: "sub",
       countryOrigin: "ALL"
     };
 
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(searchQuery)}\`;
+    const extensions = {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "06327bc10dd682e1ee7e07b6db9c16e9ad2fd56c1b769e47513128cd5c9fc77a"
+      }
+    };
+
+    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
     try {
       const responseStr = __fetch(url, {
@@ -60,6 +66,11 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const shows = data?.data?.shows?.edges || [];
 
+      // Debug: Log first show to see available fields
+      if (shows.length > 0) {
+        console.log('[AllAnime] search first show:', JSON.stringify(shows[0], null, 2));
+      }
+
       const results = shows.map(show => {
         // Thumbnail can be a full URL or a path - handle both cases
         let coverUrl = null;
@@ -71,18 +82,30 @@ const extensionObject = {
           }
         }
 
+        // Extract latest episode info
+        const latestEp = show.lastEpisodeInfo?.sub?.episodeString;
+        const latestEpDate = show.lastEpisodeDate?.sub;
+
         return {
           id: show._id,
-          title: show.name,
+          title: show.englishName || show.name,
           coverUrl: coverUrl,
           description: show.description || '',
-          year: show.season?.year || null,
+          year: show.season?.year || show.airedStart?.year || null,
           status: show.status || 'Unknown',
-          rating: show.score ? parseFloat(show.score) : null
+          rating: show.score ? parseFloat(show.score) : null,
+          latestEpisode: latestEp ? parseInt(latestEp, 10) : null,
+          latestEpisodeDate: latestEpDate ? {
+            year: latestEpDate.year,
+            month: latestEpDate.month,
+            date: latestEpDate.date
+          } : null,
+          availableEpisodes: show.availableEpisodes?.sub || null,
+          mediaType: show.type || null
         };
       });
 
-      return { results: results, hasNextPage: shows.length >= 40 };
+      return { results: results, hasNextPage: shows.length >= 26 };
     } catch (error) {
       console.error('Search failed:', error);
       return { results: [], hasNextPage: false };
@@ -90,23 +113,24 @@ const extensionObject = {
   },
 
   discover: (page, sortType, genres) => {
-    // If genres are provided, use the shows query with genre filtering
+    // If genres are provided, use the persisted query with genre search
     if (genres && genres.length > 0) {
-      const searchQuery = \`query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name thumbnail availableEpisodes description status score season __typename } } }\`;
-
       const variables = {
-        search: {
-          allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false,
-          allowUnknown: false,
-          genres: genres
-        },
-        limit: 40,
+        search: { genres: genres },
+        limit: 26,
         page: page || 1,
         translationType: "sub",
         countryOrigin: "ALL"
       };
 
-      const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(searchQuery)}\`;
+      const extensions = {
+        persistedQuery: {
+          version: 1,
+          sha256Hash: "06327bc10dd682e1ee7e07b6db9c16e9ad2fd56c1b769e47513128cd5c9fc77a"
+        }
+      };
+
+      const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
       try {
         const responseStr = __fetch(url, {
@@ -131,18 +155,29 @@ const extensionObject = {
             }
           }
 
+          const latestEp = show.lastEpisodeInfo?.sub?.episodeString;
+          const latestEpDate = show.lastEpisodeDate?.sub;
+
           return {
             id: show._id,
-            title: show.name,
+            title: show.englishName || show.name,
             coverUrl: coverUrl,
             description: show.description || '',
-            year: show.season?.year || null,
+            year: show.season?.year || show.airedStart?.year || null,
             status: show.status || 'Unknown',
-            rating: show.score ? parseFloat(show.score) : null
+            rating: show.score ? parseFloat(show.score) : null,
+            latestEpisode: latestEp ? parseInt(latestEp, 10) : null,
+            latestEpisodeDate: latestEpDate ? {
+              year: latestEpDate.year,
+              month: latestEpDate.month,
+              date: latestEpDate.date
+            } : null,
+            availableEpisodes: show.availableEpisodes?.sub || null,
+            mediaType: show.type || null
           };
         });
 
-        return { results: results, hasNextPage: shows.length >= 40 };
+        return { results: results, hasNextPage: shows.length >= 26 };
       } catch (error) {
         console.error('Genre filter failed:', error);
         return { results: [], hasNextPage: false };
@@ -185,6 +220,11 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const recommendations = data?.data?.queryPopular?.recommendations || [];
 
+      // Debug: Log first recommendation to see available fields
+      if (recommendations.length > 0) {
+        console.log('[AllAnime] queryPopular first anyCard:', JSON.stringify(recommendations[0].anyCard, null, 2));
+      }
+
       let results = recommendations.map((rec) => {
         const show = rec.anyCard;
 
@@ -197,6 +237,10 @@ const extensionObject = {
           }
         }
 
+        // Extract latest episode info if available
+        const latestEp = show.lastEpisodeInfo?.sub?.episodeString;
+        const latestEpDate = show.lastEpisodeDate?.sub;
+
         return {
           id: show._id,
           title: show.englishName || show.name,
@@ -204,7 +248,15 @@ const extensionObject = {
           description: show.description || '',
           year: show.airedStart?.year || null,
           status: show.status || 'Unknown',
-          rating: show.score ? parseFloat(show.score) : null
+          rating: show.score ? parseFloat(show.score) : null,
+          latestEpisode: latestEp ? parseInt(latestEp, 10) : null,
+          latestEpisodeDate: latestEpDate ? {
+            year: latestEpDate.year,
+            month: latestEpDate.month,
+            date: latestEpDate.date
+          } : null,
+          availableEpisodes: show.availableEpisodes?.sub || null,
+          mediaType: show.type || null
         };
       });
 
@@ -227,6 +279,98 @@ const extensionObject = {
         results: [],
         hasNextPage: false
       };
+    }
+  },
+
+  // Get anime from current season (Winter/Spring/Summer/Fall + year)
+  getCurrentSeason: (page) => {
+    // Calculate current season based on month
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    let season;
+    if (month >= 0 && month <= 2) season = 'Winter';
+    else if (month >= 3 && month <= 5) season = 'Spring';
+    else if (month >= 6 && month <= 8) season = 'Summer';
+    else season = 'Fall';
+
+    const variables = {
+      search: { season: season, year: year },
+      limit: 26,
+      page: page || 1,
+      translationType: "sub",
+      countryOrigin: "ALL"
+    };
+
+    const extensions = {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "06327bc10dd682e1ee7e07b6db9c16e9ad2fd56c1b769e47513128cd5c9fc77a"
+      }
+    };
+
+    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
+
+    try {
+      const responseStr = __fetch(url, {
+        method: 'GET',
+        headers: {
+          'Referer': 'https://allmanga.to',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+        }
+      });
+
+      const response = JSON.parse(responseStr);
+      const data = JSON.parse(response.body);
+      const shows = data?.data?.shows?.edges || [];
+
+      // Debug: Log first show to see available fields for current season
+      if (shows.length > 0) {
+        console.log('[AllAnime] getCurrentSeason first show:', JSON.stringify(shows[0], null, 2));
+      }
+
+      const results = shows.map(show => {
+        let coverUrl = null;
+        if (show.thumbnail) {
+          if (show.thumbnail.startsWith('http://') || show.thumbnail.startsWith('https://')) {
+            coverUrl = show.thumbnail;
+          } else {
+            coverUrl = \`https://wp.youtube-anime.com/aln.youtube-anime.com/\${show.thumbnail}\`;
+          }
+        }
+
+        const latestEp = show.lastEpisodeInfo?.sub?.episodeString;
+        const latestEpDate = show.lastEpisodeDate?.sub;
+
+        return {
+          id: show._id,
+          title: show.englishName || show.name,
+          coverUrl: coverUrl,
+          description: show.description || '',
+          year: show.season?.year || show.airedStart?.year || null,
+          status: show.status || 'Unknown',
+          rating: show.score ? parseFloat(show.score) : null,
+          latestEpisode: latestEp ? parseInt(latestEp, 10) : null,
+          latestEpisodeDate: latestEpDate ? {
+            year: latestEpDate.year,
+            month: latestEpDate.month,
+            date: latestEpDate.date
+          } : null,
+          availableEpisodes: show.availableEpisodes?.sub || null,
+          mediaType: show.type || null
+        };
+      });
+
+      return {
+        results: results,
+        hasNextPage: shows.length >= 26,
+        season: season,
+        year: year
+      };
+    } catch (error) {
+      console.error('Get current season failed:', error);
+      return { results: [], hasNextPage: false, season: season, year: year };
     }
   },
 
@@ -450,6 +594,82 @@ const extensionObject = {
       return { results: results.slice(0, 20), hasNextPage: false };
     } catch (error) {
       console.error('Failed to get recommendations:', error);
+      return { results: [], hasNextPage: false };
+    }
+  },
+
+  // Get recently updated anime (sorted by most recent episode releases)
+  getRecentlyUpdated: (page) => {
+    const variables = {
+      search: { sortBy: "Recent" },
+      limit: 26,
+      page: page || 1,
+      translationType: "sub",
+      countryOrigin: "ALL"
+    };
+
+    const extensions = {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "06327bc10dd682e1ee7e07b6db9c16e9ad2fd56c1b769e47513128cd5c9fc77a"
+      }
+    };
+
+    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
+
+    try {
+      const responseStr = __fetch(url, {
+        method: 'GET',
+        headers: {
+          'Referer': 'https://allmanga.to',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+        }
+      });
+
+      const response = JSON.parse(responseStr);
+      const data = JSON.parse(response.body);
+      const shows = data?.data?.shows?.edges || [];
+
+      // Debug: Log first show to see available fields
+      if (shows.length > 0) {
+        console.log('[AllAnime] getRecentlyUpdated first show:', JSON.stringify(shows[0], null, 2));
+      }
+
+      const results = shows.map(show => {
+        let coverUrl = null;
+        if (show.thumbnail) {
+          if (show.thumbnail.startsWith('http://') || show.thumbnail.startsWith('https://')) {
+            coverUrl = show.thumbnail;
+          } else {
+            coverUrl = \`https://wp.youtube-anime.com/aln.youtube-anime.com/\${show.thumbnail}\`;
+          }
+        }
+
+        const latestEp = show.lastEpisodeInfo?.sub?.episodeString;
+        const latestEpDate = show.lastEpisodeDate?.sub;
+
+        return {
+          id: show._id,
+          title: show.englishName || show.name,
+          coverUrl: coverUrl,
+          description: show.description || '',
+          year: show.season?.year || show.airedStart?.year || null,
+          status: show.status || 'Releasing',
+          rating: show.score ? parseFloat(show.score) : null,
+          latestEpisode: latestEp ? parseInt(latestEp, 10) : null,
+          latestEpisodeDate: latestEpDate ? {
+            year: latestEpDate.year,
+            month: latestEpDate.month,
+            date: latestEpDate.date
+          } : null,
+          availableEpisodes: show.availableEpisodes?.sub || null,
+          mediaType: show.type || null
+        };
+      });
+
+      return { results: results, hasNextPage: shows.length >= 26 };
+    } catch (error) {
+      console.error('Get recently updated failed:', error);
       return { results: [], hasNextPage: false };
     }
   },

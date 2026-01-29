@@ -13,6 +13,7 @@ use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
 use crate::cache::{
     self, SEARCH_CACHE, DISCOVER_CACHE, ANIME_DETAILS_CACHE, MANGA_DETAILS_CACHE,
     VIDEO_SOURCES_CACHE, CHAPTER_IMAGES_CACHE, TAGS_CACHE, HOME_CONTENT_CACHE, RECOMMENDATIONS_CACHE,
+    SEASON_CACHE,
 };
 use crate::VideoServerInfo;
 use std::collections::HashSet;
@@ -185,6 +186,9 @@ pub const ANIME_DISCOVER_EVENT: &str = "anime-discover-results";
 /// Event name for manga discover streaming
 pub const MANGA_DISCOVER_EVENT: &str = "manga-discover-results";
 
+/// Event name for season anime streaming
+pub const SEASON_ANIME_DISCOVER_EVENT: &str = "season-anime-discover-results";
+
 /// Event payload for streaming discover results
 #[derive(Clone, serde::Serialize)]
 pub struct DiscoverResultsEvent {
@@ -193,6 +197,18 @@ pub struct DiscoverResultsEvent {
     pub has_next_page: bool,
     pub is_last: bool,
     pub total_results: usize,
+}
+
+/// Event payload for streaming season anime results (includes season info)
+#[derive(Clone, serde::Serialize)]
+pub struct SeasonDiscoverResultsEvent {
+    pub results: Vec<SearchResult>,
+    pub page: u32,
+    pub has_next_page: bool,
+    pub is_last: bool,
+    pub total_results: usize,
+    pub season: String,
+    pub year: u32,
 }
 
 /// Stream anime discover results via SSE (Server-Sent Events)
@@ -405,6 +421,138 @@ pub async fn discover_anime(
     log::debug!("Cached discover results");
 
     Ok(results)
+}
+
+/// Get anime from current season
+#[tauri::command]
+pub async fn get_current_season_anime(
+    state: State<'_, AppState>,
+    extension_id: String,
+    page: u32,
+    allow_adult: Option<bool>,
+) -> Result<crate::extensions::types::SeasonResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::season_key(&extension_id, page, allow_adult);
+    if let Some(cached) = SEASON_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for season anime: {}", cache_key);
+        return Ok(cached);
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let results = runtime.get_current_season(page)
+        .map_err(|e| format!("Get current season failed: {}", e))?;
+
+    // Cache the results
+    SEASON_CACHE.insert(cache_key, results.clone());
+
+    Ok(results)
+}
+
+/// Stream current season anime results via SSE (Server-Sent Events)
+/// Emits results progressively as each page loads
+/// Uses caching to avoid repeated API calls
+#[tauri::command]
+pub async fn stream_current_season_anime(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    allow_adult: Option<bool>,
+    pages_to_fetch: Option<u32>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+    let pages_to_fetch = pages_to_fetch.unwrap_or(3);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut has_more_pages = true;
+    let mut season_name = String::new();
+    let mut season_year: u32 = 0;
+
+    // Fetch pages progressively and emit results
+    for page in 1..=pages_to_fetch {
+        if !has_more_pages {
+            break;
+        }
+
+        // Check cache first for this page
+        let cache_key = cache::season_key(&extension_id, page, allow_adult);
+        let page_results = if let Some(cached) = SEASON_CACHE.get(&cache_key) {
+            log::debug!("Cache hit for season anime page {}: {}", page, cache_key);
+            cached
+        } else {
+            let results = runtime.get_current_season(page)
+                .map_err(|e| format!("Get current season failed: {}", e))?;
+            // Cache the results
+            SEASON_CACHE.insert(cache_key, results.clone());
+            results
+        };
+
+        // Capture season info from first page
+        if page == 1 {
+            season_name = page_results.season.clone();
+            season_year = page_results.year;
+        }
+
+        has_more_pages = page_results.has_next_page;
+
+        // Deduplicate and collect new results
+        let mut new_results: Vec<SearchResult> = Vec::new();
+        for item in page_results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                new_results.push(item.clone());
+                all_results.push(item);
+            }
+        }
+
+        let is_last = page == pages_to_fetch || !has_more_pages;
+        let new_count = new_results.len();
+
+        // Emit this page's results
+        if !new_results.is_empty() || is_last {
+            let _ = app.emit(SEASON_ANIME_DISCOVER_EVENT, SeasonDiscoverResultsEvent {
+                results: new_results,
+                page,
+                has_next_page: has_more_pages,
+                is_last,
+                total_results: all_results.len(),
+                season: season_name.clone(),
+                year: season_year,
+            });
+            log::debug!("Emitted season anime page {} ({} new results, {} total)", page, new_count, all_results.len());
+        }
+    }
+
+    log::info!("Streamed {} pages of {} {} anime ({} total items)",
+        pages_to_fetch.min(pages_to_fetch), season_name, season_year, all_results.len());
+    Ok(())
 }
 
 /// Get home page content with all categories in a single call

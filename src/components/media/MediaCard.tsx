@@ -11,6 +11,29 @@ import type { MediaStatus } from '@/contexts/MediaStatusContext'
 import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
 import { Heart, BookmarkCheck } from 'lucide-react'
 
+/** Format episode date for display */
+function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
+  const now = new Date()
+  const episodeDate = new Date(epDate.year, epDate.month, epDate.date)
+  const diffTime = now.getTime() - episodeDate.getTime()
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7) return `${diffDays}d ago`
+
+  // Format as "Jan 22"
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[epDate.month]} ${epDate.date}`
+}
+
+/** Check if anime is currently airing */
+function isAiring(status?: string): boolean {
+  if (!status) return false
+  const s = status.toLowerCase()
+  return s === 'releasing' || s === 'ongoing' || s === 'airing' || s === 'currently airing'
+}
+
 interface MediaCardProps {
   media: SearchResult
   onClick?: () => void
@@ -29,6 +52,18 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
   const showFavorite = status?.isFavorite
   const showLibraryStatus = status?.inLibrary && status.libraryStatus && !progress
   const showInProgress = !progress && (status?.isWatching || status?.isReading)
+
+  // Latest episode badge for airing anime
+  const showLatestEpisode = !progress && isAiring(media.status) && media.latest_episode && media.latest_episode_date
+
+  // Debug: Log if airing anime is missing episode date
+  if (isAiring(media.status) && (!media.latest_episode || !media.latest_episode_date)) {
+    console.log('[MediaCard] Airing anime missing episode data:', media.title, {
+      status: media.status,
+      latest_episode: media.latest_episode,
+      latest_episode_date: media.latest_episode_date
+    })
+  }
 
   return (
     <button
@@ -88,6 +123,16 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
               className="h-full bg-[var(--color-accent-primary)]"
               style={{ width: `${(progress.current / progress.total) * 100}%` }}
             />
+          </div>
+        )}
+
+        {/* Latest Episode Badge (for airing anime) */}
+        {showLatestEpisode && (
+          <div
+            className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-emerald-500/90 text-white text-[10px] font-semibold rounded"
+            title={`Latest: Episode ${media.latest_episode}`}
+          >
+            EP {media.latest_episode} • {formatEpisodeDate(media.latest_episode_date!)}
           </div>
         )}
 

@@ -99,6 +99,30 @@ export async function discoverAnime(
   return await invoke('discover_anime', { extensionId, page, sortType, genres, allowAdult })
 }
 
+// Season Results type
+export interface SeasonResults {
+  results: SearchResults['results']
+  has_next_page: boolean
+  season: string // 'Winter' | 'Spring' | 'Summer' | 'Fall'
+  year: number
+}
+
+/**
+ * Get anime from current season (based on current date)
+ * Automatically determines season (Winter/Spring/Summer/Fall) from current month
+ * @param extensionId - Extension ID
+ * @param page - Page number (1-indexed)
+ * @param allowAdult - Whether to include adult content (from NSFW setting)
+ * @returns Season results with anime list, season name and year
+ */
+export async function getCurrentSeasonAnime(
+  extensionId: string,
+  page: number = 1,
+  allowAdult: boolean = false
+): Promise<SeasonResults> {
+  return await invoke('get_current_season_anime', { extensionId, page, allowAdult })
+}
+
 // Home Content types
 export interface HomeCategory {
   id: string
@@ -254,6 +278,54 @@ export async function onMangaDiscoverResults(
   callback: (event: DiscoverResultsEvent) => void
 ): Promise<UnlistenFn> {
   return await listen<DiscoverResultsEvent>(MANGA_DISCOVER_EVENT, (event) => {
+    callback(event.payload)
+  })
+}
+
+// ==================== Season Anime Streaming (SSE) ====================
+
+/** Event name for season anime streaming */
+export const SEASON_ANIME_DISCOVER_EVENT = 'season-anime-discover-results'
+
+/** Event payload for streaming season anime results */
+export interface SeasonDiscoverResultsEvent {
+  results: SearchResults['results']
+  page: number
+  has_next_page: boolean
+  is_last: boolean
+  total_results: number
+  season: string // 'Winter' | 'Spring' | 'Summer' | 'Fall'
+  year: number
+}
+
+/**
+ * Start streaming current season anime results via SSE
+ * Results are emitted progressively as pages load
+ * @param extensionId - Extension ID
+ * @param allowAdult - Whether to include adult content
+ * @param pagesToFetch - Number of pages to fetch (default 3)
+ */
+export async function streamCurrentSeasonAnime(
+  extensionId: string,
+  allowAdult: boolean = false,
+  pagesToFetch: number = 3
+): Promise<void> {
+  return await invoke('stream_current_season_anime', {
+    extensionId,
+    allowAdult,
+    pagesToFetch,
+  })
+}
+
+/**
+ * Listen for season anime discover results events
+ * @param callback - Called when results are received
+ * @returns Unsubscribe function
+ */
+export async function onSeasonAnimeDiscoverResults(
+  callback: (event: SeasonDiscoverResultsEvent) => void
+): Promise<UnlistenFn> {
+  return await listen<SeasonDiscoverResultsEvent>(SEASON_ANIME_DISCOVER_EVENT, (event) => {
     callback(event.payload)
   })
 }

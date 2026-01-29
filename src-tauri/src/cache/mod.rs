@@ -116,7 +116,7 @@ where
 // ==================== API Response Cache ====================
 
 use crate::extensions::{
-    ChapterImages, HomeContent, MangaDetails, MediaDetails, SearchResults, TagsResult, VideoSources,
+    ChapterImages, HomeContent, MangaDetails, MediaDetails, SearchResults, SeasonResults, TagsResult, VideoSources,
 };
 use std::sync::LazyLock;
 
@@ -141,6 +141,9 @@ pub mod ttl {
 
     /// Recommendations - 15 minutes
     pub const RECOMMENDATIONS: Duration = Duration::from_secs(15 * 60);
+
+    /// Season anime - 15 minutes (current season data changes moderately)
+    pub const SEASON: Duration = Duration::from_secs(15 * 60);
 }
 
 /// Maximum cache entries for different caches
@@ -168,6 +171,9 @@ pub mod limits {
 
     /// Recommendations cache
     pub const RECOMMENDATIONS: usize = 10;
+
+    /// Season anime cache (season + year + page combinations)
+    pub const SEASON: usize = 50;
 }
 
 // ==================== Global Cache Instances ====================
@@ -207,6 +213,10 @@ pub static HOME_CONTENT_CACHE: LazyLock<Cache<String, HomeContent>> =
 /// Global cache for recommendations
 pub static RECOMMENDATIONS_CACHE: LazyLock<Cache<String, SearchResults>> =
     LazyLock::new(|| Cache::new(ttl::RECOMMENDATIONS, limits::RECOMMENDATIONS));
+
+/// Global cache for season anime
+pub static SEASON_CACHE: LazyLock<Cache<String, SeasonResults>> =
+    LazyLock::new(|| Cache::new(ttl::SEASON, limits::SEASON));
 
 // ==================== Cache Key Builders ====================
 
@@ -261,6 +271,11 @@ pub fn recommendations_key(extension_id: &str, allow_adult: bool) -> String {
     format!("{}:{}", extension_id, allow_adult)
 }
 
+/// Build a cache key for season anime
+pub fn season_key(extension_id: &str, page: u32, allow_adult: bool) -> String {
+    format!("{}:{}:{}", extension_id, page, allow_adult)
+}
+
 // ==================== Cache Statistics ====================
 
 /// Get cache statistics for debugging
@@ -275,6 +290,7 @@ pub struct CacheStats {
     pub tags_entries: usize,
     pub home_content_entries: usize,
     pub recommendations_entries: usize,
+    pub season_entries: usize,
 }
 
 /// Get current cache statistics
@@ -289,6 +305,7 @@ pub fn get_cache_stats() -> CacheStats {
         tags_entries: TAGS_CACHE.len(),
         home_content_entries: HOME_CONTENT_CACHE.len(),
         recommendations_entries: RECOMMENDATIONS_CACHE.len(),
+        season_entries: SEASON_CACHE.len(),
     }
 }
 
@@ -303,5 +320,6 @@ pub fn clear_all_caches() {
     TAGS_CACHE.clear();
     HOME_CONTENT_CACHE.clear();
     RECOMMENDATIONS_CACHE.clear();
+    SEASON_CACHE.clear();
     log::info!("All API caches cleared");
 }

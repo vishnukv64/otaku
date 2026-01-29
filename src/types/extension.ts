@@ -25,6 +25,18 @@ export interface SearchResult {
   year?: number
   status?: string
   rating?: number
+  /** Latest episode number (for currently airing) */
+  latest_episode?: number
+  /** Date of the latest episode release */
+  latest_episode_date?: {
+    year: number
+    month: number // 0-indexed (0 = January)
+    date: number
+  }
+  /** Total available episodes (sub) */
+  available_episodes?: number
+  /** Media type: TV, Movie, OVA, ONA, Special */
+  media_type?: string
 }
 
 export interface SearchResults {

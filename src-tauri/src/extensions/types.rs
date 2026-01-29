@@ -26,6 +26,14 @@ pub enum ExtensionType {
     Manga,
 }
 
+/// Episode date information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeDate {
+    pub year: u32,
+    pub month: u32, // 0-indexed (0 = January)
+    pub date: u32,
+}
+
 /// Search result item
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -39,6 +47,18 @@ pub struct SearchResult {
     pub year: Option<u32>,
     pub status: Option<String>,
     pub rating: Option<f32>,
+    /// Latest episode number (for currently airing)
+    #[serde(alias = "latestEpisode")]
+    pub latest_episode: Option<u32>,
+    /// Date of the latest episode release
+    #[serde(alias = "latestEpisodeDate")]
+    pub latest_episode_date: Option<EpisodeDate>,
+    /// Total available episodes (sub)
+    #[serde(alias = "availableEpisodes")]
+    pub available_episodes: Option<u32>,
+    /// Media type: TV, Movie, OVA, ONA, Special
+    #[serde(alias = "mediaType")]
+    pub media_type: Option<String>,
 }
 
 /// Paginated search results
@@ -47,6 +67,16 @@ pub struct SearchResults {
     pub results: Vec<SearchResult>,
     #[serde(alias = "hasNextPage")]
     pub has_next_page: bool,
+}
+
+/// Season anime results with season info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeasonResults {
+    pub results: Vec<SearchResult>,
+    #[serde(alias = "hasNextPage")]
+    pub has_next_page: bool,
+    pub season: String,
+    pub year: u32,
 }
 
 /// Episode information

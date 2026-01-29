@@ -6,7 +6,7 @@
 // - Safe HTTP fetch wrapper with domain validation
 
 use super::extension::Extension;
-use super::types::{ChapterImages, ExtensionMetadata, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, TagsResult, VideoSources};
+use super::types::{ChapterImages, ExtensionMetadata, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, SeasonResults, TagsResult, VideoSources};
 use anyhow::{anyhow, Result};
 use rquickjs::{Context, Runtime};
 use std::collections::HashSet;
@@ -206,6 +206,33 @@ impl ExtensionRuntime {
         })
     }
 
+    /// Call extension's getCurrentSeason method
+    pub fn get_current_season(&self, page: u32) -> Result<SeasonResults> {
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+
+            // Check if getCurrentSeason method exists
+            let season_fn: Option<rquickjs::Function> = ext_obj.get("getCurrentSeason").ok();
+
+            let result: rquickjs::Value = if let Some(fn_obj) = season_fn {
+                fn_obj.call((page,))?
+            } else {
+                // Fallback to discover if getCurrentSeason doesn't exist
+                let discover_fn: rquickjs::Function = ext_obj.get("discover")?;
+                let genres_js = ctx.eval::<rquickjs::Value, _>("[]")?;
+                discover_fn.call((page, "trending", genres_js))?
+            };
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify current season result"))?
+                .to_string()?;
+
+            let season_results: SeasonResults = serde_json::from_str(&json_str)?;
+
+            Ok(season_results)
+        })
+    }
+
     /// Call extension's getRecommendations method
     pub fn get_recommendations(&self) -> Result<SearchResults> {
         self.context.with(|ctx| {
@@ -231,6 +258,39 @@ impl ExtensionRuntime {
 
             let json_str: String = ctx.json_stringify(result)?
                 .ok_or_else(|| anyhow!("Failed to stringify recommendations result"))?
+                .to_string()?;
+
+            let search_results: SearchResults = serde_json::from_str(&json_str)?;
+
+            Ok(search_results)
+        })
+    }
+
+    /// Call extension's getRecentlyUpdated method (anime with new episodes)
+    pub fn get_recently_updated(&self, page: u32) -> Result<SearchResults> {
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+
+            // Check if getRecentlyUpdated method exists
+            let recently_updated_fn: Option<rquickjs::Function> = ext_obj.get("getRecentlyUpdated").ok();
+
+            let result: rquickjs::Value = if let Some(fn_obj) = recently_updated_fn {
+                fn_obj.call((page,))?
+            } else {
+                // Fallback to discover with trending sort
+                let discover_fn: Option<rquickjs::Function> = ext_obj.get("discover").ok();
+                if let Some(fn_obj) = discover_fn {
+                    let genres_js = ctx.eval::<rquickjs::Value, _>("[]")?;
+                    fn_obj.call((page, "trending", genres_js))?
+                } else {
+                    // Last fallback to search
+                    let search_fn: rquickjs::Function = ext_obj.get("search")?;
+                    search_fn.call(("", page))?
+                }
+            };
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify recently updated result"))?
                 .to_string()?;
 
             let search_results: SearchResults = serde_json::from_str(&json_str)?;
@@ -310,86 +370,89 @@ impl ExtensionRuntime {
 
     // ==================== Home Content Methods ====================
 
-    /// Fetch bulk content and categorize it for the home page
-    /// This makes a single API call and sorts/filters in Rust
+    /// Fetch content for the home page from multiple API sources
+    /// - Hot Today: Daily trending anime (dateRange: 1)
+    /// - New Episodes: Recently updated anime (sortBy: Recent)
+    /// - All-Time Classics: Top rated anime (dateRange: 30, sorted by rating)
     pub fn get_home_content(&self, pages: u32) -> Result<HomeContent> {
-        // Fetch multiple pages to get a larger pool of anime
-        let mut all_results: Vec<SearchResult> = Vec::new();
-        let mut seen_ids: HashSet<String> = HashSet::new();
+        let mut categories = Vec::new();
+        let mut all_seen_ids: HashSet<String> = HashSet::new();
 
-        // Fetch trending/popular content (multiple pages)
-        for page in 1..=pages {
-            if let Ok(results) = self.discover(page, Some("view".to_string()), vec![]) {
+        // 1. Hot Today - daily trending anime (dateRange: 1)
+        // Uses discover with "view" sort type which maps to dateRange: 1 (daily trending)
+        let mut hot_today: Vec<SearchResult> = Vec::new();
+        if let Ok(results) = self.discover(1, Some("view".to_string()), vec![]) {
+            for item in results.results {
+                if !all_seen_ids.contains(&item.id) {
+                    all_seen_ids.insert(item.id.clone());
+                    hot_today.push(item);
+                }
+            }
+        }
+        log::info!("Hot Today has {} items", hot_today.len());
+        if !hot_today.is_empty() {
+            categories.push(HomeCategory {
+                id: "trending".to_string(),
+                title: "Hot Today".to_string(),
+                items: hot_today.iter().take(20).cloned().collect(),
+            });
+        }
+
+        // 2. New Episodes - recently updated anime (sortBy: Recent)
+        // Fetches anime sorted by most recent episode releases
+        let mut new_episodes: Vec<SearchResult> = Vec::new();
+        for page in 1..=2 {
+            if let Ok(results) = self.get_recently_updated(page) {
                 for item in results.results {
-                    if !seen_ids.contains(&item.id) {
-                        seen_ids.insert(item.id.clone());
-                        all_results.push(item);
+                    if !all_seen_ids.contains(&item.id) {
+                        all_seen_ids.insert(item.id.clone());
+                        new_episodes.push(item);
                     }
                 }
             }
         }
-
-        log::info!("Fetched {} unique anime for home content", all_results.len());
-
-        // Log sample ratings to debug
-        for (i, item) in all_results.iter().take(5).enumerate() {
-            log::info!("Item {}: {} - rating: {:?}", i, item.title, item.rating);
-        }
-
-        // Create categories from the pool
-        let mut categories = Vec::new();
-
-        // 1. Trending Now - first 20 items (already sorted by popularity/views from API)
-        let trending: Vec<SearchResult> = all_results.iter().take(20).cloned().collect();
-        log::info!("Trending category has {} items", trending.len());
-        if !trending.is_empty() {
+        log::info!("New Episodes has {} items", new_episodes.len());
+        if !new_episodes.is_empty() {
             categories.push(HomeCategory {
-                id: "trending".to_string(),
-                title: "Trending Now".to_string(),
-                items: trending,
+                id: "recently-updated".to_string(),
+                title: "New Episodes".to_string(),
+                items: new_episodes.iter().take(20).cloned().collect(),
             });
         }
 
-        // 2. Top Rated - sort by rating and take top 20
-        let mut by_rating = all_results.clone();
-        by_rating.sort_by(|a, b| {
+        // 3. All-Time Classics - top rated anime (dateRange: 30, sorted by score)
+        // Uses discover with "score" sort type which maps to dateRange: 30 and sorts by rating
+        let mut classics: Vec<SearchResult> = Vec::new();
+        for page in 1..=pages {
+            if let Ok(results) = self.discover(page, Some("score".to_string()), vec![]) {
+                for item in results.results {
+                    if !all_seen_ids.contains(&item.id) {
+                        all_seen_ids.insert(item.id.clone());
+                        classics.push(item);
+                    }
+                }
+            }
+        }
+        // Sort by rating (highest first)
+        classics.sort_by(|a, b| {
             let rating_a = a.rating.unwrap_or(0.0);
             let rating_b = b.rating.unwrap_or(0.0);
             rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let top_rated: Vec<SearchResult> = by_rating.into_iter().take(20).collect();
-        log::info!("Top Rated category has {} items, first item rating: {:?}",
-            top_rated.len(),
-            top_rated.first().map(|r| r.rating));
-        if !top_rated.is_empty() {
+        log::info!("All-Time Classics has {} items, top rating: {:?}",
+            classics.len(),
+            classics.first().map(|r| r.rating));
+        if !classics.is_empty() {
             categories.push(HomeCategory {
                 id: "top-rated".to_string(),
-                title: "Top Rated".to_string(),
-                items: top_rated,
+                title: "All-Time Classics".to_string(),
+                items: classics.iter().take(20).cloned().collect(),
             });
         }
 
-        // 3. Recently Updated - use items from later pages (more recent)
-        let recently_updated: Vec<SearchResult> = all_results.iter()
-            .skip(20) // Skip the trending ones
-            .take(20)
-            .cloned()
-            .collect();
-        if !recently_updated.is_empty() {
-            categories.push(HomeCategory {
-                id: "recently-updated".to_string(),
-                title: "Recently Updated".to_string(),
-                items: recently_updated,
-            });
-        }
-
-        // Featured anime - highest rated from the pool
-        let featured = all_results.iter()
-            .max_by(|a, b| {
-                let rating_a = a.rating.unwrap_or(0.0);
-                let rating_b = b.rating.unwrap_or(0.0);
-                rating_a.partial_cmp(&rating_b).unwrap_or(std::cmp::Ordering::Equal)
-            })
+        // Featured anime - pick from hot today or highest rated
+        let featured = hot_today.first()
+            .or_else(|| classics.first())
             .cloned();
 
         log::info!("Returning {} categories, featured: {:?}",
