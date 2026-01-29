@@ -5,10 +5,14 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy, BookOpen, Tv, Pause, Play } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
+
+// Extension ID for AllAnime - used for navigation to watch page
+const ALLANIME_EXTENSION_ID = 'com.allanime.source'
 
 const DOWNLOAD_PROGRESS_EVENT = 'download-progress'
 const CHAPTER_DOWNLOAD_PROGRESS_EVENT = 'chapter-download-progress'
@@ -40,6 +44,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
   const [downloadsPath, setDownloadsPath] = useState<string>('')
   const [activeTab, setActiveTab] = useState<string>('all')
   const [mediaType, setMediaType] = useState<MediaType>('anime')
+  const navigate = useNavigate()
 
   // Load static data once on mount
   useEffect(() => {
@@ -406,6 +411,19 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     }
   }
 
+  const handlePlayEpisode = (mediaId: string, episodeId: string) => {
+    // Close the download manager and navigate to watch page with specific episode
+    onClose()
+    navigate({
+      to: '/watch',
+      search: {
+        extensionId: ALLANIME_EXTENSION_ID,
+        animeId: mediaId,
+        episodeId: episodeId,
+      },
+    })
+  }
+
   // Group downloads by anime
   const groupedDownloads: GroupedDownloads[] = downloads.reduce((groups, download) => {
     const existing = groups.find(g => g.mediaId === download.media_id)
@@ -657,7 +675,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                           {group.downloads
                             .sort((a, b) => a.episode_number - b.episode_number)
                             .map((download) => (
-                              <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} />
+                              <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} onPlay={handlePlayEpisode} />
                             ))}
                         </div>
                       </div>
@@ -683,7 +701,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                         {group.downloads
                           .sort((a, b) => a.episode_number - b.episode_number)
                           .map((download) => (
-                            <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} />
+                            <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} onPlay={handlePlayEpisode} />
                           ))}
                       </div>
                     </div>
@@ -760,13 +778,15 @@ function DownloadItem({
   onCancel,
   onDelete,
   onPause,
-  onResume
+  onResume,
+  onPlay
 }: {
   download: DownloadProgress
   onCancel: (id: string) => void
   onDelete: (id: string, filename: string) => void
   onPause: (id: string) => void
   onResume: (id: string) => void
+  onPlay: (mediaId: string, episodeId: string) => void
 }) {
   const getStatusIcon = (status: DownloadProgress['status']) => {
     switch (status) {
@@ -907,13 +927,22 @@ function DownloadItem({
           )}
 
           {download.status === 'completed' && (
-            <button
-              onClick={() => onDelete(download.id, download.filename)}
-              className="w-8 h-8 flex items-center justify-center hover:bg-red-500/20 text-red-400 rounded transition-colors"
-              title="Delete File"
-            >
-              <Trash2 size={16} />
-            </button>
+            <>
+              <button
+                onClick={() => onPlay(download.media_id, download.episode_id)}
+                className="w-8 h-8 flex items-center justify-center hover:bg-green-500/20 text-green-400 rounded transition-colors"
+                title="Play Episode"
+              >
+                <Play size={16} />
+              </button>
+              <button
+                onClick={() => onDelete(download.id, download.filename)}
+                className="w-8 h-8 flex items-center justify-center hover:bg-red-500/20 text-red-400 rounded transition-colors"
+                title="Delete File"
+              >
+                <Trash2 size={16} />
+              </button>
+            </>
           )}
         </div>
       </div>

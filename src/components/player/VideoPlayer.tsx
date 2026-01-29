@@ -1058,7 +1058,8 @@ export function VideoPlayer({
                 {currentEpisode && (
                   <p className="text-base text-white/80">
                     Episode {currentEpisode}
-                    {episodeTitle && ` - ${episodeTitle}`}
+                    {/* Only show episode title if it's not just "Episode X" */}
+                    {episodeTitle && !episodeTitle.toLowerCase().startsWith('episode') && ` - ${episodeTitle}`}
                   </p>
                 )}
               </>
