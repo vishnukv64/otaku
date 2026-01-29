@@ -5,6 +5,26 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-01-29
+
+### Added
+- **Notification Center** with bell icon in top navigation
+  - Tabbed interface separating "Releases" and "All" notifications
+  - Notification persistence to database
+  - Mark as read, dismiss, and clear all functionality
+- **Release Check System** for tracking new episodes/chapters
+  - Background periodic checks for ongoing anime and manga
+  - Configurable check intervals (6h, 12h, 24h, 48h)
+  - Manual "Check Now" option
+  - Notifications with direct links to watch/read new content
+- Ephemeral toast notifications for transient messages (resuming playback)
+
+### Changed
+- "Resuming playback" messages now show as ephemeral toasts instead of persisted notifications
+
+### Fixed
+- Release workflow now accepts version input with or without 'v' prefix
+
 ## [0.1.7] - 2026-01-29
 
 ### Added
