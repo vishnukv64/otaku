@@ -195,8 +195,8 @@ function HomeScreen() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] pb-12">
-      <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
+    <div className="min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
+      <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto overflow-visible">
         {/* Hero Section */}
         {featuredAnime ? (
           <HeroSection
@@ -215,7 +215,7 @@ function HomeScreen() {
         {extensionId && <ContinueWatchingSection extensionId={extensionId} />}
 
         {/* Content Carousels */}
-        <div className="space-y-8">
+        <div className="space-y-8 overflow-visible">
           {CATEGORIES.map(category => {
             const content = categories[category.id]
             if (!content) return null

@@ -103,10 +103,11 @@ function AnimeScreen() {
   }, [nsfwFilter])
 
   // Grid density class mapping (extended for 4K displays)
+  // Added p-4 -m-4 to allow cards to scale on hover without being clipped
   const gridClasses = {
-    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-2',
-    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-4',
-    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-6',
+    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-x-2 gap-y-6 p-4 -m-4',
+    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-x-4 gap-y-8 p-4 -m-4',
+    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-x-6 gap-y-10 p-4 -m-4',
   }[gridDensity]
 
   const {
@@ -565,11 +566,11 @@ function AnimeScreen() {
         <div>
           {/* Results */}
           {searchResults.length > 0 && (
-            <div>
+            <div className="overflow-visible">
               <h2 className="text-xl font-semibold mb-4">
                 Search Results for "{searchQuery}" ({searchResults.length} results)
               </h2>
-              <div className={`grid ${gridClasses}`}>
+              <div className={`grid ${gridClasses} overflow-visible`}>
                 {searchResults.map((item) => (
                   <MediaCard
                     key={item.id}
@@ -659,8 +660,8 @@ function AnimeScreen() {
                     <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
                   </div>
                 ) : recommendations.length > 0 ? (
-                  <>
-                    <div className={`grid ${gridClasses}`}>
+                  <div className="overflow-visible">
+                    <div className={`grid ${gridClasses} overflow-visible`}>
                       {recommendations.map((item) => (
                         <MediaCard
                           key={item.id}
@@ -682,7 +683,7 @@ function AnimeScreen() {
                         </p>
                       )}
                     </div>
-                  </>
+                  </div>
                 ) : (
                   <div className="text-center py-12">
                     <p className="text-[var(--color-text-secondary)]">
@@ -711,8 +712,8 @@ function AnimeScreen() {
                   <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
                 </div>
               ) : fullSeasonAnime.length > 0 ? (
-                <>
-                  <div className={`grid ${gridClasses}`}>
+                <div className="overflow-visible">
+                  <div className={`grid ${gridClasses} overflow-visible`}>
                     {fullSeasonAnime.map((item) => (
                       <MediaCard
                         key={item.id}
@@ -734,7 +735,7 @@ function AnimeScreen() {
                       </p>
                     )}
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="text-center py-12">
                   <p className="text-[var(--color-text-secondary)]">

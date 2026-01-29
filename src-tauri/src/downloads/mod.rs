@@ -67,7 +67,7 @@ impl DownloadManager {
         Self {
             downloads: Arc::new(RwLock::new(HashMap::new())),
             active_downloads: Arc::new(Mutex::new(0)),
-            max_concurrent: 3,
+            max_concurrent: 10,
             download_dir,
             db_pool: None,
             app_handle: None,

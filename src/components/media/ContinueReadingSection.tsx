@@ -129,14 +129,14 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
   }
 
   return (
-    <div className="mb-8">
+    <div className="mb-8 overflow-visible">
       <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
         <BookOpen className="w-6 h-6 text-[var(--color-accent-primary)]" />
         Continue Reading
       </h2>
 
       {/* Carousel Container */}
-      <div className="relative group/carousel">
+      <div className="relative group/carousel overflow-visible">
         {/* Left Arrow */}
         {canScrollLeft && (
           <button
@@ -162,7 +162,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
         {/* Scrollable Container */}
         <div
           ref={scrollContainerRef}
-          className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2"
+          className="flex gap-4 overflow-x-auto overflow-y-visible scrollbar-hide scroll-smooth py-4 -my-4 px-4 -mx-4"
           style={{
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
@@ -186,15 +186,21 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
               : `Page ${entry.current_page}`
 
             return (
-              <div key={entry.media.id} className="flex-shrink-0 w-[180px] group/card">
-                {/* Image container - for positioning badges inside the image area */}
-                <div className="relative">
+              <div key={entry.media.id} className="flex-shrink-0 w-[180px] group/card relative">
+                {/* Invisible spacer that maintains flex position */}
+                <div className="w-full">
+                  <div className="aspect-[2/3]" />
+                  <div className="h-12" /> {/* Space for title */}
+                </div>
+
+                {/* Actual card - positioned absolute so it can scale without affecting layout */}
+                <div className="absolute inset-0 transition-all duration-300 ease-out origin-top group-hover/card:scale-110 group-hover/card:z-50">
                   {/* Cover Image */}
                   <button
                     onClick={() => handleContinueReading(entry)}
                     className="w-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-md"
                   >
-                    <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] animate-scale-hover">
+                    <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] shadow-lg group-hover/card:shadow-2xl group-hover/card:shadow-black/60 transition-shadow duration-300">
                       {media.cover_url ? (
                         <img
                           src={media.cover_url}
@@ -240,7 +246,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                       e.stopPropagation()
                       setSelectedManga(media)
                     }}
-                    className="absolute top-2 left-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                    className="absolute top-2 left-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                     title="View Details"
                   >
                     <Info className="w-4 h-4" />
@@ -248,7 +254,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                   {/* Remove button */}
                   <button
                     onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                    className="absolute top-2 right-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                    className="absolute top-2 right-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                     title="Remove from Continue Reading"
                   >
                     <X className="w-4 h-4" />

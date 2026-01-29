@@ -138,14 +138,14 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   }
 
   return (
-    <div className="mb-8">
+    <div className="mb-8 overflow-visible">
       <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
         <Play className="w-6 h-6 text-[var(--color-accent-primary)]" fill="currentColor" />
         Continue Watching
       </h2>
 
       {/* Carousel Container */}
-      <div className="relative group/carousel">
+      <div className="relative group/carousel overflow-visible">
         {/* Left Arrow */}
         {canScrollLeft && (
           <button
@@ -171,7 +171,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
         {/* Scrollable Container */}
         <div
           ref={scrollContainerRef}
-          className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2"
+          className="flex gap-4 overflow-x-auto overflow-y-visible scrollbar-hide scroll-smooth py-4 -my-4 px-4 -mx-4"
           style={{
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
@@ -215,7 +215,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                     e.stopPropagation()
                     setSelectedMedia(media)
                   }}
-                  className="absolute top-2 left-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                   title="View Details"
                 >
                   <Info className="w-4 h-4" />
@@ -223,7 +223,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                  className="absolute top-2 right-2 z-10 p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity"
+                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                   title="Remove from Continue Watching"
                 >
                   <X className="w-4 h-4" />
