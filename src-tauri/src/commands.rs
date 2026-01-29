@@ -1284,10 +1284,11 @@ pub async fn start_download(
     episode_number: i32,
     url: String,
     filename: String,
+    custom_path: Option<String>,
 ) -> Result<String, String> {
     let download_id = format!("{}_{}", media_id, episode_number);
 
-    log::debug!("Starting download: {}", download_id);
+    log::debug!("Starting download: {} (custom_path: {:?})", download_id, custom_path);
 
     download_manager
         .queue_download(
@@ -1297,6 +1298,7 @@ pub async fn start_download(
             episode_number,
             url,
             filename,
+            custom_path,
         )
         .await
         .map_err(|e| format!("Failed to queue download: {}", e))?;
@@ -1400,8 +1402,10 @@ pub async fn get_downloads_directory(
 #[tauri::command]
 pub async fn open_downloads_folder(
     download_manager: State<'_, DownloadManager>,
+    custom_path: Option<String>,
 ) -> Result<(), String> {
-    let path = download_manager.get_downloads_directory();
+    // Use custom path if provided, otherwise use default
+    let path = custom_path.unwrap_or_else(|| download_manager.get_downloads_directory());
 
     // Ensure the directory exists
     std::fs::create_dir_all(&path)
@@ -2354,9 +2358,12 @@ pub async fn start_chapter_download(
     chapter_id: String,
     chapter_number: f64,
     image_urls: Vec<String>,
+    custom_path: Option<String>,
 ) -> Result<String, String> {
-    // Use the same downloads directory as anime downloads
-    let downloads_dir = PathBuf::from(download_manager.get_downloads_directory());
+    // Use custom path if provided, otherwise use default downloads directory
+    let downloads_dir = custom_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(download_manager.get_downloads_directory()));
 
     chapter_downloads::start_chapter_download(
         state.database.pool(),
@@ -2767,4 +2774,73 @@ pub async fn initialize_release_tracking(
     )
     .await
     .map_err(|e| format!("Failed to initialize tracking: {}", e))
+}
+
+// ============================================================================
+// App Settings Commands
+// ============================================================================
+
+/// Get an app setting by key
+#[tauri::command]
+pub async fn get_app_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let pool = state.database.pool();
+
+    let value: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM app_settings WHERE key = ?"
+    )
+    .bind(&key)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to get setting '{}': {}", key, e))?;
+
+    Ok(value)
+}
+
+/// Set an app setting (creates or updates)
+#[tauri::command]
+pub async fn set_app_setting(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    let now = chrono::Utc::now().timestamp_millis();
+
+    sqlx::query(
+        r#"
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        "#
+    )
+    .bind(&key)
+    .bind(&value)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Failed to set setting '{}': {}", key, e))?;
+
+    log::debug!("Set app setting: {} = {}", key, value);
+    Ok(())
+}
+
+/// Delete an app setting
+#[tauri::command]
+pub async fn delete_app_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+
+    sqlx::query("DELETE FROM app_settings WHERE key = ?")
+        .bind(&key)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to delete setting '{}': {}", key, e))?;
+
+    log::debug!("Deleted app setting: {}", key);
+    Ok(())
 }

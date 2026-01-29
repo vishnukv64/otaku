@@ -28,6 +28,7 @@ export function DownloadButton({
   className = '',
 }: DownloadButtonProps) {
   const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
+  const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
   const [showOptions, setShowOptions] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [completed, setCompleted] = useState(false)
@@ -38,8 +39,8 @@ export function DownloadButton({
 
     try {
       const filename = `${animeTitle.replace(/[^a-zA-Z0-9]/g, '_')}_EP${episodeNumber}_${source.quality}.mp4`
-      // Correct parameter order: mediaId, episodeId, episodeNumber, url, filename
-      await startDownload(mediaId, episodeId, episodeNumber, source.url, filename)
+      // Correct parameter order: mediaId, episodeId, episodeNumber, url, filename, customPath
+      await startDownload(mediaId, episodeId, episodeNumber, source.url, filename, customDownloadLocation || undefined)
 
       setCompleted(true)
       setTimeout(() => {

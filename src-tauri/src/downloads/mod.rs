@@ -258,8 +258,17 @@ impl DownloadManager {
         episode_number: i32,
         url: String,
         filename: String,
+        custom_path: Option<String>,
     ) -> Result<()> {
-        let file_path = self.download_dir.join(&filename);
+        // Use custom path if provided, otherwise use default download_dir
+        let download_dir = custom_path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.download_dir.clone());
+
+        // Ensure the directory exists
+        tokio::fs::create_dir_all(&download_dir).await.ok();
+
+        let file_path = download_dir.join(&filename);
 
         let progress = DownloadProgress {
             id: id.clone(),

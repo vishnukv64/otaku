@@ -10,6 +10,7 @@ import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
+import { useSettingsStore } from '@/store/settingsStore'
 
 // Extension ID for AllAnime - used for navigation to watch page
 const ALLANIME_EXTENSION_ID = 'com.allanime.source'
@@ -46,25 +47,29 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
   const [mediaType, setMediaType] = useState<MediaType>('anime')
   const navigate = useNavigate()
 
+  // Get custom download location from settings
+  const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
+
   // Load static data once on mount
   useEffect(() => {
     if (!isOpen) return
 
     const loadStaticData = async () => {
       try {
-        const [storage, path] = await Promise.all([
+        const [storage, defaultPath] = await Promise.all([
           getTotalStorageUsed(),
           getDownloadsDirectory()
         ])
         setTotalStorage(storage)
-        setDownloadsPath(path)
+        // Use custom location from settings if set, otherwise use default
+        setDownloadsPath(customDownloadLocation || defaultPath)
       } catch (error) {
         console.error('Failed to load static data:', error)
       }
     }
 
     loadStaticData()
-  }, [isOpen])
+  }, [isOpen, customDownloadLocation])
 
   // Handle Escape key to close modal
   useEffect(() => {
@@ -291,7 +296,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
 
   const handleOpenFolder = async () => {
     try {
-      await openDownloadsFolder()
+      // Pass custom location if set, otherwise backend will use default
+      await openDownloadsFolder(customDownloadLocation || undefined)
       notifySuccess('Folder Opened', 'Downloads folder opened')
     } catch (error) {
       console.error('Failed to open folder:', error)

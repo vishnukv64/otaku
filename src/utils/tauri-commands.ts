@@ -495,6 +495,7 @@ export async function proxyHlsPlaylist(url: string): Promise<string> {
  * @param episodeNumber - Episode number
  * @param url - Video URL to download
  * @param filename - Filename for the downloaded video
+ * @param customPath - Optional custom download location
  * @returns Download ID for tracking progress
  */
 export async function startDownload(
@@ -502,9 +503,10 @@ export async function startDownload(
   episodeId: string,
   episodeNumber: number,
   url: string,
-  filename: string
+  filename: string,
+  customPath?: string
 ): Promise<string> {
-  return await invoke('start_download', { mediaId, episodeId, episodeNumber, url, filename })
+  return await invoke('start_download', { mediaId, episodeId, episodeNumber, url, filename, customPath })
 }
 
 /**
@@ -582,9 +584,10 @@ export async function getDownloadsDirectory(): Promise<string> {
 
 /**
  * Open the downloads folder in file explorer
+ * @param customPath - Optional custom path to open (uses default if not provided)
  */
-export async function openDownloadsFolder(): Promise<void> {
-  return await invoke('open_downloads_folder')
+export async function openDownloadsFolder(customPath?: string): Promise<void> {
+  return await invoke('open_downloads_folder', { customPath })
 }
 
 /**
@@ -1095,7 +1098,8 @@ export async function startChapterDownload(
   mediaTitle: string,
   chapterId: string,
   chapterNumber: number,
-  imageUrls: string[]
+  imageUrls: string[],
+  customPath?: string
 ): Promise<string> {
   return await invoke('start_chapter_download', {
     mediaId,
@@ -1103,6 +1107,7 @@ export async function startChapterDownload(
     chapterId,
     chapterNumber,
     imageUrls,
+    customPath,
   })
 }
 
@@ -1506,5 +1511,35 @@ export async function initializeReleaseTracking(
     mediaType,
     currentCount,
   })
+}
+
+// ============================================================================
+// App Settings
+// ============================================================================
+
+/**
+ * Get an app setting from the database
+ * @param key - Setting key
+ * @returns Setting value or null if not found
+ */
+export async function getAppSetting(key: string): Promise<string | null> {
+  return await invoke('get_app_setting', { key })
+}
+
+/**
+ * Set an app setting in the database
+ * @param key - Setting key
+ * @param value - Setting value
+ */
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  return await invoke('set_app_setting', { key, value })
+}
+
+/**
+ * Delete an app setting from the database
+ * @param key - Setting key
+ */
+export async function deleteAppSetting(key: string): Promise<void> {
+  return await invoke('delete_app_setting', { key })
 }
 

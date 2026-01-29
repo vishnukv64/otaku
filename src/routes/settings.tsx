@@ -239,7 +239,7 @@ function SettingsScreen() {
             <SettingSlider
               value={settings.maxConcurrentDownloads}
               min={1}
-              max={5}
+              max={10}
               step={1}
               onChange={(value) =>
                 settings.updateSettings({ maxConcurrentDownloads: value })

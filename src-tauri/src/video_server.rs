@@ -91,6 +91,8 @@ impl VideoServer {
         let app = Router::new()
             // Local file serving with automatic Range support
             .nest_service("/files", serve_dir)
+            // Serve files from absolute paths (for custom download locations)
+            .route("/absolute", get(serve_absolute_path))
             // Legacy local endpoint (redirects to /files)
             .route("/local/*path", get(serve_local_redirect))
             // Remote video proxy
@@ -176,6 +178,143 @@ async fn serve_local_redirect(
         Ok(response) => response.into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "File not found").into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AbsolutePathQuery {
+    #[allow(dead_code)]
+    token: Option<String>,
+    path: Option<String>,
+}
+
+// Serve a file from an absolute path (for custom download locations)
+async fn serve_absolute_path(
+    Query(query): Query<AbsolutePathQuery>,
+    request: Request<Body>,
+) -> Response {
+    let file_path = match query.path {
+        Some(p) => {
+            // URL decode the path
+            urlencoding::decode(&p)
+                .map(|s| PathBuf::from(s.as_ref()))
+                .unwrap_or_else(|_| PathBuf::from(&p))
+        }
+        None => return (StatusCode::BAD_REQUEST, "Missing path parameter").into_response(),
+    };
+
+    log::debug!("Serving absolute file: {:?}", file_path);
+
+    // Check if file exists
+    if !file_path.exists() {
+        log::error!("File not found: {:?}", file_path);
+        return (StatusCode::NOT_FOUND, "File not found").into_response();
+    }
+
+    // Get file metadata for content-length
+    let metadata = match tokio::fs::metadata(&file_path).await {
+        Ok(m) => m,
+        Err(e) => {
+            log::error!("Failed to get file metadata: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response();
+        }
+    };
+
+    let file_size = metadata.len();
+
+    // Parse Range header
+    let range = request.headers().get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| parse_range_header(s, file_size));
+
+    // Open file
+    let file = match tokio::fs::File::open(&file_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("Failed to open file: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to open file").into_response();
+        }
+    };
+
+    // Determine content type from extension
+    let content_type = file_path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| match ext.to_lowercase().as_str() {
+            "mp4" => "video/mp4",
+            "mkv" => "video/x-matroska",
+            "webm" => "video/webm",
+            "avi" => "video/x-msvideo",
+            _ => "application/octet-stream",
+        })
+        .unwrap_or("application/octet-stream");
+
+    if let Some((start, end)) = range {
+        // Partial content response
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let mut file = file;
+
+        // Seek to start position
+        if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+            log::error!("Failed to seek file: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to seek file").into_response();
+        }
+
+        let length = end - start + 1;
+
+        // Create a limited reader
+        let reader = file.take(length);
+        let stream = tokio_util::io::ReaderStream::new(reader);
+        let body = Body::from_stream(stream);
+
+        Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CONTENT_LENGTH, length.to_string())
+            .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start, end, file_size))
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .body(body)
+            .unwrap()
+    } else {
+        // Full file response
+        let stream = tokio_util::io::ReaderStream::new(file);
+        let body = Body::from_stream(stream);
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CONTENT_LENGTH, file_size.to_string())
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .body(body)
+            .unwrap()
+    }
+}
+
+// Parse HTTP Range header
+fn parse_range_header(range: &str, file_size: u64) -> Option<(u64, u64)> {
+    if !range.starts_with("bytes=") {
+        return None;
+    }
+
+    let range = &range[6..]; // Remove "bytes="
+    let parts: Vec<&str> = range.split('-').collect();
+
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let start: u64 = parts[0].parse().ok()?;
+    let end: u64 = if parts[1].is_empty() {
+        file_size - 1
+    } else {
+        parts[1].parse().ok()?
+    };
+
+    if start > end || end >= file_size {
+        return None;
+    }
+
+    Some((start, end))
 }
 
 #[derive(serde::Deserialize)]

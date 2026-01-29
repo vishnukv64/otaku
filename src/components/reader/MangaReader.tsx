@@ -445,30 +445,49 @@ export function MangaReader({
           : images.find(img => img.page === currentPage + 1)
 
         return (
-          <div className="flex-1 flex items-center justify-center gap-1">
+          <div className={cn(
+            'flex-1 flex items-center justify-center gap-2 p-2',
+            settings.fitMode === 'original' ? 'overflow-auto' : 'overflow-hidden'
+          )}>
             {leftPage && (
-              <PageView
-                imageUrl={leftPage.url}
-                pageNumber={leftPage.page}
-                totalPages={totalPages}
-                fitMode={settings.fitMode}
-                zoom={settings.zoom}
-                showPageNumber={false}
-                onClick={handlePageClick}
-                className="max-w-[50%] h-full"
-              />
+              <div className="h-full flex items-center justify-center">
+                <img
+                  src={leftPage.url}
+                  alt={`Page ${leftPage.page}`}
+                  className="select-none"
+                  style={{
+                    maxHeight: settings.fitMode === 'original' ? 'none' : '100%',
+                    maxWidth: settings.fitMode === 'original' ? 'none' : 'calc(50vw - 1rem)',
+                    width: settings.fitMode === 'width' ? 'calc(50vw - 1rem)' : 'auto',
+                    height: settings.fitMode === 'height' ? '100%' : 'auto',
+                    objectFit: 'contain',
+                    transform: `scale(${settings.zoom})`,
+                    transformOrigin: 'center',
+                  }}
+                  draggable={false}
+                  onClick={() => handlePageClick('left')}
+                />
+              </div>
             )}
             {rightPage && (
-              <PageView
-                imageUrl={rightPage.url}
-                pageNumber={rightPage.page}
-                totalPages={totalPages}
-                fitMode={settings.fitMode}
-                zoom={settings.zoom}
-                showPageNumber={false}
-                onClick={handlePageClick}
-                className="max-w-[50%] h-full"
-              />
+              <div className="h-full flex items-center justify-center">
+                <img
+                  src={rightPage.url}
+                  alt={`Page ${rightPage.page}`}
+                  className="select-none"
+                  style={{
+                    maxHeight: settings.fitMode === 'original' ? 'none' : '100%',
+                    maxWidth: settings.fitMode === 'original' ? 'none' : 'calc(50vw - 1rem)',
+                    width: settings.fitMode === 'width' ? 'calc(50vw - 1rem)' : 'auto',
+                    height: settings.fitMode === 'height' ? '100%' : 'auto',
+                    objectFit: 'contain',
+                    transform: `scale(${settings.zoom})`,
+                    transformOrigin: 'center',
+                  }}
+                  draggable={false}
+                  onClick={() => handlePageClick('right')}
+                />
+              </div>
             )}
           </div>
         )

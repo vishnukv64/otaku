@@ -383,6 +383,9 @@ pub fn run() {
       // App Settings
       commands::get_update_check_info,
       commands::set_update_check_info,
+      commands::get_app_setting,
+      commands::set_app_setting,
+      commands::delete_app_setting,
       // Release Checker
       commands::get_release_check_settings,
       commands::update_release_check_settings,

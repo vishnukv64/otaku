@@ -169,9 +169,8 @@ function WatchPage() {
 
         if (filePath && videoServerInfo) {
           // Use video server for local file (proper Range request support for large files)
-          // Split on both forward and backslashes to handle Windows and Unix paths
-          const filename = filePath.split(/[/\\]/).pop() || filePath
-          const localUrl = `http://127.0.0.1:${videoServerInfo.port}/files/${encodeURIComponent(filename)}?token=${videoServerInfo.token}`
+          // Use the /absolute endpoint with the full file path to support custom download locations
+          const localUrl = `http://127.0.0.1:${videoServerInfo.port}/absolute?path=${encodeURIComponent(filePath)}&token=${videoServerInfo.token}`
           setSources({
             sources: [{
               url: localUrl,
@@ -181,11 +180,11 @@ function WatchPage() {
             }],
             subtitles: []
           })
+          toastInfo('Offline Mode', 'Playing from downloaded video')
         } else if (filePath) {
-          // Fallback: Try getLocalVideoUrl command
+          // Fallback: Try getLocalVideoUrl command with full path
           try {
-            const filename = filePath.split(/[/\\]/).pop() || filePath
-            const localUrl = await getLocalVideoUrl(filename)
+            const localUrl = await getLocalVideoUrl(filePath)
             setSources({
               sources: [{
                 url: localUrl,
@@ -195,6 +194,7 @@ function WatchPage() {
               }],
               subtitles: []
             })
+            toastInfo('Offline Mode', 'Playing from downloaded video')
           } catch {
             // Fall through to streaming
           }

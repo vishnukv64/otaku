@@ -97,11 +97,23 @@ export function PageView({
     }
   }
 
+  // Check if className contains explicit width/height sizing
+  const hasExplicitSizing = className && (
+    className.includes('w-[') ||
+    className.includes('h-[') ||
+    className.includes('max-w-[') ||
+    className.includes('max-h-')
+  )
+
   return (
     <div
       ref={containerRef}
       className={cn(
-        'relative flex items-center justify-center w-full h-full overflow-hidden cursor-pointer',
+        'relative flex items-center justify-center cursor-pointer',
+        // Only add w-full h-full if no explicit sizing is passed
+        !hasExplicitSizing && 'w-full h-full overflow-hidden',
+        // For explicit sizing, allow overflow for original mode
+        hasExplicitSizing && 'overflow-visible',
         className
       )}
       onClick={handleClick}

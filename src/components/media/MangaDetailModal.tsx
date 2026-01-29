@@ -45,6 +45,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const navigate = useNavigate()
   const maxConcurrentDownloads = useSettingsStore((state) => state.maxConcurrentDownloads)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
+  const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
   const { refresh: refreshMediaStatus } = useMediaStatusContext()
   const [details, setDetails] = useState<MangaDetails | null>(null)
   const [loading, setLoading] = useState(true)
@@ -326,7 +327,8 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         details.title,
         chapter.id,
         chapter.number,
-        imageUrls
+        imageUrls,
+        customDownloadLocation || undefined
       )
       // Download completion is tracked via events (onComplete callback updates downloadedChapters)
     } catch (err) {
@@ -372,7 +374,8 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         details.title,
         chapter.id,
         chapter.number,
-        imageUrls
+        imageUrls,
+        customDownloadLocation || undefined
       )
       // Download completion is tracked via events (onComplete callback updates downloadedChapters)
       return true

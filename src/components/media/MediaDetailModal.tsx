@@ -17,6 +17,7 @@ import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMedi
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { useSettingsStore } from '@/store/settingsStore'
 import { MediaCard } from './MediaCard'
 
 /** Format episode date for display */
@@ -59,6 +60,7 @@ export function MediaDetailModal({
 }: MediaDetailModalProps) {
   const navigate = useNavigate()
   const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
+  const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -187,8 +189,8 @@ export function MediaDetailModal({
           // Generate filename
           const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.mp4`
 
-          // Start download
-          await startDownload(media.id, episode.id, episode.number, videoUrl, filename)
+          // Start download with custom path if set
+          await startDownload(media.id, episode.id, episode.number, videoUrl, filename, customDownloadLocation || undefined)
           successCount++
         } catch (err) {
           console.error(`Failed to download episode ${episode.number}:`, err)
@@ -251,8 +253,8 @@ export function MediaDetailModal({
           // Generate filename
           const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.mp4`
 
-          // Start download
-          await startDownload(media.id, episode.id, episode.number, videoUrl, filename)
+          // Start download with custom path if set
+          await startDownload(media.id, episode.id, episode.number, videoUrl, filename, customDownloadLocation || undefined)
           successCount++
         } catch (err) {
           console.error(`Failed to download episode ${episode.number}:`, err)
