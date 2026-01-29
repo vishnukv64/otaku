@@ -90,6 +90,7 @@ impl Database {
             ("008_add_manga_library_statuses.sql", include_str!("../../migrations/008_add_manga_library_statuses.sql")),
             ("009_notifications.sql", include_str!("../../migrations/009_notifications.sql")),
             ("010_app_settings.sql", include_str!("../../migrations/010_app_settings.sql")),
+            ("011_release_tracking.sql", include_str!("../../migrations/011_release_tracking.sql")),
         ];
 
         for (name, migration_sql) in migrations {

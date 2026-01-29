@@ -1327,3 +1327,95 @@ export async function setUpdateCheckInfo(
   })
 }
 
+// ============================================================================
+// Release Checker Commands
+// ============================================================================
+
+/** Release check settings */
+export interface ReleaseCheckSettings {
+  enabled: boolean
+  interval_hours: number
+  last_full_check: number | null
+}
+
+/** Release check status */
+export interface ReleaseCheckStatus {
+  is_running: boolean
+  last_check: number | null
+  next_check: number | null
+  items_checked: number
+  new_releases_found: number
+}
+
+/** Result from checking a single media item */
+export interface ReleaseCheckResult {
+  media_id: string
+  media_title: string
+  media_type: 'anime' | 'manga'
+  previous_count: number
+  current_count: number
+  new_releases: number
+  extension_id: string
+}
+
+/**
+ * Get release check settings
+ * @returns Current release check settings
+ */
+export async function getReleaseCheckSettings(): Promise<ReleaseCheckSettings> {
+  return await invoke('get_release_check_settings')
+}
+
+/**
+ * Update release check settings
+ * @param enabled - Whether release checking is enabled
+ * @param intervalHours - Hours between checks (6, 12, 24, or 48)
+ */
+export async function updateReleaseCheckSettings(
+  enabled: boolean,
+  intervalHours: number
+): Promise<void> {
+  return await invoke('update_release_check_settings', {
+    enabled,
+    intervalHours,
+  })
+}
+
+/**
+ * Manually trigger a release check for all eligible media
+ * @returns Array of media items with new releases
+ */
+export async function checkForNewReleases(): Promise<ReleaseCheckResult[]> {
+  return await invoke('check_for_new_releases')
+}
+
+/**
+ * Get release check status
+ * @returns Current status of the release checker
+ */
+export async function getReleaseCheckStatus(): Promise<ReleaseCheckStatus> {
+  return await invoke('get_release_check_status')
+}
+
+/**
+ * Initialize release tracking for a media item
+ * Called when adding media to library
+ * @param mediaId - Media ID
+ * @param extensionId - Extension ID
+ * @param mediaType - Type of media ('anime' or 'manga')
+ * @param currentCount - Current episode/chapter count
+ */
+export async function initializeReleaseTracking(
+  mediaId: string,
+  extensionId: string,
+  mediaType: 'anime' | 'manga',
+  currentCount: number
+): Promise<void> {
+  return await invoke('initialize_release_tracking', {
+    mediaId,
+    extensionId,
+    mediaType,
+    currentCount,
+  })
+}
+

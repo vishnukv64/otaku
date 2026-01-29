@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { getMediaDetails, getVideoSources, saveMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import type { MediaDetails, VideoSources } from '@/types/extension'
-import { notifyInfo } from '@/utils/notify'
+import { toastInfo } from '@/utils/notify'
 
 interface WatchSearch {
   extensionId: string
@@ -136,8 +136,8 @@ function WatchPage() {
             const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
             setResumeTime(progress.progress_seconds)
 
-            // Show resume notification
-            notifyInfo('Resuming Playback', `Resuming from ${timeStr}`)
+            // Show ephemeral toast (not stored in notification center)
+            toastInfo('Resuming Playback', `Resuming from ${timeStr}`)
           } else {
             setResumeTime(0)
           }

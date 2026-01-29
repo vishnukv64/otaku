@@ -2508,3 +2508,91 @@ pub async fn set_update_check_info(
 
     Ok(())
 }
+
+// ============================================================================
+// Release Checker Commands
+// ============================================================================
+
+use crate::release_checker::{
+    self, ReleaseCheckResult, ReleaseCheckSettings, ReleaseCheckStatus,
+};
+
+/// Get release check settings
+#[tauri::command]
+pub async fn get_release_check_settings(
+    state: State<'_, AppState>,
+) -> Result<ReleaseCheckSettings, String> {
+    release_checker::get_release_settings(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get release settings: {}", e))
+}
+
+/// Update release check settings
+#[tauri::command]
+pub async fn update_release_check_settings(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    enabled: bool,
+    interval_hours: u32,
+) -> Result<(), String> {
+    let settings = ReleaseCheckSettings {
+        enabled,
+        interval_hours,
+        last_full_check: None, // Don't update last check time when changing settings
+    };
+
+    release_checker::update_release_settings(state.database.pool(), &settings)
+        .await
+        .map_err(|e| format!("Failed to update release settings: {}", e))?;
+
+    // Start or stop checker based on enabled status
+    if enabled {
+        if !release_checker::is_checker_running() {
+            release_checker::start_release_checker(app).await;
+        }
+    } else {
+        release_checker::stop_release_checker();
+    }
+
+    Ok(())
+}
+
+/// Manually check for new releases
+#[tauri::command]
+pub async fn check_for_new_releases(
+    app: AppHandle,
+) -> Result<Vec<ReleaseCheckResult>, String> {
+    release_checker::run_full_release_check(&app)
+        .await
+        .map_err(|e| format!("Release check failed: {}", e))
+}
+
+/// Get release check status
+#[tauri::command]
+pub async fn get_release_check_status(
+    state: State<'_, AppState>,
+) -> Result<ReleaseCheckStatus, String> {
+    release_checker::get_release_check_status(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get release status: {}", e))
+}
+
+/// Initialize release tracking for a media item
+#[tauri::command]
+pub async fn initialize_release_tracking(
+    state: State<'_, AppState>,
+    media_id: String,
+    extension_id: String,
+    media_type: String,
+    current_count: i32,
+) -> Result<(), String> {
+    release_checker::initialize_tracking(
+        state.database.pool(),
+        &media_id,
+        &extension_id,
+        &media_type,
+        current_count,
+    )
+    .await
+    .map_err(|e| format!("Failed to initialize tracking: {}", e))
+}
