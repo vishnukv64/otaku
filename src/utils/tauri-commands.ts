@@ -533,6 +533,22 @@ export async function cancelDownload(downloadId: string): Promise<void> {
 }
 
 /**
+ * Pause an ongoing download
+ * @param downloadId - Download ID to pause
+ */
+export async function pauseDownload(downloadId: string): Promise<void> {
+  return await invoke('pause_download', { downloadId })
+}
+
+/**
+ * Resume a paused download
+ * @param downloadId - Download ID to resume
+ */
+export async function resumeDownload(downloadId: string): Promise<void> {
+  return await invoke('resume_download', { downloadId })
+}
+
+/**
  * Check if an episode is downloaded
  * @param mediaId - Media ID
  * @param episodeNumber - Episode number

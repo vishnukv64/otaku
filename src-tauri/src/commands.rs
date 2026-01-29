@@ -1336,6 +1336,30 @@ pub async fn cancel_download(
         .map_err(|e| format!("Failed to cancel download: {}", e))
 }
 
+/// Pause a download
+#[tauri::command]
+pub async fn pause_download(
+    download_manager: State<'_, DownloadManager>,
+    download_id: String,
+) -> Result<(), String> {
+    download_manager
+        .pause_download(&download_id)
+        .await
+        .map_err(|e| format!("Failed to pause download: {}", e))
+}
+
+/// Resume a paused download
+#[tauri::command]
+pub async fn resume_download(
+    download_manager: State<'_, DownloadManager>,
+    download_id: String,
+) -> Result<(), String> {
+    download_manager
+        .resume_download(&download_id)
+        .await
+        .map_err(|e| format!("Failed to resume download: {}", e))
+}
+
 /// Check if an episode is downloaded
 #[tauri::command]
 pub async fn is_episode_downloaded(

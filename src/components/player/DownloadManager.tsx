@@ -5,9 +5,9 @@
  */
 
 import { useEffect, useState } from 'react'
-import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy, BookOpen, Tv } from 'lucide-react'
+import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy, BookOpen, Tv, Pause, Play } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { listDownloads, cancelDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
+import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 
 const DOWNLOAD_PROGRESS_EVENT = 'download-progress'
@@ -187,6 +187,30 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     } catch (error) {
       console.error('Failed to cancel download:', error)
       notifyError('Cancel Failed', `Failed to cancel ${displayName}`)
+    }
+  }
+
+  const handlePause = async (downloadId: string) => {
+    const download = downloads.find(d => d.id === downloadId)
+    const displayName = download ? `Episode ${download.episode_number}` : 'Download'
+    try {
+      await pauseDownload(downloadId)
+      notifySuccess('Download Paused', `Paused ${displayName}`)
+    } catch (error) {
+      console.error('Failed to pause download:', error)
+      notifyError('Pause Failed', `Failed to pause ${displayName}`)
+    }
+  }
+
+  const handleResume = async (downloadId: string) => {
+    const download = downloads.find(d => d.id === downloadId)
+    const displayName = download ? `Episode ${download.episode_number}` : 'Download'
+    try {
+      await resumeDownload(downloadId)
+      notifySuccess('Download Resumed', `Resumed ${displayName}`)
+    } catch (error) {
+      console.error('Failed to resume download:', error)
+      notifyError('Resume Failed', `Failed to resume ${displayName}`)
     }
   }
 
@@ -617,12 +641,12 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                     .filter(g => g.mediaId === activeTab)
                     .map((group) => (
                       <div key={group.mediaId}>
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-lg font-semibold">{group.mediaTitle}</h3>
+                        <div className="flex items-center justify-between gap-4 mb-3">
+                          <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
                           {group.downloads.some(d => d.status === 'completed') && (
                             <button
                               onClick={() => handleDeleteAnime(group.mediaId, group.mediaTitle)}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
+                              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
                             >
                               <Trash2 size={14} />
                               Delete All
@@ -633,7 +657,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                           {group.downloads
                             .sort((a, b) => a.episode_number - b.episode_number)
                             .map((download) => (
-                              <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} />
+                              <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} />
                             ))}
                         </div>
                       </div>
@@ -643,12 +667,12 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                 <div className="space-y-6">
                   {groupedDownloads.map((group) => (
                     <div key={group.mediaId}>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold">{group.mediaTitle}</h3>
+                      <div className="flex items-center justify-between gap-4 mb-3">
+                        <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
                         {group.downloads.some(d => d.status === 'completed') && (
                           <button
                             onClick={() => handleDeleteAnime(group.mediaId, group.mediaTitle)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
                           >
                             <Trash2 size={14} />
                             Delete All
@@ -659,7 +683,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                         {group.downloads
                           .sort((a, b) => a.episode_number - b.episode_number)
                           .map((download) => (
-                            <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} />
+                            <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} />
                           ))}
                       </div>
                     </div>
@@ -674,12 +698,12 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                     .filter(g => g.mediaId === activeTab)
                     .map((group) => (
                       <div key={group.mediaId}>
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-lg font-semibold">{group.mediaTitle}</h3>
+                        <div className="flex items-center justify-between gap-4 mb-3">
+                          <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
                           {group.downloads.some(d => d.status === 'completed') && (
                             <button
                               onClick={() => handleDeleteManga(group.mediaId, group.mediaTitle)}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
+                              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
                             >
                               <Trash2 size={14} />
                               Delete All
@@ -700,12 +724,12 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                 <div className="space-y-6">
                   {groupedChapterDownloads.map((group) => (
                     <div key={group.mediaId}>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold">{group.mediaTitle}</h3>
+                      <div className="flex items-center justify-between gap-4 mb-3">
+                        <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
                         {group.downloads.some(d => d.status === 'completed') && (
                           <button
                             onClick={() => handleDeleteManga(group.mediaId, group.mediaTitle)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
                           >
                             <Trash2 size={14} />
                             Delete All
@@ -734,11 +758,15 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
 function DownloadItem({
   download,
   onCancel,
-  onDelete
+  onDelete,
+  onPause,
+  onResume
 }: {
   download: DownloadProgress
   onCancel: (id: string) => void
   onDelete: (id: string, filename: string) => void
+  onPause: (id: string) => void
+  onResume: (id: string) => void
 }) {
   const getStatusIcon = (status: DownloadProgress['status']) => {
     switch (status) {
@@ -746,6 +774,8 @@ function DownloadItem({
         return <Loader2 size={20} className="animate-spin text-blue-400" />
       case 'completed':
         return <CheckCircle size={20} className="text-green-400" />
+      case 'paused':
+        return <Pause size={20} className="text-yellow-400" />
       case 'failed':
       case 'cancelled':
         return <XCircle size={20} className="text-red-400" />
@@ -776,12 +806,14 @@ function DownloadItem({
             Episode {download.episode_number}
           </h3>
 
-          {/* Progress Bar */}
-          {download.status === 'downloading' && (
+          {/* Progress Bar - show for downloading and paused */}
+          {(download.status === 'downloading' || download.status === 'paused') && (
             <div className="mb-2">
               <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-[var(--color-accent-primary)] transition-all duration-300"
+                  className={`h-full transition-all duration-300 ${
+                    download.status === 'paused' ? 'bg-yellow-500' : 'bg-[var(--color-accent-primary)]'
+                  }`}
                   style={{ width: `${download.percentage}%` }}
                 />
               </div>
@@ -801,6 +833,16 @@ function DownloadItem({
                     {formatBytes(download.speed)}/s
                   </span>
                 )}
+              </>
+            )}
+
+            {download.status === 'paused' && (
+              <>
+                <span className="text-yellow-400 font-medium">Paused</span>
+                <span>{download.percentage.toFixed(1)}%</span>
+                <span>
+                  {formatBytes(download.downloaded_bytes)} / {formatBytes(download.total_bytes)}
+                </span>
               </>
             )}
 
@@ -831,7 +873,30 @@ function DownloadItem({
 
         {/* Actions */}
         <div className="flex-shrink-0 flex items-center gap-2">
-          {(download.status === 'downloading' || download.status === 'queued') && (
+          {/* Pause button - for downloading */}
+          {download.status === 'downloading' && (
+            <button
+              onClick={() => onPause(download.id)}
+              className="w-8 h-8 flex items-center justify-center hover:bg-yellow-500/20 text-yellow-400 rounded transition-colors"
+              title="Pause Download"
+            >
+              <Pause size={16} />
+            </button>
+          )}
+
+          {/* Resume button - for paused or failed */}
+          {(download.status === 'paused' || download.status === 'failed') && (
+            <button
+              onClick={() => onResume(download.id)}
+              className="w-8 h-8 flex items-center justify-center hover:bg-green-500/20 text-green-400 rounded transition-colors"
+              title="Resume Download"
+            >
+              <Play size={16} />
+            </button>
+          )}
+
+          {/* Cancel button - for downloading, queued, or paused */}
+          {(download.status === 'downloading' || download.status === 'queued' || download.status === 'paused') && (
             <button
               onClick={() => onCancel(download.id)}
               className="w-8 h-8 flex items-center justify-center hover:bg-red-500/20 text-red-400 rounded transition-colors"

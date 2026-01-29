@@ -313,6 +313,8 @@ pub fn run() {
       commands::get_download_progress,
       commands::list_downloads,
       commands::cancel_download,
+      commands::pause_download,
+      commands::resume_download,
       commands::is_episode_downloaded,
       commands::get_episode_file_path,
       commands::get_total_storage_used,

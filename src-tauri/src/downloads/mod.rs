@@ -419,8 +419,8 @@ impl DownloadManager {
                             }
                         }
                         Err(e) => {
-                            // Don't overwrite Cancelled status - it was intentionally cancelled
-                            if progress.status != DownloadStatus::Cancelled {
+                            // Don't overwrite Cancelled or Paused status - they were intentional
+                            if progress.status != DownloadStatus::Cancelled && progress.status != DownloadStatus::Paused {
                                 progress.status = DownloadStatus::Failed;
                                 progress.error_message = Some(e.to_string());
                                 log::error!("Download failed: {} - {}", download_id, e);
@@ -442,8 +442,10 @@ impl DownloadManager {
                                         &e.to_string(),
                                     ).await;
                                 }
-                            } else {
+                            } else if progress.status == DownloadStatus::Cancelled {
                                 log::debug!("Download was cancelled: {}", download_id);
+                            } else {
+                                log::debug!("Download was paused: {}", download_id);
                             }
                         }
                     }
@@ -515,8 +517,8 @@ impl DownloadManager {
         db_pool: Option<Arc<SqlitePool>>,
         app_handle: Option<AppHandle>,
     ) -> Result<()> {
-        // Get download info and check if cancelled
-        let (url, file_path) = {
+        // Get download info, check if cancelled, and get resume offset
+        let (url, file_path, resume_from, existing_total) = {
             let downloads_map = downloads.read().await;
             let progress = downloads_map
                 .get(&download_id)
@@ -527,7 +529,25 @@ impl DownloadManager {
                 return Err(anyhow::anyhow!("Download was cancelled"));
             }
 
-            (progress.url.clone(), progress.file_path.clone())
+            (
+                progress.url.clone(),
+                progress.file_path.clone(),
+                progress.downloaded_bytes,
+                progress.total_bytes,
+            )
+        };
+
+        // Check if file exists and has expected size for resume
+        let actual_file_size = tokio::fs::metadata(&file_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        // Only resume if file exists and has the expected bytes
+        let resume_offset = if actual_file_size > 0 && actual_file_size == resume_from {
+            resume_from
+        } else {
+            0 // Start fresh if file doesn't match
         };
 
         // Make HTTP request with appropriate timeouts for large files
@@ -538,34 +558,76 @@ impl DownloadManager {
             .build()
             .context("Failed to create HTTP client")?;
 
-        let response = client
+        let mut request = client
             .get(&url)
             .header("User-Agent", "Mozilla/5.0")
-            .header("Referer", "https://allmanga.to")
+            .header("Referer", "https://allmanga.to");
+
+        // Add Range header for resume
+        if resume_offset > 0 {
+            request = request.header("Range", format!("bytes={}-", resume_offset));
+            log::debug!("Resuming download from byte {}", resume_offset);
+        }
+
+        let response = request
             .send()
             .await
             .context("Failed to initiate download")?;
 
-        let total_bytes = response.content_length().unwrap_or(0);
+        // Check response status - 206 Partial Content for resume, 200 for fresh start
+        let is_resume = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+
+        // Get total bytes from Content-Length or Content-Range
+        let total_bytes = if is_resume {
+            // For resumed downloads, try to get total from Content-Range header
+            // Format: "bytes start-end/total"
+            response
+                .headers()
+                .get("content-range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split('/').last())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(existing_total)
+        } else {
+            response.content_length().unwrap_or(0)
+        };
 
         // Update total bytes
         {
             let mut downloads_map = downloads.write().await;
             if let Some(progress) = downloads_map.get_mut(&download_id) {
-                progress.total_bytes = total_bytes;
+                if total_bytes > 0 {
+                    progress.total_bytes = total_bytes;
+                }
             }
         }
 
-        // Create file
-        let mut file = File::create(&file_path)
-            .await
-            .context("Failed to create file")?;
+        // Open file - append if resuming, create if fresh
+        let mut file = if is_resume && resume_offset > 0 {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&file_path)
+                .await
+                .context("Failed to open file for resume")?
+        } else {
+            // Fresh start - reset downloaded bytes
+            {
+                let mut downloads_map = downloads.write().await;
+                if let Some(progress) = downloads_map.get_mut(&download_id) {
+                    progress.downloaded_bytes = 0;
+                }
+            }
+            File::create(&file_path)
+                .await
+                .context("Failed to create file")?
+        };
 
         // Download in chunks
         let mut stream = response.bytes_stream();
-        let mut downloaded: u64 = 0;
+        let mut downloaded: u64 = if is_resume { resume_offset } else { 0 };
         let start_time = std::time::Instant::now();
-        let mut last_db_save: u64 = 0;
+        let session_downloaded: u64 = 0; // Track bytes downloaded this session for speed calc
+        let mut last_db_save: u64 = downloaded;
         let mut last_event_time = std::time::Instant::now();
         const DB_SAVE_INTERVAL: u64 = 5 * 1024 * 1024; // Save to DB every 5MB
         const EVENT_THROTTLE_MS: u128 = 500; // Emit events at most every 500ms
@@ -573,7 +635,7 @@ impl DownloadManager {
         use futures_util::StreamExt;
 
         while let Some(chunk) = stream.next().await {
-            // Check if cancelled
+            // Check if cancelled or paused
             {
                 let downloads_map = downloads.read().await;
                 if let Some(progress) = downloads_map.get(&download_id) {
@@ -582,6 +644,12 @@ impl DownloadManager {
                         tokio::fs::remove_file(&file_path).await.ok();
                         return Err(anyhow::anyhow!("Download cancelled"));
                     }
+                    if progress.status == DownloadStatus::Paused {
+                        // Flush and return - don't delete file, keep progress
+                        file.flush().await.ok();
+                        log::debug!("Download paused at {} bytes", downloaded);
+                        return Err(anyhow::anyhow!("Download paused"));
+                    }
                 }
             }
 
@@ -589,12 +657,13 @@ impl DownloadManager {
             file.write_all(&chunk).await.context("Failed to write chunk")?;
             downloaded += chunk.len() as u64;
 
-            // Calculate speed
+            // Calculate speed based on this session's download
             let elapsed = start_time.elapsed().as_secs();
+            let session_bytes = downloaded - (if is_resume { resume_offset } else { 0 });
             let speed = if elapsed > 0 {
-                downloaded / elapsed
+                session_bytes / elapsed
             } else {
-                0
+                session_downloaded
             };
 
             // Update progress
@@ -657,6 +726,57 @@ impl DownloadManager {
 
             // Save to database
             self.save_to_database(progress).await.ok();
+        }
+        Ok(())
+    }
+
+    /// Pause a download
+    pub async fn pause_download(&self, download_id: &str) -> Result<()> {
+        let mut downloads = self.downloads.write().await;
+        if let Some(progress) = downloads.get_mut(download_id) {
+            // Only pause if currently downloading or queued
+            if progress.status == DownloadStatus::Downloading || progress.status == DownloadStatus::Queued {
+                progress.status = DownloadStatus::Paused;
+                progress.speed = 0; // Reset speed since we're paused
+                log::debug!("Paused download: {} at {} bytes", download_id, progress.downloaded_bytes);
+
+                // Emit event
+                self.emit_progress(progress);
+
+                // Save to database
+                self.save_to_database(progress).await.ok();
+            }
+        }
+        Ok(())
+    }
+
+    /// Resume a paused download
+    pub async fn resume_download(&self, download_id: &str) -> Result<()> {
+        // Get the download info
+        let download_info = {
+            let downloads = self.downloads.read().await;
+            downloads.get(download_id).cloned()
+        };
+
+        if let Some(progress) = download_info {
+            // Only resume if paused or failed
+            if progress.status == DownloadStatus::Paused || progress.status == DownloadStatus::Failed {
+                // Update status to queued
+                {
+                    let mut downloads = self.downloads.write().await;
+                    if let Some(p) = downloads.get_mut(download_id) {
+                        p.status = DownloadStatus::Queued;
+                        p.error_message = None; // Clear any previous error
+                        self.emit_progress(p);
+                        self.save_to_database(p).await.ok();
+                    }
+                }
+
+                log::debug!("Resuming download: {} from {} bytes", download_id, progress.downloaded_bytes);
+
+                // Start the download task (it will resume from downloaded_bytes)
+                self.start_download_task(download_id.to_string()).await?;
+            }
         }
         Ok(())
     }
