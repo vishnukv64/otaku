@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sqlx::{SqlitePool, Row};
 use tauri::{AppHandle, Emitter};
+use crate::notifications;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -372,11 +373,46 @@ impl DownloadManager {
                             }
 
                             log::debug!("Download completed: {} ({} bytes)", download_id, progress.total_bytes);
+
+                            // Emit notification for completed download
+                            if let Some(ref handle) = app_handle {
+                                // Extract title from filename (format: Title_EP1_quality.mp4)
+                                let title = progress.filename
+                                    .split("_EP")
+                                    .next()
+                                    .unwrap_or(&progress.filename)
+                                    .replace('_', " ");
+
+                                let _ = notifications::notify_download_complete(
+                                    handle,
+                                    db_pool.as_ref().map(|p| p.as_ref()),
+                                    &title,
+                                    progress.episode_number,
+                                ).await;
+                            }
                         }
                         Err(e) => {
                             progress.status = DownloadStatus::Failed;
                             progress.error_message = Some(e.to_string());
                             log::error!("Download failed: {} - {}", download_id, e);
+
+                            // Emit notification for failed download
+                            if let Some(ref handle) = app_handle {
+                                // Extract title from filename
+                                let title = progress.filename
+                                    .split("_EP")
+                                    .next()
+                                    .unwrap_or(&progress.filename)
+                                    .replace('_', " ");
+
+                                let _ = notifications::notify_download_failed(
+                                    handle,
+                                    db_pool.as_ref().map(|p| p.as_ref()),
+                                    &title,
+                                    progress.episode_number,
+                                    &e.to_string(),
+                                ).await;
+                            }
                         }
                     }
 

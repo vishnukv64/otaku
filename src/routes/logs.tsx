@@ -10,7 +10,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getAppLogs, clearAppLogs, getLogFilePath, startLogsStream, stopLogsStream, APP_LOGS_EVENT, type LogEntry } from '../utils/tauri-commands'
 import { ArrowLeft, RefreshCw, Trash2, FolderOpen, Download, Filter } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { notifySuccess, notifyError } from '@/utils/notify'
 import { invoke } from '@tauri-apps/api/core'
 
 export const Route = createFileRoute('/logs')({
@@ -33,7 +33,7 @@ function LogsScreen() {
       setLogs(entries)
     } catch (error) {
       console.error('Failed to load logs:', error)
-      toast.error(`Failed to load logs: ${error}`)
+      notifyError('Load Failed', `Failed to load logs: ${error}`)
     } finally {
       setLoading(false)
     }
@@ -100,9 +100,9 @@ function LogsScreen() {
     try {
       await clearAppLogs()
       setLogs([])
-      toast.success('Logs cleared')
+      notifySuccess('Logs Cleared', 'Application logs have been cleared')
     } catch (error) {
-      toast.error(`Failed to clear logs: ${error}`)
+      notifyError('Clear Failed', `Failed to clear logs: ${error}`)
     }
   }
 
@@ -114,7 +114,7 @@ function LogsScreen() {
       const dirPath = logFilePath.substring(0, logFilePath.lastIndexOf('/'))
       await invoke('plugin:shell|open', { path: dirPath })
     } catch (error) {
-      toast.error(`Failed to open folder: ${error}`)
+      notifyError('Open Failed', `Failed to open folder: ${error}`)
     }
   }
 
@@ -130,7 +130,7 @@ function LogsScreen() {
     a.download = `otaku-logs-${new Date().toISOString().split('T')[0]}.txt`
     a.click()
     URL.revokeObjectURL(url)
-    toast.success('Logs exported')
+    notifySuccess('Logs Exported', 'Logs have been exported')
   }
 
   const filteredLogs = logs.filter((log) => {

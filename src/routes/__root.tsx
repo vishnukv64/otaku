@@ -2,12 +2,21 @@ import { createRootRoute, Outlet } from '@tanstack/react-router'
 import { Toaster } from 'react-hot-toast'
 import { AppShell } from '@/components/layout/AppShell'
 import { MediaStatusProvider } from '@/contexts/MediaStatusContext'
+import { useNotificationEvents } from '@/hooks/useNotificationEvents'
+import { useAutoUpdateCheck } from '@/hooks/useAutoUpdateCheck'
 
 export const Route = createRootRoute({
   component: RootComponent,
 })
 
 function RootComponent() {
+  // Initialize notification event listener at root level
+  // This ensures notifications are received app-wide
+  useNotificationEvents()
+
+  // Check for app updates on launch and periodically
+  useAutoUpdateCheck()
+
   return (
     <MediaStatusProvider>
       <AppShell>

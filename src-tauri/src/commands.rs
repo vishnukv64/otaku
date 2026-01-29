@@ -2235,6 +2235,19 @@ pub async fn get_downloaded_chapter_images(
         .map_err(|e| format!("Failed to get downloaded chapter images: {}", e))
 }
 
+/// Cancel an ongoing chapter download
+#[tauri::command]
+pub async fn cancel_chapter_download(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<(), String> {
+    chapter_downloads::cancel_chapter_download(state.database.pool(), &app_handle, &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to cancel chapter download: {}", e))
+}
+
 /// Delete a chapter download
 #[tauri::command]
 pub async fn delete_chapter_download(
@@ -2291,4 +2304,295 @@ pub async fn get_cache_stats() -> Result<cache::CacheStats, String> {
 pub async fn clear_api_cache() -> Result<(), String> {
     cache::clear_all_caches();
     Ok(())
+}
+
+// ==================== Notification Commands ====================
+
+use crate::notifications::{self, NotificationPayload, NotificationType};
+
+/// Create and save a notification to the database
+#[tauri::command]
+pub async fn create_notification(
+    state: State<'_, AppState>,
+    notification_type: String,
+    title: String,
+    message: String,
+    source: Option<String>,
+    action_label: Option<String>,
+    action_route: Option<String>,
+    metadata: Option<serde_json::Value>,
+) -> Result<String, String> {
+    let n_type = match notification_type.as_str() {
+        "success" => NotificationType::Success,
+        "error" => NotificationType::Error,
+        "warning" => NotificationType::Warning,
+        _ => NotificationType::Info,
+    };
+
+    let mut notification = NotificationPayload::new(n_type, title, message);
+
+    if let Some(src) = source {
+        notification = notification.with_source(src);
+    }
+
+    if let Some(label) = action_label {
+        notification = notification.with_action(label, action_route, None);
+    }
+
+    if let Some(meta) = metadata {
+        notification = notification.with_metadata(meta);
+    }
+
+    let notification_id = notification.id.clone();
+
+    notifications::save_notification_public(state.database.pool(), &notification)
+        .await
+        .map_err(|e| format!("Failed to save notification: {}", e))?;
+
+    Ok(notification_id)
+}
+
+/// List notifications from database
+#[tauri::command]
+pub async fn list_notifications(
+    state: State<'_, AppState>,
+    limit: Option<i32>,
+    include_dismissed: Option<bool>,
+) -> Result<Vec<NotificationPayload>, String> {
+    let limit = limit.unwrap_or(50);
+    let include_dismissed = include_dismissed.unwrap_or(false);
+
+    notifications::list_notifications(state.database.pool(), limit, include_dismissed)
+        .await
+        .map_err(|e| format!("Failed to list notifications: {}", e))
+}
+
+/// Mark a notification as read
+#[tauri::command]
+pub async fn mark_notification_read(
+    state: State<'_, AppState>,
+    notification_id: String,
+) -> Result<(), String> {
+    notifications::mark_notification_read(state.database.pool(), &notification_id)
+        .await
+        .map_err(|e| format!("Failed to mark notification as read: {}", e))
+}
+
+/// Mark all notifications as read
+#[tauri::command]
+pub async fn mark_all_notifications_read(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    notifications::mark_all_notifications_read(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to mark all notifications as read: {}", e))
+}
+
+/// Dismiss a notification
+#[tauri::command]
+pub async fn dismiss_notification(
+    state: State<'_, AppState>,
+    notification_id: String,
+) -> Result<(), String> {
+    notifications::dismiss_notification(state.database.pool(), &notification_id)
+        .await
+        .map_err(|e| format!("Failed to dismiss notification: {}", e))
+}
+
+/// Clear all notifications
+#[tauri::command]
+pub async fn clear_all_notifications(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    notifications::clear_all_notifications(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to clear notifications: {}", e))
+}
+
+/// Get count of unread notifications
+#[tauri::command]
+pub async fn get_unread_notification_count(
+    state: State<'_, AppState>,
+) -> Result<i32, String> {
+    notifications::get_unread_count(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get unread count: {}", e))
+}
+
+// ============================================================================
+// App Settings Commands
+// ============================================================================
+
+/// Update check info returned to frontend
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpdateCheckInfo {
+    pub last_check: Option<i64>,
+    pub next_check: Option<i64>,
+    pub notified_version: Option<String>,
+}
+
+/// Get update check info from database
+#[tauri::command]
+pub async fn get_update_check_info(
+    state: State<'_, AppState>,
+) -> Result<UpdateCheckInfo, String> {
+    let pool = state.database.pool();
+
+    // Get last check timestamp
+    let last_check: Option<i64> = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM app_settings WHERE key = 'update_last_check'"
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to get last check: {}", e))?;
+
+    // Get notified version
+    let notified_version: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM app_settings WHERE key = 'update_notified_version'"
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to get notified version: {}", e))?;
+
+    // Calculate next check (24 hours after last check)
+    let next_check = last_check.map(|ts| ts + (24 * 60 * 60 * 1000));
+
+    Ok(UpdateCheckInfo {
+        last_check,
+        next_check,
+        notified_version,
+    })
+}
+
+/// Set update check info in database
+#[tauri::command]
+pub async fn set_update_check_info(
+    state: State<'_, AppState>,
+    last_check: Option<i64>,
+    notified_version: Option<String>,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Update last check if provided
+    if let Some(ts) = last_check {
+        sqlx::query(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES ('update_last_check', ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            "#
+        )
+        .bind(ts.to_string())
+        .bind(now)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to set last check: {}", e))?;
+    }
+
+    // Update notified version if provided
+    if let Some(version) = notified_version {
+        sqlx::query(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES ('update_notified_version', ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            "#
+        )
+        .bind(version)
+        .bind(now)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to set notified version: {}", e))?;
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Release Checker Commands
+// ============================================================================
+
+use crate::release_checker::{
+    self, ReleaseCheckResult, ReleaseCheckSettings, ReleaseCheckStatus,
+};
+
+/// Get release check settings
+#[tauri::command]
+pub async fn get_release_check_settings(
+    state: State<'_, AppState>,
+) -> Result<ReleaseCheckSettings, String> {
+    release_checker::get_release_settings(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get release settings: {}", e))
+}
+
+/// Update release check settings
+#[tauri::command]
+pub async fn update_release_check_settings(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    enabled: bool,
+    interval_hours: u32,
+) -> Result<(), String> {
+    let settings = ReleaseCheckSettings {
+        enabled,
+        interval_hours,
+        last_full_check: None, // Don't update last check time when changing settings
+    };
+
+    release_checker::update_release_settings(state.database.pool(), &settings)
+        .await
+        .map_err(|e| format!("Failed to update release settings: {}", e))?;
+
+    // Start or stop checker based on enabled status
+    if enabled {
+        if !release_checker::is_checker_running() {
+            release_checker::start_release_checker(app).await;
+        }
+    } else {
+        release_checker::stop_release_checker();
+    }
+
+    Ok(())
+}
+
+/// Manually check for new releases
+#[tauri::command]
+pub async fn check_for_new_releases(
+    app: AppHandle,
+) -> Result<Vec<ReleaseCheckResult>, String> {
+    release_checker::run_full_release_check(&app)
+        .await
+        .map_err(|e| format!("Release check failed: {}", e))
+}
+
+/// Get release check status
+#[tauri::command]
+pub async fn get_release_check_status(
+    state: State<'_, AppState>,
+) -> Result<ReleaseCheckStatus, String> {
+    release_checker::get_release_check_status(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get release status: {}", e))
+}
+
+/// Initialize release tracking for a media item
+#[tauri::command]
+pub async fn initialize_release_tracking(
+    state: State<'_, AppState>,
+    media_id: String,
+    extension_id: String,
+    media_type: String,
+    current_count: i32,
+) -> Result<(), String> {
+    release_checker::initialize_tracking(
+        state.database.pool(),
+        &media_id,
+        &extension_id,
+        &media_type,
+        current_count,
+    )
+    .await
+    .map_err(|e| format!("Failed to initialize tracking: {}", e))
 }

@@ -4,7 +4,7 @@ import { usePlayerStore } from '../store/playerStore'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion, getTauriVersion } from '@tauri-apps/api/app'
 import { useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
+import { notifySuccess, notifyError } from '@/utils/notify'
 import { SettingSection } from '../components/settings/SettingSection'
 import { SettingRow } from '../components/settings/SettingRow'
 import { SettingToggle } from '../components/settings/SettingToggle'
@@ -78,36 +78,36 @@ function SettingsScreen() {
   const handleClearWatchHistory = async () => {
     try {
       await invoke('clear_all_watch_history')
-      toast.success('Watch history cleared')
+      notifySuccess('History Cleared', 'Watch history has been cleared')
       loadStorageUsage()
     } catch (error) {
-      toast.error(`Failed to clear watch history: ${error}`)
+      notifyError('Clear Failed', `Failed to clear watch history: ${error}`)
     }
   }
 
   const handleClearLibrary = async () => {
     try {
       await invoke('clear_library')
-      toast.success('Library cleared')
+      notifySuccess('Library Cleared', 'Library has been cleared')
       loadStorageUsage()
     } catch (error) {
-      toast.error(`Failed to clear library: ${error}`)
+      notifyError('Clear Failed', `Failed to clear library: ${error}`)
     }
   }
 
   const handleClearAllData = async () => {
     try {
       await invoke('clear_all_data')
-      toast.success('All data cleared')
+      notifySuccess('Data Cleared', 'All data has been cleared')
       loadStorageUsage()
     } catch (error) {
-      toast.error(`Failed to clear data: ${error}`)
+      notifyError('Clear Failed', `Failed to clear data: ${error}`)
     }
   }
 
   const handleResetSettings = () => {
     settings.resetToDefaults()
-    toast.success('Settings reset to defaults')
+    notifySuccess('Settings Reset', 'Settings have been reset to defaults')
   }
 
   return (

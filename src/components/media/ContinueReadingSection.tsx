@@ -12,7 +12,7 @@ import { getContinueReadingWithDetails, removeFromContinueReadingManga, type Con
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import type { SearchResult } from '@/types/extension'
-import toast from 'react-hot-toast'
+import { notifySuccess, notifyError } from '@/utils/notify'
 
 interface ContinueReadingSectionProps {
   extensionId: string
@@ -100,10 +100,10 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
     try {
       await removeFromContinueReadingManga(mediaId)
       setContinueReading(prev => prev.filter(entry => entry.media.id !== mediaId))
-      toast.success(`Removed "${title}" from Continue Reading`)
+      notifySuccess('Removed', `Removed "${title}" from Continue Reading`)
     } catch (error) {
       console.error('Failed to remove from continue reading:', error)
-      toast.error('Failed to remove from Continue Reading')
+      notifyError('Remove Failed', 'Failed to remove from Continue Reading')
     }
   }
 

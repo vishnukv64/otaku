@@ -24,7 +24,7 @@ import { saveWatchProgress, deleteEpisodeDownload, getVideoServerInfo, type Vide
 import { DownloadButton } from './DownloadButton'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
-import toast from 'react-hot-toast'
+import { notifySuccess } from '@/utils/notify'
 
 // Helper to create proxy URL for HLS streaming via embedded video server
 function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
@@ -493,10 +493,7 @@ export function VideoPlayer({
         if (completed && autoDeleteWatched) {
           try {
             await deleteEpisodeDownload(mediaId, currentEpisode)
-            toast.success(`Episode ${currentEpisode} deleted (auto-delete enabled)`, {
-              icon: '🗑️',
-              duration: 3000,
-            })
+            notifySuccess(animeTitle || 'Episode Deleted', `Episode ${currentEpisode} auto-deleted after watching`)
           } catch {
             // Silently fail if episode wasn't downloaded - this is expected
           }

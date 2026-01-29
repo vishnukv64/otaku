@@ -2,8 +2,8 @@ import { Link, useRouterState } from '@tanstack/react-router'
 import { Search, Settings, Menu, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useEffect, useState, useCallback } from 'react'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
-import { ToastContainer } from '@/components/ui/Toast'
 import { DownloadManager } from '@/components/player/DownloadManager'
+import { NotificationCenter } from '@/components/notifications'
 import logoImage from '@/assets/logo.png'
 
 const navItems = [
@@ -23,7 +23,7 @@ export function TopNav({ onSearchClick }: TopNavProps) {
   const [downloadManagerOpen, setDownloadManagerOpen] = useState(false)
   const routerState = useRouterState()
   const currentPath = routerState.location.pathname
-  const { activeCount, toasts } = useDownloadStatus()
+  const { activeCount } = useDownloadStatus()
 
   // Navigation state - track history position for back/forward buttons
   const [navState, setNavState] = useState(() => {
@@ -181,6 +181,9 @@ export function TopNav({ onSearchClick }: TopNavProps) {
               </kbd>
             </button>
 
+            {/* Notification Center */}
+            <NotificationCenter />
+
             {/* Download Indicator with Badge */}
             <button
               onClick={() => setDownloadManagerOpen(true)}
@@ -243,9 +246,6 @@ export function TopNav({ onSearchClick }: TopNavProps) {
         isOpen={downloadManagerOpen}
         onClose={() => setDownloadManagerOpen(false)}
       />
-
-      {/* Toast Notifications */}
-      <ToastContainer toasts={toasts} />
     </nav>
   )
 }

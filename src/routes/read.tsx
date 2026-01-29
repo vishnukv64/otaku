@@ -23,7 +23,7 @@ import {
 } from '@/utils/tauri-commands'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { MangaDetails, ChapterImages } from '@/types/extension'
-import toast from 'react-hot-toast'
+import { toastInfo } from '@/utils/notify'
 
 interface ReadSearch {
   extensionId: string
@@ -154,11 +154,7 @@ function ReadPage() {
 
           if (progress && progress.current_page > 1) {
             setResumePage(progress.current_page)
-            toast.success(`Resuming from page ${progress.current_page}`, {
-              id: `resume-${currentChapterId}`,
-              duration: 3000,
-              position: 'bottom-center',
-            })
+            toastInfo('Resuming Reading', `Resuming from page ${progress.current_page}`)
 
             // Mark as read if completed
             if (progress.completed) {
@@ -191,11 +187,7 @@ function ReadPage() {
               title: `Chapter ${currentChapter.number}`,
             })
 
-            toast.success('Reading from downloaded content', {
-              id: `offline-${currentChapterId}`,
-              duration: 2000,
-              position: 'bottom-center',
-            })
+            toastInfo('Offline Mode', 'Reading from downloaded content')
             return
           }
         }

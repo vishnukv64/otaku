@@ -5,6 +5,8 @@ mod database;
 mod downloads;
 mod extensions;
 mod media;
+mod notifications;
+mod release_checker;
 mod trackers;
 mod video_server;
 
@@ -207,6 +209,7 @@ pub fn run() {
         };
 
         let db_pool = Arc::new(database.pool().clone());
+        let checker_db_pool = db_pool.clone(); // Clone for release checker before it's moved
 
         // Add database to app state
         app_handle.manage(AppState::new(database));
@@ -244,6 +247,28 @@ pub fn run() {
             }
         });
 
+        // Start release checker if enabled (with delay to let app fully initialize)
+        let checker_app_handle = app_handle.clone();
+        tokio::spawn(async move {
+            // Wait for app to fully initialize
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+            // Check settings and start if enabled
+            match release_checker::get_release_settings(&checker_db_pool).await {
+                Ok(settings) => {
+                    if settings.enabled {
+                        log::info!("Starting background release checker");
+                        release_checker::start_release_checker(checker_app_handle).await;
+                    } else {
+                        log::debug!("Release checker is disabled");
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to get release settings on startup: {}", e);
+                }
+            }
+        });
+
         log::info!("Backend initialized successfully");
       });
 
@@ -276,6 +301,7 @@ pub fn run() {
       commands::get_chapter_download_progress,
       commands::is_chapter_downloaded,
       commands::get_downloaded_chapter_images,
+      commands::cancel_chapter_download,
       commands::delete_chapter_download,
       commands::list_chapter_downloads,
       commands::get_downloaded_manga,
@@ -342,6 +368,23 @@ pub fn run() {
       // Cache Management
       commands::get_cache_stats,
       commands::clear_api_cache,
+      // Notifications
+      commands::create_notification,
+      commands::list_notifications,
+      commands::mark_notification_read,
+      commands::mark_all_notifications_read,
+      commands::dismiss_notification,
+      commands::clear_all_notifications,
+      commands::get_unread_notification_count,
+      // App Settings
+      commands::get_update_check_info,
+      commands::set_update_check_info,
+      // Release Checker
+      commands::get_release_check_settings,
+      commands::update_release_check_settings,
+      commands::check_for_new_releases,
+      commands::get_release_check_status,
+      commands::initialize_release_tracking,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

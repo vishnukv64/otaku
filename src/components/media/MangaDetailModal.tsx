@@ -30,9 +30,10 @@ import {
 import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { useChapterDownloadEvents } from '@/hooks/useChapterDownloadEvents'
 import { hasNsfwGenres } from '@/utils/nsfw-filter'
 import type { SearchResult, MangaDetails, Chapter } from '@/types/extension'
-import toast from 'react-hot-toast'
+import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 
 interface MangaDetailModalProps {
   manga: SearchResult | null
@@ -53,9 +54,18 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const [showAllChapters, setShowAllChapters] = useState(false)
   const [readingProgress, setReadingProgress] = useState<{ chapterId: string; chapterNumber: number; page: number } | null>(null)
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
-  const [downloadingChapters, setDownloadingChapters] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
+
+  // Use event-based download tracking instead of polling
+  // Note: Toast notifications are handled globally by the notification system
+  const { downloadingChapters } = useChapterDownloadEvents({
+    mediaId: manga?.id,
+    onComplete: (download) => {
+      // Add to downloaded chapters when a download completes
+      setDownloadedChapters(prev => new Set(prev).add(download.chapter_id))
+    },
+  })
 
   // Close on escape
   useEffect(() => {
@@ -234,16 +244,26 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const handleAddToLibrary = async (status: LibraryStatus) => {
     if (!details) return
 
+    const statusLabels: Record<LibraryStatus, string> = {
+      watching: 'Watching',
+      completed: 'Completed',
+      on_hold: 'On Hold',
+      dropped: 'Dropped',
+      plan_to_watch: 'Plan to Watch',
+      reading: 'Reading',
+      plan_to_read: 'Plan to Read',
+    }
+
     try {
       // Ensure media is saved first (required for foreign key constraint)
       await ensureMediaSaved()
       await addToLibrary(details.id, status)
       setInLibrary(true)
-      toast.success(`Added to ${status.replace('_', ' ')}`)
+      notifySuccess(details.title, `Added to "${statusLabels[status]}" list`)
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
-      toast.error('Failed to add to library')
+      notifyError('Library Error', `Failed to add "${details.title}" to library`)
       console.error(err)
     }
   }
@@ -255,11 +275,11 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       await removeFromLibrary(details.id)
       setInLibrary(false)
       setIsFavorite(false)
-      toast.success('Removed from library')
+      notifySuccess(details.title, 'Removed from your library')
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
-      toast.error('Failed to remove from library')
+      notifyError('Library Error', `Failed to remove "${details.title}" from library`)
       console.error(err)
     }
   }
@@ -277,11 +297,11 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       }
       const newFavorite = await toggleFavorite(details.id)
       setIsFavorite(newFavorite)
-      toast.success(newFavorite ? 'Added to favorites' : 'Removed from favorites')
+      notifySuccess(details.title, newFavorite ? 'Added to your favorites' : 'Removed from your favorites')
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
-      toast.error('Failed to toggle favorite')
+      notifyError('Favorites Error', `Failed to update favorites for "${details.title}"`)
       console.error(err)
     }
   }
@@ -292,9 +312,6 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     if (!details) return
 
     try {
-      setDownloadingChapters(prev => new Set(prev).add(chapter.id))
-      toast.loading(`Downloading Chapter ${chapter.number}...`, { id: `download-${chapter.id}` })
-
       // Get chapter images first
       const chapterImages = await getChapterImages(extensionId, chapter.id)
       if (!chapterImages.images || chapterImages.images.length === 0) {
@@ -302,6 +319,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       }
 
       // Start download with image URLs
+      // Progress tracking is handled by useChapterDownloadEvents hook via SSE
       const imageUrls = chapterImages.images.map(img => img.url)
       await startChapterDownload(
         details.id,
@@ -310,19 +328,10 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         chapter.number,
         imageUrls
       )
-
-      // Mark as downloaded
-      setDownloadedChapters(prev => new Set(prev).add(chapter.id))
-      toast.success(`Chapter ${chapter.number} downloaded!`, { id: `download-${chapter.id}` })
+      // Download completion is tracked via events (onComplete callback updates downloadedChapters)
     } catch (err) {
       console.error('Download failed:', err)
-      toast.error(`Failed to download chapter ${chapter.number}`, { id: `download-${chapter.id}` })
-    } finally {
-      setDownloadingChapters(prev => {
-        const next = new Set(prev)
-        next.delete(chapter.id)
-        return next
-      })
+      notifyError('Download Failed', `Failed to download "${details.title}" Chapter ${chapter.number}`)
     }
   }
 
@@ -338,10 +347,10 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         next.delete(chapter.id)
         return next
       })
-      toast.success(`Chapter ${chapter.number} download deleted`)
+      notifySuccess(details.title, `Chapter ${chapter.number} download deleted`)
     } catch (err) {
       console.error('Delete failed:', err)
-      toast.error(`Failed to delete chapter ${chapter.number} download`)
+      notifyError('Delete Failed', `Failed to delete "${details.title}" Chapter ${chapter.number} download`)
     }
   }
 
@@ -350,15 +359,13 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     if (!details) return false
 
     try {
-      setDownloadingChapters(prev => new Set(prev).add(chapter.id))
-
       // Get chapter images
       const chapterImages = await getChapterImages(extensionId, chapter.id)
       if (!chapterImages.images || chapterImages.images.length === 0) {
         throw new Error('No images found')
       }
 
-      // Start download
+      // Start download - progress tracking is handled by useChapterDownloadEvents hook via SSE
       const imageUrls = chapterImages.images.map(img => img.url)
       await startChapterDownload(
         details.id,
@@ -367,19 +374,11 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         chapter.number,
         imageUrls
       )
-
-      // Mark as downloaded
-      setDownloadedChapters(prev => new Set(prev).add(chapter.id))
+      // Download completion is tracked via events (onComplete callback updates downloadedChapters)
       return true
     } catch (err) {
       console.error(`Failed to download chapter ${chapter.number}:`, err)
       return false
-    } finally {
-      setDownloadingChapters(prev => {
-        const next = new Set(prev)
-        next.delete(chapter.id)
-        return next
-      })
     }
   }
 
@@ -391,16 +390,13 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     const chaptersToDownload = details.chapters.filter(ch => !downloadedChapters.has(ch.id))
 
     if (chaptersToDownload.length === 0) {
-      toast.success('All chapters already downloaded!')
+      notifyInfo(details.title, 'All chapters are already downloaded')
       return
     }
 
     setIsDownloadingAll(true)
-    const toastId = 'download-all'
     let successCount = 0
     let failCount = 0
-
-    toast.loading(`Downloading ${chaptersToDownload.length} chapters (${maxConcurrentDownloads} concurrent)...`, { id: toastId })
 
     // Process chapters in batches of maxConcurrentDownloads
     const concurrency = maxConcurrentDownloads || 3
@@ -420,18 +416,14 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
           failCount++
         }
       })
-
-      // Update progress toast
-      const total = successCount + failCount
-      toast.loading(`Downloaded ${total}/${chaptersToDownload.length} chapters...`, { id: toastId })
     }
 
     setIsDownloadingAll(false)
 
     if (failCount === 0) {
-      toast.success(`Successfully downloaded ${successCount} chapters!`, { id: toastId })
+      notifySuccess(details.title, `Successfully downloaded ${successCount} chapter${successCount > 1 ? 's' : ''}`)
     } else {
-      toast.error(`Downloaded ${successCount} chapters, ${failCount} failed`, { id: toastId })
+      notifyError(details.title, `Downloaded ${successCount} chapter${successCount > 1 ? 's' : ''}, ${failCount} failed`)
     }
   }
 
@@ -554,9 +546,10 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                   </button>
                 )}
 
-                {/* Library button */}
+                {/* Library button - key forces re-render to prevent visual artifacts */}
                 {inLibrary ? (
                   <button
+                    key="in-library-btn"
                     onClick={handleRemoveFromLibrary}
                     className="flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                   >
@@ -564,7 +557,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                     In Library
                   </button>
                 ) : (
-                  <div className="relative group">
+                  <div key="add-library-btn" className="relative group">
                     <button
                       onClick={() => handleAddToLibrary('plan_to_read')}
                       className="flex items-center gap-2 px-4 py-3 bg-[var(--color-bg-secondary)] text-white rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"

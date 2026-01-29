@@ -988,7 +988,7 @@ export interface ChapterDownloadProgress {
   total_images: number
   downloaded_images: number
   percentage: number
-  status: 'queued' | 'downloading' | 'completed' | 'failed'
+  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   error_message?: string
 }
 
@@ -1053,6 +1053,18 @@ export async function getDownloadedChapterImages(
 }
 
 /**
+ * Cancel an ongoing chapter download
+ * @param mediaId - Media ID
+ * @param chapterId - Chapter ID
+ */
+export async function cancelChapterDownload(
+  mediaId: string,
+  chapterId: string
+): Promise<void> {
+  return await invoke('cancel_chapter_download', { mediaId, chapterId })
+}
+
+/**
  * Delete a chapter download
  * @param mediaId - Media ID
  * @param chapterId - Chapter ID
@@ -1105,7 +1117,7 @@ export interface ChapterDownloadWithTitle {
   total_images: number
   downloaded_images: number
   percentage: number
-  status: 'queued' | 'downloading' | 'completed' | 'failed'
+  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   error_message?: string
 }
 
@@ -1120,7 +1132,7 @@ export interface ChapterDownloadProgressEvent {
   total_images: number
   downloaded_images: number
   percentage: number
-  status: 'queued' | 'downloading' | 'completed' | 'failed'
+  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   error_message?: string
 }
 
@@ -1160,5 +1172,250 @@ export async function getCacheStats(): Promise<CacheStats> {
  */
 export async function clearApiCache(): Promise<void> {
   return await invoke('clear_api_cache')
+}
+
+// ==================== Notification Commands ====================
+
+export type NotificationType = 'success' | 'error' | 'warning' | 'info'
+
+export interface NotificationAction {
+  label: string
+  route?: string
+  callback?: string
+}
+
+export interface NotificationPayload {
+  id: string
+  type: NotificationType
+  title: string
+  message: string
+  source?: string
+  action?: NotificationAction
+  metadata?: Record<string, unknown>
+  read: boolean
+  dismissed: boolean
+  timestamp: number
+}
+
+/** Event name for notification events */
+export const NOTIFICATION_EVENT = 'notification'
+
+/**
+ * Create and save a notification to the database
+ * @param notificationType - Type of notification (success, error, warning, info)
+ * @param title - Notification title
+ * @param message - Notification message
+ * @param source - Optional source/category
+ * @param actionLabel - Optional action button label
+ * @param actionRoute - Optional route to navigate to when action is clicked
+ * @param metadata - Optional additional metadata
+ * @returns The notification ID
+ */
+export async function createNotification(
+  notificationType: 'success' | 'error' | 'warning' | 'info',
+  title: string,
+  message: string,
+  source?: string,
+  actionLabel?: string,
+  actionRoute?: string,
+  metadata?: Record<string, unknown>
+): Promise<string> {
+  return await invoke('create_notification', {
+    notificationType,
+    title,
+    message,
+    source,
+    actionLabel,
+    actionRoute,
+    metadata,
+  })
+}
+
+/**
+ * List notifications from database
+ * @param limit - Maximum number of notifications to return (default 50)
+ * @param includeDismissed - Whether to include dismissed notifications
+ */
+export async function listNotifications(
+  limit: number = 50,
+  includeDismissed: boolean = false
+): Promise<NotificationPayload[]> {
+  return await invoke('list_notifications', { limit, includeDismissed })
+}
+
+/**
+ * Mark a notification as read
+ * @param notificationId - The notification ID to mark as read
+ */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  return await invoke('mark_notification_read', { notificationId })
+}
+
+/**
+ * Mark all notifications as read
+ */
+export async function markAllNotificationsRead(): Promise<void> {
+  return await invoke('mark_all_notifications_read')
+}
+
+/**
+ * Dismiss a notification (soft delete)
+ * @param notificationId - The notification ID to dismiss
+ */
+export async function dismissNotification(notificationId: string): Promise<void> {
+  return await invoke('dismiss_notification', { notificationId })
+}
+
+/**
+ * Clear all notifications
+ */
+export async function clearAllNotifications(): Promise<void> {
+  return await invoke('clear_all_notifications')
+}
+
+/**
+ * Get count of unread notifications
+ */
+export async function getUnreadNotificationCount(): Promise<number> {
+  return await invoke('get_unread_notification_count')
+}
+
+/**
+ * Listen for notification events
+ * @param callback - Called when a notification is received
+ * @returns Unsubscribe function
+ */
+export async function onNotification(
+  callback: (notification: NotificationPayload) => void
+): Promise<UnlistenFn> {
+  return await listen<NotificationPayload>(NOTIFICATION_EVENT, (event) => {
+    callback(event.payload)
+  })
+}
+
+// ============================================================================
+// App Settings / Update Check
+// ============================================================================
+
+/** Update check info from database */
+export interface UpdateCheckInfo {
+  last_check: number | null
+  next_check: number | null
+  notified_version: string | null
+}
+
+/**
+ * Get update check info from database
+ * @returns Update check timestamps and notified version
+ */
+export async function getUpdateCheckInfo(): Promise<UpdateCheckInfo> {
+  return await invoke('get_update_check_info')
+}
+
+/**
+ * Set update check info in database
+ * @param lastCheck - Timestamp of last check (optional)
+ * @param notifiedVersion - Version user was notified about (optional)
+ */
+export async function setUpdateCheckInfo(
+  lastCheck?: number,
+  notifiedVersion?: string
+): Promise<void> {
+  return await invoke('set_update_check_info', {
+    lastCheck: lastCheck ?? null,
+    notifiedVersion: notifiedVersion ?? null,
+  })
+}
+
+// ============================================================================
+// Release Checker Commands
+// ============================================================================
+
+/** Release check settings */
+export interface ReleaseCheckSettings {
+  enabled: boolean
+  interval_hours: number
+  last_full_check: number | null
+}
+
+/** Release check status */
+export interface ReleaseCheckStatus {
+  is_running: boolean
+  last_check: number | null
+  next_check: number | null
+  items_checked: number
+  new_releases_found: number
+}
+
+/** Result from checking a single media item */
+export interface ReleaseCheckResult {
+  media_id: string
+  media_title: string
+  media_type: 'anime' | 'manga'
+  previous_count: number
+  current_count: number
+  new_releases: number
+  extension_id: string
+}
+
+/**
+ * Get release check settings
+ * @returns Current release check settings
+ */
+export async function getReleaseCheckSettings(): Promise<ReleaseCheckSettings> {
+  return await invoke('get_release_check_settings')
+}
+
+/**
+ * Update release check settings
+ * @param enabled - Whether release checking is enabled
+ * @param intervalHours - Hours between checks (6, 12, 24, or 48)
+ */
+export async function updateReleaseCheckSettings(
+  enabled: boolean,
+  intervalHours: number
+): Promise<void> {
+  return await invoke('update_release_check_settings', {
+    enabled,
+    intervalHours,
+  })
+}
+
+/**
+ * Manually trigger a release check for all eligible media
+ * @returns Array of media items with new releases
+ */
+export async function checkForNewReleases(): Promise<ReleaseCheckResult[]> {
+  return await invoke('check_for_new_releases')
+}
+
+/**
+ * Get release check status
+ * @returns Current status of the release checker
+ */
+export async function getReleaseCheckStatus(): Promise<ReleaseCheckStatus> {
+  return await invoke('get_release_check_status')
+}
+
+/**
+ * Initialize release tracking for a media item
+ * Called when adding media to library
+ * @param mediaId - Media ID
+ * @param extensionId - Extension ID
+ * @param mediaType - Type of media ('anime' or 'manga')
+ * @param currentCount - Current episode/chapter count
+ */
+export async function initializeReleaseTracking(
+  mediaId: string,
+  extensionId: string,
+  mediaType: 'anime' | 'manga',
+  currentCount: number
+): Promise<void> {
+  return await invoke('initialize_release_tracking', {
+    mediaId,
+    extensionId,
+    mediaType,
+    currentCount,
+  })
 }
 
