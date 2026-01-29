@@ -314,6 +314,17 @@ impl DownloadManager {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             }
 
+            // Check if download was cancelled while waiting in queue
+            {
+                let downloads_map = downloads.read().await;
+                if let Some(progress) = downloads_map.get(&download_id) {
+                    if progress.status == DownloadStatus::Cancelled {
+                        log::debug!("Download was cancelled while queued: {}", download_id);
+                        return;
+                    }
+                }
+            }
+
             // Acquire slot
             {
                 let mut active = active_downloads.lock().await;
@@ -321,21 +332,37 @@ impl DownloadManager {
             }
 
             // Update status to downloading and emit event
-            {
+            let should_proceed = {
                 let mut downloads_map = downloads.write().await;
                 if let Some(progress) = downloads_map.get_mut(&download_id) {
-                    progress.status = DownloadStatus::Downloading;
+                    // Check again if cancelled (could have been cancelled between the read and write)
+                    if progress.status == DownloadStatus::Cancelled {
+                        log::debug!("Download was cancelled before starting: {}", download_id);
+                        false
+                    } else {
+                        progress.status = DownloadStatus::Downloading;
 
-                    // Emit event
-                    if let Some(ref handle) = app_handle {
-                        let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
-                    }
+                        // Emit event
+                        if let Some(ref handle) = app_handle {
+                            let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
+                        }
 
-                    // Save to database
-                    if let Some(pool) = &db_pool {
-                        Self::save_progress_to_db(pool, progress).await.ok();
+                        // Save to database
+                        if let Some(pool) = &db_pool {
+                            Self::save_progress_to_db(pool, progress).await.ok();
+                        }
+                        true
                     }
+                } else {
+                    false
                 }
+            };
+
+            // If cancelled or not found, release slot and return
+            if !should_proceed {
+                let mut active = active_downloads.lock().await;
+                *active -= 1;
+                return;
             }
 
             // Perform download
@@ -392,26 +419,31 @@ impl DownloadManager {
                             }
                         }
                         Err(e) => {
-                            progress.status = DownloadStatus::Failed;
-                            progress.error_message = Some(e.to_string());
-                            log::error!("Download failed: {} - {}", download_id, e);
+                            // Don't overwrite Cancelled status - it was intentionally cancelled
+                            if progress.status != DownloadStatus::Cancelled {
+                                progress.status = DownloadStatus::Failed;
+                                progress.error_message = Some(e.to_string());
+                                log::error!("Download failed: {} - {}", download_id, e);
 
-                            // Emit notification for failed download
-                            if let Some(ref handle) = app_handle {
-                                // Extract title from filename
-                                let title = progress.filename
-                                    .split("_EP")
-                                    .next()
-                                    .unwrap_or(&progress.filename)
-                                    .replace('_', " ");
+                                // Emit notification for failed download
+                                if let Some(ref handle) = app_handle {
+                                    // Extract title from filename
+                                    let title = progress.filename
+                                        .split("_EP")
+                                        .next()
+                                        .unwrap_or(&progress.filename)
+                                        .replace('_', " ");
 
-                                let _ = notifications::notify_download_failed(
-                                    handle,
-                                    db_pool.as_ref().map(|p| p.as_ref()),
-                                    &title,
-                                    progress.episode_number,
-                                    &e.to_string(),
-                                ).await;
+                                    let _ = notifications::notify_download_failed(
+                                        handle,
+                                        db_pool.as_ref().map(|p| p.as_ref()),
+                                        &title,
+                                        progress.episode_number,
+                                        &e.to_string(),
+                                    ).await;
+                                }
+                            } else {
+                                log::debug!("Download was cancelled: {}", download_id);
                             }
                         }
                     }
@@ -483,12 +515,18 @@ impl DownloadManager {
         db_pool: Option<Arc<SqlitePool>>,
         app_handle: Option<AppHandle>,
     ) -> Result<()> {
-        // Get download info
+        // Get download info and check if cancelled
         let (url, file_path) = {
             let downloads_map = downloads.read().await;
             let progress = downloads_map
                 .get(&download_id)
                 .context("Download not found")?;
+
+            // Check if cancelled before starting HTTP request
+            if progress.status == DownloadStatus::Cancelled {
+                return Err(anyhow::anyhow!("Download was cancelled"));
+            }
+
             (progress.url.clone(), progress.file_path.clone())
         };
 
