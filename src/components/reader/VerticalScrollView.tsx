@@ -66,7 +66,7 @@ export function VerticalScrollView({
     } else {
       hasScrolledToInitial.current = true
     }
-  }, []) // Only run once on mount
+  }, [initialPage]) // Re-run when initialPage changes
 
   // Track visible page using Intersection Observer - no state updates during scroll
   useEffect(() => {

@@ -21,22 +21,24 @@ export function TopNav({ onSearchClick }: TopNavProps) {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [downloadManagerOpen, setDownloadManagerOpen] = useState(false)
-  const [canGoBack, setCanGoBack] = useState(false)
-  const [canGoForward, setCanGoForward] = useState(false)
   const routerState = useRouterState()
   const currentPath = routerState.location.pathname
   const { activeCount, toasts } = useDownloadStatus()
 
-  // Track history position using history.state
-  const [historyIndex, setHistoryIndex] = useState(() => {
-    // Initialize or get current index from history state
+  // Navigation state - track history position for back/forward buttons
+  const [navState, setNavState] = useState(() => {
+    // Initialize from history.state on mount
     const currentIndex = window.history.state?.historyIndex ?? 0
+    const maxIndex = window.history.state?.maxHistoryIndex ?? 0
     if (window.history.state?.historyIndex === undefined) {
-      window.history.replaceState({ ...window.history.state, historyIndex: 0 }, '')
+      window.history.replaceState({ ...window.history.state, historyIndex: 0, maxHistoryIndex: 0 }, '')
     }
-    return currentIndex
+    return { historyIndex: currentIndex, maxHistoryIndex: maxIndex }
   })
-  const [maxHistoryIndex, setMaxHistoryIndex] = useState(historyIndex)
+
+  // Derive canGoBack/canGoForward from state
+  const canGoBack = navState.historyIndex > 0
+  const canGoForward = navState.historyIndex < navState.maxHistoryIndex
 
   // Handle back navigation
   const handleBack = useCallback(() => {
@@ -48,35 +50,40 @@ export function TopNav({ onSearchClick }: TopNavProps) {
     window.history.forward()
   }, [])
 
-  // Track navigation - update index on route changes
+  // Listen for history changes (popstate + custom event for new navigations)
+  useEffect(() => {
+    const updateNavState = () => {
+      const index = window.history.state?.historyIndex ?? 0
+      const max = window.history.state?.maxHistoryIndex ?? index
+      setNavState({ historyIndex: index, maxHistoryIndex: max })
+    }
+
+    window.addEventListener('popstate', updateNavState)
+    window.addEventListener('historyupdate', updateNavState)
+
+    return () => {
+      window.removeEventListener('popstate', updateNavState)
+      window.removeEventListener('historyupdate', updateNavState)
+    }
+  }, [])
+
+  // Update history.state on route changes and dispatch event to trigger state update
   useEffect(() => {
     const currentStateIndex = window.history.state?.historyIndex
 
     if (currentStateIndex === undefined) {
       // New navigation (not back/forward) - increment index
-      const newIndex = historyIndex + 1
-      window.history.replaceState({ ...window.history.state, historyIndex: newIndex }, '')
-      setHistoryIndex(newIndex)
-      setMaxHistoryIndex(newIndex) // New navigation clears forward history
+      const currentMax = window.history.state?.maxHistoryIndex ?? 0
+      const newIndex = currentMax + 1
+      window.history.replaceState({
+        ...window.history.state,
+        historyIndex: newIndex,
+        maxHistoryIndex: newIndex
+      }, '')
+      // Dispatch custom event to trigger state update (setState happens in event handler)
+      window.dispatchEvent(new Event('historyupdate'))
     }
-  }, [currentPath, historyIndex])
-
-  // Listen for popstate (back/forward browser events)
-  useEffect(() => {
-    const handlePopState = () => {
-      const newIndex = window.history.state?.historyIndex ?? 0
-      setHistoryIndex(newIndex)
-    }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
-
-  // Update canGoBack and canGoForward based on history position
-  useEffect(() => {
-    setCanGoBack(historyIndex > 0)
-    setCanGoForward(historyIndex < maxHistoryIndex)
-  }, [historyIndex, maxHistoryIndex])
+  }, [currentPath])
 
   useEffect(() => {
     const handleScroll = () => {

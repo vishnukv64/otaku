@@ -2,7 +2,7 @@
  * PageView - Single page display component with lazy loading
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { Loader2, ImageOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FitMode } from '@/store/readerStore'
@@ -32,29 +32,32 @@ export function PageView({
   onClick,
   className,
 }: PageViewProps) {
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
-  const [imageSrc, setImageSrc] = useState<string | null>(null)
+  // Track loading/error state per imageUrl - reset when imageUrl changes
+  const [imageState, setImageState] = useState<{ url: string; loading: boolean; error: boolean }>({
+    url: imageUrl,
+    loading: true,
+    error: false,
+  })
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Use proxy for CORS images
-  useEffect(() => {
-    setLoading(true)
-    setError(false)
+  // Reset state when imageUrl changes (React 18 pattern: adjusting state during rendering)
+  // This is the recommended way to reset state based on prop changes
+  if (imageState.url !== imageUrl) {
+    setImageState({ url: imageUrl, loading: true, error: false })
+  }
 
-    // For now, use direct URL - we'll add proxy support if needed
-    // In production, might need to use proxyImageRequest for CORS images
-    setImageSrc(imageUrl)
-  }, [imageUrl])
+  // Derive loading/error from combined state
+  const loading = imageState.loading
+  const error = imageState.error
+  const imageSrc = imageUrl // Use imageUrl directly
 
   const handleLoad = () => {
-    setLoading(false)
+    setImageState(prev => ({ ...prev, loading: false }))
     onLoad?.()
   }
 
   const handleError = () => {
-    setLoading(false)
-    setError(true)
+    setImageState(prev => ({ ...prev, loading: false, error: true }))
     onError?.()
   }
 

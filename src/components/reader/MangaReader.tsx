@@ -29,7 +29,7 @@ interface MangaReaderProps {
   _mangaTitle?: string // For display purposes (future use)
   _chapterTitle?: string // For display purposes (future use)
   currentChapter?: number
-  totalChapters?: number
+  _totalChapters?: number
   hasNextChapter?: boolean
   hasPreviousChapter?: boolean
   chapters?: Chapter[]
@@ -46,7 +46,7 @@ export function MangaReader({
   mangaId,
   chapterId,
   currentChapter,
-  totalChapters,
+  // _totalChapters - intentionally unused, kept for API compatibility
   hasNextChapter = false,
   hasPreviousChapter = false,
   chapters = [],
@@ -128,6 +128,17 @@ export function MangaReader({
       previousPage()
     }
   }, [currentPage, canGoToPreviousChapter, onPreviousChapter, previousPage])
+
+  // Fullscreen handling - defined before keyboard effect that uses it
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen()
+      setFullscreen(true)
+    } else {
+      document.exitFullscreen()
+      setFullscreen(false)
+    }
+  }, [setFullscreen])
 
   // Initialize reader state
   useEffect(() => {
@@ -232,13 +243,14 @@ export function MangaReader({
           toggleFullscreen()
           break
         case 'm':
-        case 'M':
+        case 'M': {
           // Cycle through reading modes
           const modes = ['single', 'double', 'vertical', 'webtoon'] as const
           const currentIndex = modes.indexOf(settings.readingMode)
           const nextMode = modes[(currentIndex + 1) % modes.length]
           useReaderStore.getState().setReadingMode(nextMode)
           break
+        }
         case 'n':
         case 'N':
           if (canGoToNextChapter && onNextChapter) {
@@ -284,6 +296,7 @@ export function MangaReader({
     onNextChapter,
     onPreviousChapter,
     onGoBack,
+    toggleFullscreen,
   ])
 
   // Auto-hide controls
@@ -315,17 +328,7 @@ export function MangaReader({
     }
   }, [resetControlsTimer])
 
-  // Fullscreen handling
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen()
-      setFullscreen(true)
-    } else {
-      document.exitFullscreen()
-      setFullscreen(false)
-    }
-  }, [setFullscreen])
-
+  // Sync fullscreen state with document
   useEffect(() => {
     const handleFullscreenChange = () => {
       setFullscreen(!!document.fullscreenElement)
@@ -399,7 +402,7 @@ export function MangaReader({
           />
         )
 
-      case 'double':
+      case 'double': {
         // Show two pages side by side
         const leftPage = settings.readingDirection === 'rtl'
           ? images.find(img => img.page === currentPage + 1)
@@ -436,6 +439,7 @@ export function MangaReader({
             )}
           </div>
         )
+      }
 
       case 'single':
       default:
