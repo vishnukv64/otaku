@@ -419,7 +419,6 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
 
   const handlePlayEpisode = (mediaId: string, episodeId: string) => {
     // Close the download manager and navigate to watch page with specific episode
-    onClose()
     navigate({
       to: '/watch',
       search: {
@@ -428,6 +427,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
         episodeId: episodeId,
       },
     })
+    onClose()
   }
 
   // Group downloads by anime
