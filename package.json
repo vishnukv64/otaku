@@ -1,6 +1,6 @@
 {
   "name": "otaku",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Cross-platform anime and manga viewer with Netflix-like UI",
   "private": true,
   "type": "module",

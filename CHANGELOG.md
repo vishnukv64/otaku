@@ -5,6 +5,35 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-01-30
+
+### Added
+- **Custom Download Location** - Set a custom folder for downloads in Settings
+  - Downloads persist across app restarts (saved to database)
+  - Works for both anime episodes and manga chapters
+  - "Open Folder" button opens the correct custom location
+- **Pause/Resume Downloads** - Pause and resume ongoing downloads
+- **Play from Downloads** - Play button in Downloads Manager to watch downloaded episodes
+- **Info Buttons** - Quick info buttons on Continue Watching/Reading sections
+- **Offline Mode Toast** - Shows "Offline Mode" toast when playing downloaded content
+- **NSFW Content Filtering** - Enhanced filtering across all media components
+
+### Changed
+- **Max Concurrent Downloads** increased to 10
+- **Card Hover Effects** - Improved popover effects on home page media cards
+- **Settings Dropdowns** - Custom dropdown component for better cross-platform consistency
+- **Manga Reader** - Disabled arrow keys and page numbers in vertical/webtoon modes
+- **Double Page Mode** - Fixed fit-to-width and original size modes
+
+### Fixed
+- Navigation bar z-index to prevent card overlays
+- Play button in Downloads Manager navigating to wrong episode
+- Duplicate episode text in video player ("Episode 3 - Episode 3")
+- Update notification flow - download button works after clicking notification link
+- Browse downloads location dialog (added dialog:default permission)
+- Downloads using custom location from settings
+- Video player and manga reader reading from custom download locations
+
 ## [0.1.9] - 2026-01-29
 
 ### Added
