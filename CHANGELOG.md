@@ -5,6 +5,18 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2026-01-30
+
+### Added
+- **Immersive Video Player** - Full immersive viewing experience
+  - TopNav and Footer automatically hidden on watch/read routes
+  - All UI (title bar, controls, cursor) auto-hides after 2 seconds of mouse inactivity
+  - Works in both windowed and fullscreen modes
+- **Episode Dropdown Auto-Scroll** - Episode list now scrolls to currently playing episode when opened
+
+### Changed
+- Video player controls now use document-level mouse tracking for more reliable auto-hide
+
 ## [0.1.11] - 2026-01-30
 
 ### Added
