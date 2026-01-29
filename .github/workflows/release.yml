@@ -29,7 +29,10 @@ jobs:
         id: get-version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            # Strip 'v' prefix if provided (e.g., v0.1.8 -> 0.1.8)
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
           else
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
