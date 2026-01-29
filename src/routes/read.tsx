@@ -6,8 +6,12 @@
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X, Home } from 'lucide-react'
 import { MangaReader } from '@/components/reader/MangaReader'
+import { useSettingsStore } from '@/store/settingsStore'
+
+// NSFW genres that should be blocked when filter is enabled
+const NSFW_GENRES = ['hentai', 'ecchi', 'adult', 'mature', 'erotica', 'smut', 'adult cast', 'sexual violence']
 import {
   getMangaDetails,
   getChapterImages,
@@ -41,8 +45,10 @@ export const Route = createFileRoute('/read')({
 function ReadPage() {
   const navigate = useNavigate()
   const { extensionId, mangaId, chapterId: initialChapterId } = Route.useSearch()
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
 
   const [details, setDetails] = useState<MangaDetails | null>(null)
+  const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
   const [chapterImages, setChapterImages] = useState<ChapterImages | null>(null)
   const [currentChapterId, setCurrentChapterId] = useState<string>(initialChapterId || '')
   const [loading, setLoading] = useState(true)
@@ -59,8 +65,20 @@ function ReadPage() {
 
     const loadDetails = async () => {
       try {
-        const result = await getMangaDetails(extensionId, mangaId)
+        const result = await getMangaDetails(extensionId, mangaId, !nsfwFilter)
         console.log('[Read] Manga details loaded:', result.title, '- Genres from API:', result.genres)
+
+        // Check if content is NSFW and should be blocked
+        if (nsfwFilter && result.genres) {
+          const hasNsfwGenre = result.genres.some(genre =>
+            NSFW_GENRES.includes(genre.toLowerCase())
+          )
+          if (hasNsfwGenre) {
+            setIsNsfwBlocked(true)
+            setLoading(false)
+            return
+          }
+        }
 
         // Sort chapters by number
         if (result.chapters) {
@@ -115,7 +133,7 @@ function ReadPage() {
     }
 
     loadDetails()
-  }, [extensionId, mangaId, initialChapterId])
+  }, [extensionId, mangaId, initialChapterId, nsfwFilter])
 
   // Get current chapter info
   const currentChapter = details?.chapters.find((ch) => ch.id === currentChapterId)
@@ -228,7 +246,7 @@ function ReadPage() {
     <div className="fixed inset-0 bg-black z-50" style={{ paddingTop: '64px' }}>
       {/* Reader Container */}
       <div className="w-full h-full">
-        {loading && (
+        {loading && !isNsfwBlocked && (
           <div className="w-full h-full flex items-center justify-center bg-black">
             <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
           </div>
@@ -241,7 +259,30 @@ function ReadPage() {
           </div>
         )}
 
-        {!loading && !error && chapterImages && chapterImages.images.length > 0 && (
+        {/* NSFW Content Blocked */}
+        {isNsfwBlocked && (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
+            <div className="w-20 h-20 mb-6 rounded-full bg-red-500/20 flex items-center justify-center">
+              <X className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-2xl font-bold mb-3">Content Blocked</h2>
+            <p className="text-[var(--color-text-secondary)] max-w-md text-center mb-6">
+              This manga contains adult content and has been blocked by your NSFW filter settings.
+            </p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-8">
+              You can disable the NSFW filter in Settings to view this content.
+            </p>
+            <button
+              onClick={handleGoBack}
+              className="flex items-center gap-2 px-6 py-3 bg-[var(--color-bg-secondary)] text-white rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              <Home className="w-5 h-5" />
+              Go Back
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && !isNsfwBlocked && chapterImages && chapterImages.images.length > 0 && (
           <MangaReader
             images={chapterImages.images}
             mangaId={mangaId}
@@ -262,7 +303,7 @@ function ReadPage() {
           />
         )}
 
-        {!loading && !error && chapterImages && chapterImages.images.length === 0 && (
+        {!loading && !error && !isNsfwBlocked && chapterImages && chapterImages.images.length === 0 && (
           <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
             <p className="text-lg font-semibold mb-2">No Pages Available</p>
             <p className="text-[var(--color-text-secondary)]">

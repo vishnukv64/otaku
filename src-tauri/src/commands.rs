@@ -7,7 +7,7 @@
 // due to QuickJS's thread-safety limitations. In production, we'd use a thread-local
 // runtime pool.
 
-use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeContent, MangaDetails, MediaDetails, SearchResults, TagsResult, VideoSources};
+use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
 use crate::cache::{
@@ -15,9 +15,10 @@ use crate::cache::{
     VIDEO_SOURCES_CACHE, CHAPTER_IMAGES_CACHE, TAGS_CACHE, HOME_CONTENT_CACHE, RECOMMENDATIONS_CACHE,
 };
 use crate::VideoServerInfo;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use sqlx;
 
 /// Global state for loaded extensions (stores just the code, not runtimes)
@@ -259,6 +260,201 @@ pub async fn get_home_content(
     log::debug!("Cached home content");
 
     Ok(content)
+}
+
+/// Event name for home content streaming
+pub const HOME_CONTENT_EVENT: &str = "home-content-category";
+
+/// Event payload for streaming home content
+#[derive(Clone, serde::Serialize)]
+pub struct HomeCategoryEvent {
+    pub category: HomeCategory,
+    pub is_last: bool,
+    pub featured: Option<SearchResult>,
+}
+
+/// Stream home content categories via SSE (Server-Sent Events)
+/// Emits each category as it becomes available for progressive loading
+#[tauri::command]
+pub async fn stream_home_content(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    allow_adult: Option<bool>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first - if cached, emit all at once
+    let cache_key = cache::home_content_key(&extension_id, allow_adult);
+    if let Some(cached) = HOME_CONTENT_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for streaming home content: {}", cache_key);
+        let total = cached.categories.len();
+        for (i, category) in cached.categories.into_iter().enumerate() {
+            let is_last = i == total - 1;
+            let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+                category,
+                is_last,
+                featured: if i == 0 { cached.featured.clone() } else { None },
+            });
+        }
+        return Ok(());
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    // Fetch and emit categories progressively
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut categories_emitted = 0;
+
+    // Fetch page 1 - emit Trending Now immediately
+    if let Ok(results) = runtime.discover(1, Some("view".to_string()), vec![]) {
+        for item in results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                all_results.push(item);
+            }
+        }
+
+        // Emit Trending Now (first 20 items)
+        let trending: Vec<SearchResult> = all_results.iter().take(20).cloned().collect();
+        if !trending.is_empty() {
+            let featured = trending.first().cloned();
+            let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+                category: HomeCategory {
+                    id: "trending".to_string(),
+                    title: "Trending Now".to_string(),
+                    items: trending,
+                },
+                is_last: false,
+                featured,
+            });
+            categories_emitted += 1;
+            log::debug!("Emitted Trending Now category");
+        }
+    }
+
+    // Fetch pages 2-3 for more data, then emit Top Rated
+    for page in 2..=3 {
+        if let Ok(results) = runtime.discover(page, Some("view".to_string()), vec![]) {
+            for item in results.results {
+                if !seen_ids.contains(&item.id) {
+                    seen_ids.insert(item.id.clone());
+                    all_results.push(item);
+                }
+            }
+        }
+    }
+
+    // Emit Top Rated (sorted by rating)
+    let mut by_rating = all_results.clone();
+    by_rating.sort_by(|a, b| {
+        let rating_a = a.rating.unwrap_or(0.0);
+        let rating_b = b.rating.unwrap_or(0.0);
+        rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let top_rated: Vec<SearchResult> = by_rating.into_iter().take(20).collect();
+    if !top_rated.is_empty() {
+        let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+            category: HomeCategory {
+                id: "top-rated".to_string(),
+                title: "Top Rated".to_string(),
+                items: top_rated,
+            },
+            is_last: false,
+            featured: None,
+        });
+        categories_emitted += 1;
+        log::debug!("Emitted Top Rated category");
+    }
+
+    // Fetch pages 4-5 for Recently Updated
+    for page in 4..=5 {
+        if let Ok(results) = runtime.discover(page, Some("view".to_string()), vec![]) {
+            for item in results.results {
+                if !seen_ids.contains(&item.id) {
+                    seen_ids.insert(item.id.clone());
+                    all_results.push(item);
+                }
+            }
+        }
+    }
+
+    // Emit Recently Updated (items 21-40)
+    let recently_updated: Vec<SearchResult> = all_results.iter()
+        .skip(20)
+        .take(20)
+        .cloned()
+        .collect();
+    if !recently_updated.is_empty() {
+        let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+            category: HomeCategory {
+                id: "recently-updated".to_string(),
+                title: "Recently Updated".to_string(),
+                items: recently_updated.clone(),
+            },
+            is_last: true,
+            featured: None,
+        });
+        categories_emitted += 1;
+        log::debug!("Emitted Recently Updated category");
+    }
+
+    // Cache the complete content for future requests
+    let featured = all_results.iter()
+        .max_by(|a, b| {
+            let rating_a = a.rating.unwrap_or(0.0);
+            let rating_b = b.rating.unwrap_or(0.0);
+            rating_a.partial_cmp(&rating_b).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .cloned();
+
+    let mut categories = Vec::new();
+    let trending: Vec<SearchResult> = all_results.iter().take(20).cloned().collect();
+    if !trending.is_empty() {
+        categories.push(HomeCategory {
+            id: "trending".to_string(),
+            title: "Trending Now".to_string(),
+            items: trending,
+        });
+    }
+    let mut by_rating = all_results.clone();
+    by_rating.sort_by(|a, b| {
+        let rating_a = a.rating.unwrap_or(0.0);
+        let rating_b = b.rating.unwrap_or(0.0);
+        rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let top_rated: Vec<SearchResult> = by_rating.into_iter().take(20).collect();
+    if !top_rated.is_empty() {
+        categories.push(HomeCategory {
+            id: "top-rated".to_string(),
+            title: "Top Rated".to_string(),
+            items: top_rated,
+        });
+    }
+    if !recently_updated.is_empty() {
+        categories.push(HomeCategory {
+            id: "recently-updated".to_string(),
+            title: "Recently Updated".to_string(),
+            items: recently_updated,
+        });
+    }
+
+    HOME_CONTENT_CACHE.insert(cache_key, HomeContent { featured, categories });
+    log::info!("Streamed {} categories for home content", categories_emitted);
+
+    Ok(())
 }
 
 /// Get anime recommendations (trending/latest)
@@ -1399,7 +1595,6 @@ pub async fn get_proxy_video_url(
 // ==================== System Stats Commands ====================
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Emitter;
 
 /// Event names for streaming
 pub const SYSTEM_STATS_EVENT: &str = "system-stats";

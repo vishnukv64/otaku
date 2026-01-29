@@ -1,7 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Loader2, AlertCircle } from 'lucide-react'
-import { loadExtension, getHomeContent, type HomeCategory } from '@/utils/tauri-commands'
+import {
+  loadExtension,
+  streamHomeContent,
+  onHomeContentCategory,
+  type HomeCategory,
+  type HomeCategoryEvent,
+} from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
@@ -20,11 +26,14 @@ function HomeScreen() {
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [contentLoading, setContentLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
   const [categories, setCategories] = useState<HomeCategory[]>([])
+  const [streamComplete, setStreamComplete] = useState(false)
+
+  // Track if we've started streaming to avoid duplicate calls
+  const streamingRef = useRef(false)
 
   // Load extensions on mount
   useEffect(() => {
@@ -52,27 +61,66 @@ function HomeScreen() {
     initExtensions()
   }, [])
 
-  // Load all home content in a single call
+  // Handle incoming category events
+  const handleCategoryEvent = useCallback((event: HomeCategoryEvent) => {
+    console.log('[SSE] Received category:', event.category.title, 'is_last:', event.is_last)
+
+    // Add the category to state (avoid duplicates)
+    setCategories(prev => {
+      const exists = prev.some(c => c.id === event.category.id)
+      if (exists) {
+        return prev.map(c => c.id === event.category.id ? event.category : c)
+      }
+      return [...prev, event.category]
+    })
+
+    // Set featured anime from first event if available
+    if (event.featured) {
+      setFeaturedAnime(event.featured)
+    }
+
+    // Mark stream as complete when last category received
+    if (event.is_last) {
+      setStreamComplete(true)
+      console.log('[SSE] Stream complete')
+    }
+  }, [])
+
+  // Stream home content via SSE
   useEffect(() => {
-    if (!extensionId) return
+    if (!extensionId || streamingRef.current) return
 
-    const loadHomeContent = async () => {
-      setContentLoading(true)
+    let unsubscribe: (() => void) | null = null
+
+    const startStreaming = async () => {
+      streamingRef.current = true
+      setCategories([])
+      setStreamComplete(false)
+
       try {
-        // Single API call that fetches and categorizes content in Rust
-        const content = await getHomeContent(extensionId, nsfwFilter)
+        // Set up event listener FIRST
+        unsubscribe = await onHomeContentCategory(handleCategoryEvent)
+        console.log('[SSE] Listener set up, starting stream...')
 
-        setCategories(content.categories)
-        setFeaturedAnime(content.featured)
-        setContentLoading(false)
+        // Then start streaming
+        await streamHomeContent(extensionId, nsfwFilter)
+        console.log('[SSE] Stream command completed')
       } catch (err) {
-        console.error('Failed to load home content:', err)
-        setContentLoading(false)
+        console.error('Failed to stream home content:', err)
+        setStreamComplete(true)
       }
     }
 
-    loadHomeContent()
-  }, [extensionId, nsfwFilter])
+    startStreaming()
+
+    // Cleanup on unmount
+    return () => {
+      if (unsubscribe) {
+        unsubscribe()
+      }
+      streamingRef.current = false
+    }
+  }, [extensionId, nsfwFilter, handleCategoryEvent])
 
   const handleWatch = () => {
     // TODO: Navigate to watch screen or show details
@@ -106,6 +154,11 @@ function HomeScreen() {
     )
   }
 
+  // Show skeleton loaders for categories not yet loaded
+  const expectedCategories = ['trending', 'top-rated', 'recently-updated']
+  const loadedCategoryIds = new Set(categories.map(c => c.id))
+  const pendingCategories = expectedCategories.filter(id => !loadedCategoryIds.has(id))
+
   return (
     <div className="min-h-[calc(100vh-4rem)] pb-12">
       <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
@@ -128,30 +181,29 @@ function HomeScreen() {
           <ContinueReadingSection extensionId={mangaExtensionId} />
         )}
 
-        {/* Content Carousels */}
+        {/* Content Carousels - Progressive Loading */}
         <div className="space-y-8">
-          {contentLoading ? (
-            // Show loading skeletons for 3 categories
-            Array.from({ length: 3 }).map((_, i) => (
-              <MediaCarousel
-                key={`skeleton-${i}`}
-                title="Loading..."
-                items={[]}
-                loading={true}
-                onItemClick={handleMediaClick}
-              />
-            ))
-          ) : (
-            categories.map(category => (
-              <MediaCarousel
-                key={category.id}
-                title={category.title}
-                items={category.items}
-                loading={false}
-                onItemClick={handleMediaClick}
-              />
-            ))
-          )}
+          {/* Render loaded categories */}
+          {categories.map(category => (
+            <MediaCarousel
+              key={category.id}
+              title={category.title}
+              items={category.items}
+              loading={false}
+              onItemClick={handleMediaClick}
+            />
+          ))}
+
+          {/* Show skeleton loaders for pending categories */}
+          {!streamComplete && pendingCategories.map(id => (
+            <MediaCarousel
+              key={`skeleton-${id}`}
+              title="Loading..."
+              items={[]}
+              loading={true}
+              onItemClick={handleMediaClick}
+            />
+          ))}
         </div>
       </div>
     </div>

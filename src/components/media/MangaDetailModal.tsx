@@ -38,9 +38,13 @@ interface MangaDetailModalProps {
   onClose: () => void
 }
 
+// NSFW genres that should be blocked when filter is enabled
+const NSFW_GENRES = ['hentai', 'ecchi', 'adult', 'mature', 'erotica', 'smut', 'adult cast', 'sexual violence']
+
 export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailModalProps) {
   const navigate = useNavigate()
   const maxConcurrentDownloads = useSettingsStore((state) => state.maxConcurrentDownloads)
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [details, setDetails] = useState<MangaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +55,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
   const [downloadingChapters, setDownloadingChapters] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
+  const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
 
   // Close on escape
   useEffect(() => {
@@ -70,8 +75,18 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       setError(null)
 
       try {
-        const result = await getMangaDetails(extensionId, manga.id)
+        const result = await getMangaDetails(extensionId, manga.id, !nsfwFilter)
         setDetails(result)
+
+        // Check if content is NSFW and should be blocked
+        if (nsfwFilter && result.genres) {
+          const hasNsfwGenre = result.genres.some(genre =>
+            NSFW_GENRES.includes(genre.toLowerCase())
+          )
+          setIsNsfwBlocked(hasNsfwGenre)
+        } else {
+          setIsNsfwBlocked(false)
+        }
 
         // Save to database for library
         try {
@@ -135,7 +150,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     }
 
     loadDetails()
-  }, [manga, extensionId])
+  }, [manga, extensionId, nsfwFilter])
 
   // Check which chapters are downloaded
   useEffect(() => {
@@ -497,7 +512,23 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
             </div>
           )}
 
-          {!loading && !error && details && (
+          {/* NSFW Content Blocked */}
+          {!loading && !error && isNsfwBlocked && (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
+                <X className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Content Blocked</h3>
+              <p className="text-[var(--color-text-secondary)] max-w-md mx-auto mb-4">
+                This manga contains adult content and has been blocked by your NSFW filter settings.
+              </p>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                You can disable the NSFW filter in Settings to view this content.
+              </p>
+            </div>
+          )}
+
+          {!loading && !error && details && !isNsfwBlocked && (
             <div className="space-y-6">
               {/* Action buttons */}
               <div className="flex flex-wrap gap-3">

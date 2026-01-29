@@ -254,6 +254,7 @@ pub fn run() {
       commands::search_anime,
       commands::discover_anime,
       commands::get_home_content,
+      commands::stream_home_content,
       commands::get_recommendations,
       commands::get_tags,
       commands::get_anime_details,

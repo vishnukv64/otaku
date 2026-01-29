@@ -125,6 +125,46 @@ export async function getHomeContent(
   return await invoke('get_home_content', { extensionId, allowAdult })
 }
 
+// ==================== Home Content Streaming (SSE) ====================
+
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+
+/** Event name for home content streaming */
+export const HOME_CONTENT_EVENT = 'home-content-category'
+
+/** Event payload for streaming home content */
+export interface HomeCategoryEvent {
+  category: HomeCategory
+  is_last: boolean
+  featured: SearchResults['results'][0] | null
+}
+
+/**
+ * Start streaming home content via SSE
+ * Categories are emitted progressively as they load
+ * @param extensionId - Extension ID
+ * @param allowAdult - Whether to include adult content
+ */
+export async function streamHomeContent(
+  extensionId: string,
+  allowAdult: boolean = false
+): Promise<void> {
+  return await invoke('stream_home_content', { extensionId, allowAdult })
+}
+
+/**
+ * Listen for home content category events
+ * @param callback - Called when a category is received
+ * @returns Unsubscribe function
+ */
+export async function onHomeContentCategory(
+  callback: (event: HomeCategoryEvent) => void
+): Promise<UnlistenFn> {
+  return await listen<HomeCategoryEvent>(HOME_CONTENT_EVENT, (event) => {
+    callback(event.payload)
+  })
+}
+
 // Tag/Genre types
 export interface Tag {
   name: string
