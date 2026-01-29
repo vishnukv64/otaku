@@ -7,8 +7,8 @@
 import { useEffect, useState } from 'react'
 import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy, BookOpen, Tv } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { listDownloads, cancelDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
-import toast from 'react-hot-toast'
+import { listDownloads, cancelDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
+import { notifySuccess, notifyError } from '@/utils/notify'
 
 const DOWNLOAD_PROGRESS_EVENT = 'download-progress'
 const CHAPTER_DOWNLOAD_PROGRESS_EVENT = 'chapter-download-progress'
@@ -60,6 +60,23 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
 
     loadStaticData()
   }, [isOpen])
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }
+    }
+
+    // Use capture phase to intercept before other handlers
+    document.addEventListener('keydown', handleEscape, true)
+    return () => document.removeEventListener('keydown', handleEscape, true)
+  }, [isOpen, onClose])
 
   // Load downloads and listen for real-time events
   useEffect(() => {
@@ -159,20 +176,27 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
   }, [isOpen])
 
   const handleCancel = async (downloadId: string) => {
+    const download = downloads.find(d => d.id === downloadId)
+    const displayName = download ? `Episode ${download.episode_number}` : 'Download'
     try {
       await cancelDownload(downloadId)
       // Refresh downloads
       const result = await listDownloads()
       setDownloads(result)
-      toast.success('Download cancelled')
+      notifySuccess('Download Cancelled', `Cancelled ${displayName}`)
     } catch (error) {
       console.error('Failed to cancel download:', error)
-      toast.error('Failed to cancel download')
+      notifyError('Cancel Failed', `Failed to cancel ${displayName}`)
     }
   }
 
   const handleDelete = async (downloadId: string, filename: string) => {
-    if (!confirm(`Delete "${filename}"? This will permanently remove the file.`)) {
+    const download = downloads.find(d => d.id === downloadId)
+    // Extract a cleaner display name from filename (e.g., "Anime_Name_EP1.mp4" -> "Anime Name EP1")
+    const cleanFilename = filename.replace(/_/g, ' ').replace(/\.[^/.]+$/, '')
+    const displayName = download ? `Episode ${download.episode_number}` : cleanFilename
+
+    if (!confirm(`Delete "${cleanFilename}"? This will permanently remove the file.`)) {
       return
     }
 
@@ -185,17 +209,17 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       ])
       setDownloads(downloadsList)
       setTotalStorage(storage)
-      toast.success('Download deleted')
+      notifySuccess('Download Deleted', `Deleted "${cleanFilename}"`)
     } catch (error) {
       console.error('Failed to delete download:', error)
-      toast.error('Failed to delete download')
+      notifyError('Delete Failed', `Failed to delete ${displayName}`)
     }
   }
 
   const handleClearCompleted = async () => {
     const completedCount = downloads.filter(d => d.status === 'completed').length
     if (completedCount === 0) {
-      toast.error('No completed downloads to clear')
+      notifyError('No Downloads', 'No completed downloads to clear')
       return
     }
 
@@ -207,17 +231,17 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       await clearCompletedDownloads()
       const result = await listDownloads()
       setDownloads(result)
-      toast.success(`Cleared ${completedCount} completed download(s)`)
+      notifySuccess('Downloads Cleared', `Cleared ${completedCount} completed download(s)`)
     } catch (error) {
       console.error('Failed to clear completed downloads:', error)
-      toast.error('Failed to clear completed downloads')
+      notifyError('Clear Failed', 'Failed to clear completed downloads')
     }
   }
 
   const handleClearFailed = async () => {
     const failedCount = downloads.filter(d => d.status === 'failed').length
     if (failedCount === 0) {
-      toast.error('No failed downloads to clear')
+      notifyError('No Downloads', 'No failed downloads to clear')
       return
     }
 
@@ -229,37 +253,37 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       await clearFailedDownloads()
       const result = await listDownloads()
       setDownloads(result)
-      toast.success(`Cleared ${failedCount} failed download(s)`)
+      notifySuccess('Downloads Cleared', `Cleared ${failedCount} failed download(s)`)
     } catch (error) {
       console.error('Failed to clear failed downloads:', error)
-      toast.error('Failed to clear failed downloads')
+      notifyError('Clear Failed', 'Failed to clear failed downloads')
     }
   }
 
   const handleOpenFolder = async () => {
     try {
       await openDownloadsFolder()
-      toast.success('Opened downloads folder')
+      notifySuccess('Folder Opened', 'Downloads folder opened')
     } catch (error) {
       console.error('Failed to open folder:', error)
-      toast.error('Failed to open folder: ' + (error instanceof Error ? error.message : String(error)))
+      notifyError('Open Failed', 'Failed to open folder: ' + (error instanceof Error ? error.message : String(error)))
     }
   }
 
   const handleCopyPath = () => {
     if (!downloadsPath) {
-      toast.error('Downloads path not available')
+      notifyError('Path Unavailable', 'Downloads path not available')
       return
     }
     navigator.clipboard.writeText(downloadsPath)
-    toast.success('Path copied to clipboard')
+    notifySuccess('Copied', 'Path copied to clipboard')
   }
 
   const handleDeleteAnime = async (mediaId: string, mediaTitle: string) => {
     const animeDownloads = downloads.filter(d => d.media_id === mediaId && d.status === 'completed')
 
     if (animeDownloads.length === 0) {
-      toast.error('No completed downloads to delete')
+      notifyError('No Downloads', 'No completed downloads to delete')
       return
     }
 
@@ -279,15 +303,33 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       setDownloads(downloadsList)
       setTotalStorage(storage)
 
-      toast.success(`Deleted ${animeDownloads.length} episode(s)`)
+      notifySuccess(mediaTitle, `Deleted ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''}`)
     } catch (error) {
       console.error('Failed to delete anime downloads:', error)
-      toast.error('Failed to delete some episodes')
+      notifyError(mediaTitle, 'Failed to delete some episodes')
+    }
+  }
+
+  const handleCancelChapter = async (mediaId: string, chapterId: string) => {
+    const chapter = chapterDownloads.find(d => d.media_id === mediaId && d.chapter_id === chapterId)
+    const displayName = chapter ? `${chapter.media_title} Ch.${chapter.chapter_number}` : 'Chapter'
+    try {
+      await cancelChapterDownload(mediaId, chapterId)
+      // Refresh chapter downloads
+      const result = await listAllChapterDownloads()
+      setChapterDownloads(result)
+      notifySuccess('Download Cancelled', `Cancelled "${displayName}"`)
+    } catch (error) {
+      console.error('Failed to cancel chapter download:', error)
+      notifyError('Cancel Failed', `Failed to cancel "${displayName}"`)
     }
   }
 
   const handleDeleteChapter = async (mediaId: string, chapterId: string) => {
-    if (!confirm('Delete this chapter? This will permanently remove the downloaded images.')) {
+    const chapter = chapterDownloads.find(d => d.media_id === mediaId && d.chapter_id === chapterId)
+    const displayName = chapter ? `${chapter.media_title} Ch.${chapter.chapter_number}` : 'Chapter'
+
+    if (!confirm(`Delete "${displayName}"? This will permanently remove the downloaded images.`)) {
       return
     }
 
@@ -302,10 +344,10 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       setChapterDownloads(chaptersList)
       setTotalStorage(storage)
 
-      toast.success('Chapter deleted')
+      notifySuccess('Chapter Deleted', `Deleted "${displayName}"`)
     } catch (error) {
       console.error('Failed to delete chapter:', error)
-      toast.error('Failed to delete chapter')
+      notifyError('Delete Failed', `Failed to delete "${displayName}"`)
     }
   }
 
@@ -313,7 +355,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     const mangaChapters = chapterDownloads.filter(d => d.media_id === mediaId && d.status === 'completed')
 
     if (mangaChapters.length === 0) {
-      toast.error('No completed downloads to delete')
+      notifyError('No Downloads', `No completed downloads for "${mediaTitle}"`)
       return
     }
 
@@ -333,10 +375,10 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       setChapterDownloads(chaptersList)
       setTotalStorage(storage)
 
-      toast.success(`Deleted ${mangaChapters.length} chapter(s)`)
+      notifySuccess(mediaTitle, `Deleted ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''}`)
     } catch (error) {
       console.error('Failed to delete manga chapters:', error)
-      toast.error('Failed to delete some chapters')
+      notifyError(mediaTitle, 'Failed to delete some chapters')
     }
   }
 
@@ -648,7 +690,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                           {group.downloads
                             .sort((a, b) => a.chapter_number - b.chapter_number)
                             .map((download) => (
-                              <ChapterDownloadItem key={download.id} download={download} onDelete={handleDeleteChapter} />
+                              <ChapterDownloadItem key={download.id} download={download} onCancel={handleCancelChapter} onDelete={handleDeleteChapter} />
                             ))}
                         </div>
                       </div>
@@ -674,7 +716,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
                         {group.downloads
                           .sort((a, b) => a.chapter_number - b.chapter_number)
                           .map((download) => (
-                            <ChapterDownloadItem key={download.id} download={download} onDelete={handleDeleteChapter} />
+                            <ChapterDownloadItem key={download.id} download={download} onCancel={handleCancelChapter} onDelete={handleDeleteChapter} />
                           ))}
                       </div>
                     </div>
@@ -817,9 +859,11 @@ function DownloadItem({
 // Chapter download item component for manga
 function ChapterDownloadItem({
   download,
+  onCancel,
   onDelete
 }: {
   download: ChapterDownloadWithTitle
+  onCancel: (mediaId: string, chapterId: string) => void
   onDelete: (mediaId: string, chapterId: string) => void
 }) {
   const getStatusIcon = (status: string) => {
@@ -829,6 +873,7 @@ function ChapterDownloadItem({
       case 'completed':
         return <CheckCircle size={20} className="text-green-400" />
       case 'failed':
+      case 'cancelled':
         return <XCircle size={20} className="text-red-400" />
       default:
         return <Download size={20} className="text-[var(--color-text-muted)]" />
@@ -887,6 +932,10 @@ function ChapterDownloadItem({
               </>
             )}
 
+            {download.status === 'cancelled' && (
+              <span className="text-[var(--color-text-muted)] font-medium">Cancelled</span>
+            )}
+
             {download.status === 'queued' && (
               <span className="text-yellow-400 font-medium">Queued</span>
             )}
@@ -895,6 +944,16 @@ function ChapterDownloadItem({
 
         {/* Actions */}
         <div className="flex-shrink-0 flex items-center gap-2">
+          {(download.status === 'downloading' || download.status === 'queued') && (
+            <button
+              onClick={() => onCancel(download.media_id, download.chapter_id)}
+              className="w-8 h-8 flex items-center justify-center hover:bg-red-500/20 text-red-400 rounded transition-colors"
+              title="Cancel Download"
+            >
+              <X size={16} />
+            </button>
+          )}
+
           {download.status === 'completed' && (
             <button
               onClick={() => onDelete(download.media_id, download.chapter_id)}

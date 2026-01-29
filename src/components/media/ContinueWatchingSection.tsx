@@ -13,7 +13,7 @@ import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from './MediaCard'
 import type { SearchResult } from '@/types/extension'
-import toast from 'react-hot-toast'
+import { notifySuccess, notifyError } from '@/utils/notify'
 
 interface ContinueWatchingSectionProps {
   extensionId: string
@@ -101,10 +101,10 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     try {
       await removeFromContinueWatching(mediaId)
       setContinueWatching(prev => prev.filter(entry => entry.media.id !== mediaId))
-      toast.success(`Removed "${title}" from Continue Watching`)
+      notifySuccess('Removed', `Removed "${title}" from Continue Watching`)
     } catch (error) {
       console.error('Failed to remove from continue watching:', error)
-      toast.error('Failed to remove from Continue Watching')
+      notifyError('Remove Failed', 'Failed to remove from Continue Watching')
     }
   }
 

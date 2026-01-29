@@ -10,10 +10,10 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2 } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle } from 'lucide-react'
+import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, type MediaEntry, type WatchHistory } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
@@ -50,7 +50,7 @@ export function MediaDetailModal({
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
 
   // Use event-based download tracking instead of polling
-  // Note: Toast notifications are handled globally by TopNav's useDownloadStatus hook
+  // Note: Toast notifications are handled globally by the notification system (useNotificationEvents)
   const { downloadingEpisodes } = useDownloadEvents({
     mediaId: media.id,
     onComplete: (download) => {
@@ -115,8 +115,6 @@ export function MediaDetailModal({
   }
 
   const handleDeleteEpisode = async (episodeNumber: number) => {
-    const toastId = toast.loading(`Deleting Episode ${episodeNumber}...`)
-
     try {
       await deleteEpisodeDownload(media.id, episodeNumber)
 
@@ -127,17 +125,15 @@ export function MediaDetailModal({
         return newSet
       })
 
-      toast.success(`Episode ${episodeNumber} deleted`, { id: toastId })
+      notifySuccess(media.title, `Episode ${episodeNumber} download deleted`)
     } catch (error) {
       console.error('Failed to delete episode:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to delete episode', { id: toastId })
+      notifyError('Delete Failed', `Failed to delete "${media.title}" Episode ${episodeNumber}`)
     }
   }
 
   const handleDownloadAll = async () => {
     if (!details) return
-
-    const toastId = toast.loading(`Preparing to download ${details.episodes.length} episodes...`)
 
     try {
       let successCount = 0
@@ -176,36 +172,32 @@ export function MediaDetailModal({
         }
       }
 
-      toast.dismiss(toastId)
-
       if (successCount > 0) {
-        toast.success(`Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
+        notifySuccess(details.title, `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
       } else if (skippedCount > 0) {
-        toast.success(`All ${skippedCount} episodes already downloaded`)
+        notifyInfo(details.title, `All ${skippedCount} episodes are already downloaded`)
       }
       if (failCount > 0) {
-        toast.error(`Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
+        notifyError(details.title, `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
       }
 
       // Refresh downloaded episodes after a short delay
       setTimeout(refreshDownloadedEpisodes, 2000)
     } catch (error) {
-      toast.dismiss(toastId)
-      toast.error('Failed to start downloads')
+      notifyError('Download Failed', `Failed to start downloads for "${details?.title || media.title}"`)
       console.error('Download all error:', error)
     }
   }
 
   const handleDownloadSelected = async () => {
     if (selectedEpisodes.size === 0) {
-      toast.error('No episodes selected')
+      notifyError('No Selection', 'Please select episodes to download')
       return
     }
 
     if (!details) return
 
     const selectedEpisodesList = details.episodes.filter(ep => selectedEpisodes.has(ep.id))
-    const toastId = toast.loading(`Preparing to download ${selectedEpisodesList.length} episodes...`)
 
     try {
       let successCount = 0
@@ -244,15 +236,13 @@ export function MediaDetailModal({
         }
       }
 
-      toast.dismiss(toastId)
-
       if (successCount > 0) {
-        toast.success(`Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
+        notifySuccess(details.title, `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
       } else if (skippedCount > 0) {
-        toast.success(`All ${skippedCount} selected episodes already downloaded`)
+        notifyInfo(details.title, `All ${skippedCount} selected episodes are already downloaded`)
       }
       if (failCount > 0) {
-        toast.error(`Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
+        notifyError(details.title, `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
       }
 
       // Exit selection mode and clear selection
@@ -262,29 +252,47 @@ export function MediaDetailModal({
       // Refresh downloaded episodes after a short delay
       setTimeout(refreshDownloadedEpisodes, 2000)
     } catch (error) {
-      toast.dismiss(toastId)
-      toast.error('Failed to start downloads')
+      notifyError('Download Failed', `Failed to start downloads for "${details.title}"`)
       console.error('Download selected error:', error)
     }
   }
 
-  const handleToggleLibrary = async () => {
+  const handleAddToLibrary = async (status: LibraryStatus) => {
     setLibraryLoading(true)
+    const statusLabels: Record<LibraryStatus, string> = {
+      watching: 'Watching',
+      completed: 'Completed',
+      on_hold: 'On Hold',
+      dropped: 'Dropped',
+      plan_to_watch: 'Plan to Watch',
+      reading: 'Reading',
+      plan_to_read: 'Plan to Read',
+    }
     try {
-      if (inLibrary) {
-        await removeFromLibrary(media.id)
-        setInLibrary(false)
-        toast.success('Removed from My List')
-      } else {
-        await addToLibrary(media.id, 'plan_to_watch')
-        setInLibrary(true)
-        toast.success('Added to My List')
-      }
+      await addToLibrary(media.id, status)
+      setInLibrary(true)
+      notifySuccess(media.title, `Added to "${statusLabels[status]}" list`)
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (error) {
-      console.error('Failed to toggle library:', error)
-      toast.error('Failed to update My List')
+      console.error('Failed to add to library:', error)
+      notifyError('Library Error', `Failed to add "${media.title}" to library`)
+    } finally {
+      setLibraryLoading(false)
+    }
+  }
+
+  const handleRemoveFromLibrary = async () => {
+    setLibraryLoading(true)
+    try {
+      await removeFromLibrary(media.id)
+      setInLibrary(false)
+      notifySuccess(media.title, 'Removed from your library')
+      // Refresh media status context so badges update across the app
+      refreshMediaStatus()
+    } catch (error) {
+      console.error('Failed to remove from library:', error)
+      notifyError('Library Error', `Failed to remove "${media.title}" from library`)
     } finally {
       setLibraryLoading(false)
     }
@@ -640,24 +648,75 @@ export function MediaDetailModal({
                             </button>
                           )
                         })()}
-                        <button
-                          onClick={handleToggleLibrary}
-                          disabled={libraryLoading}
-                          className={`flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border ${
-                            inLibrary
-                              ? 'bg-white/20 backdrop-blur-sm text-white border-white/30 hover:bg-white/25'
-                              : 'bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20'
-                          } disabled:opacity-50 disabled:cursor-not-allowed`}
-                        >
-                          {libraryLoading ? (
-                            <Loader2 size={22} className="animate-spin" />
-                          ) : inLibrary ? (
-                            <Check size={22} />
-                          ) : (
-                            <Plus size={22} />
-                          )}
-                          <span>{inLibrary ? 'In My List' : 'My List'}</span>
-                        </button>
+                        {/* Library button with dropdown - key forces re-render to prevent visual artifacts */}
+                        {inLibrary ? (
+                          <button
+                            key="in-library-btn"
+                            onClick={handleRemoveFromLibrary}
+                            disabled={libraryLoading}
+                            className="flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border bg-green-600 text-white border-green-500 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {libraryLoading ? (
+                              <Loader2 size={22} className="animate-spin" />
+                            ) : (
+                              <Check size={22} />
+                            )}
+                            <span>In My List</span>
+                          </button>
+                        ) : (
+                          <div key="add-library-btn" className="relative group">
+                            <button
+                              onClick={() => handleAddToLibrary('plan_to_watch')}
+                              disabled={libraryLoading}
+                              className="flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {libraryLoading ? (
+                                <Loader2 size={22} className="animate-spin" />
+                              ) : (
+                                <Plus size={22} />
+                              )}
+                              <span>My List</span>
+                            </button>
+                            {/* Dropdown menu - opens upward */}
+                            <div className="absolute bottom-full left-0 mb-1 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 min-w-[180px] border border-white/10">
+                              <button
+                                onClick={() => handleAddToLibrary('watching')}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-t-lg"
+                              >
+                                <Tv className="w-4 h-4" />
+                                Watching
+                              </button>
+                              <button
+                                onClick={() => handleAddToLibrary('plan_to_watch')}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                              >
+                                <Library className="w-4 h-4" />
+                                Plan to Watch
+                              </button>
+                              <button
+                                onClick={() => handleAddToLibrary('completed')}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                              >
+                                <Check className="w-4 h-4" />
+                                Completed
+                              </button>
+                              <button
+                                onClick={() => handleAddToLibrary('on_hold')}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                              >
+                                <Clock className="w-4 h-4" />
+                                On Hold
+                              </button>
+                              <button
+                                onClick={() => handleAddToLibrary('dropped')}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-b-lg"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                Dropped
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         <button
                           className="flex items-center justify-center w-12 h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
                           aria-label="More info"

@@ -5,6 +5,7 @@ mod database;
 mod downloads;
 mod extensions;
 mod media;
+mod notifications;
 mod trackers;
 mod video_server;
 
@@ -276,6 +277,7 @@ pub fn run() {
       commands::get_chapter_download_progress,
       commands::is_chapter_downloaded,
       commands::get_downloaded_chapter_images,
+      commands::cancel_chapter_download,
       commands::delete_chapter_download,
       commands::list_chapter_downloads,
       commands::get_downloaded_manga,
@@ -342,6 +344,17 @@ pub fn run() {
       // Cache Management
       commands::get_cache_stats,
       commands::clear_api_cache,
+      // Notifications
+      commands::create_notification,
+      commands::list_notifications,
+      commands::mark_notification_read,
+      commands::mark_all_notifications_read,
+      commands::dismiss_notification,
+      commands::clear_all_notifications,
+      commands::get_unread_notification_count,
+      // App Settings
+      commands::get_update_check_info,
+      commands::set_update_check_info,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

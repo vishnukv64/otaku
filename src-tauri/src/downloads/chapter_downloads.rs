@@ -8,6 +8,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use tokio::fs;
 use tauri::{AppHandle, Emitter};
+use crate::notifications;
 
 /// Event name for chapter download progress updates
 pub const CHAPTER_DOWNLOAD_PROGRESS_EVENT: &str = "chapter-download-progress";
@@ -133,13 +134,32 @@ pub async fn start_chapter_download(
     let download_id_clone = download_id.clone();
     let media_id_clone = media_id.to_string();
     let chapter_id_clone = chapter_id.to_string();
+    let media_title_clone = media_title.to_string();
     let total_images = image_urls.len();
 
     tokio::spawn(async move {
         let mut downloaded = 0;
         let mut last_emit_time = std::time::Instant::now();
+        let mut cancelled = false;
 
         for (index, url) in image_urls.iter().enumerate() {
+            // Check for cancellation every 5 images
+            if index > 0 && index % 5 == 0 {
+                let status: Option<String> = sqlx::query_scalar(
+                    "SELECT status FROM chapter_downloads WHERE id = ?"
+                )
+                .bind(&download_id_clone)
+                .fetch_optional(&pool_clone)
+                .await
+                .unwrap_or(None);
+
+                if status.as_deref() == Some("cancelled") || status.is_none() {
+                    log::info!("Chapter download cancelled, stopping: {}", download_id_clone);
+                    cancelled = true;
+                    break;
+                }
+            }
+
             let page_num = index + 1;
             let extension = get_image_extension(url);
             let filename = format!("page_{:04}.{}", page_num, extension);
@@ -188,6 +208,11 @@ pub async fn start_chapter_download(
             }
         }
 
+        // If cancelled, don't update final status (it's already handled by cancel function)
+        if cancelled {
+            return;
+        }
+
         // Mark as completed or failed
         let status = if downloaded == total_images as i32 {
             "completed"
@@ -226,9 +251,28 @@ pub async fn start_chapter_download(
             downloaded_images: downloaded,
             percentage: if total_images > 0 { (downloaded as f64 / total_images as f64) * 100.0 } else { 0.0 },
             status: status.to_string(),
-            error_message: error_message_str,
+            error_message: error_message_str.clone(),
         };
         emit_chapter_progress(&app_handle, &final_progress);
+
+        // Emit notification for chapter download completion/failure
+        if status == "completed" {
+            let _ = notifications::notify_chapter_download_complete(
+                &app_handle,
+                Some(&pool_clone),
+                &media_title_clone,
+                chapter_number,
+            ).await;
+        } else if status == "failed" {
+            let error_msg = error_message_str.as_deref().unwrap_or("Unknown error");
+            let _ = notifications::notify_chapter_download_failed(
+                &app_handle,
+                Some(&pool_clone),
+                &media_title_clone,
+                chapter_number,
+                error_msg,
+            ).await;
+        }
 
         log::info!("Chapter download completed: {}/{} images", downloaded, total_images);
     });
@@ -365,6 +409,74 @@ pub async fn get_downloaded_chapter_images(
     }
 
     Ok(vec![])
+}
+
+/// Cancel an ongoing chapter download
+pub async fn cancel_chapter_download(
+    pool: &SqlitePool,
+    app_handle: &AppHandle,
+    media_id: &str,
+    chapter_id: &str,
+) -> Result<()> {
+    // Get the download info first
+    let download = sqlx::query_as::<_, ChapterDownload>(
+        r#"
+        SELECT id, media_id, chapter_id, chapter_number, folder_path, total_images, downloaded_images, status, error_message, created_at
+        FROM chapter_downloads
+        WHERE media_id = ? AND chapter_id = ?
+        "#
+    )
+    .bind(media_id)
+    .bind(chapter_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(download) = download {
+        // Only cancel if downloading or queued
+        if download.status == "downloading" || download.status == "queued" {
+            // Update status to cancelled
+            sqlx::query("UPDATE chapter_downloads SET status = 'cancelled' WHERE id = ?")
+                .bind(&download.id)
+                .execute(pool)
+                .await?;
+
+            // Emit cancelled event
+            let progress = ChapterDownloadProgress {
+                id: download.id.clone(),
+                media_id: download.media_id.clone(),
+                chapter_id: download.chapter_id.clone(),
+                chapter_number: download.chapter_number,
+                total_images: download.total_images,
+                downloaded_images: download.downloaded_images,
+                percentage: if download.total_images > 0 {
+                    (download.downloaded_images as f64 / download.total_images as f64) * 100.0
+                } else {
+                    0.0
+                },
+                status: "cancelled".to_string(),
+                error_message: None,
+            };
+            emit_chapter_progress(app_handle, &progress);
+
+            // Delete partial files
+            let folder_path = PathBuf::from(&download.folder_path);
+            if folder_path.exists() {
+                if let Err(e) = fs::remove_dir_all(&folder_path).await {
+                    log::warn!("Failed to remove partial download folder: {:?}", e);
+                }
+            }
+
+            // Remove from database
+            sqlx::query("DELETE FROM chapter_downloads WHERE id = ?")
+                .bind(&download.id)
+                .execute(pool)
+                .await?;
+
+            log::info!("Cancelled chapter download: {} - chapter {}", media_id, chapter_id);
+        }
+    }
+
+    Ok(())
 }
 
 /// Delete a chapter download
