@@ -7,12 +7,18 @@
 // due to QuickJS's thread-safety limitations. In production, we'd use a thread-local
 // runtime pool.
 
-use crate::extensions::{Extension, ExtensionMetadata, ExtensionRuntime, MediaDetails, SearchResults, TagsResult, VideoSources};
+use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
-use crate::downloads::{DownloadManager, DownloadProgress};
+use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
+use crate::cache::{
+    self, SEARCH_CACHE, DISCOVER_CACHE, ANIME_DETAILS_CACHE, MANGA_DETAILS_CACHE,
+    VIDEO_SOURCES_CACHE, CHAPTER_IMAGES_CACHE, TAGS_CACHE, HOME_CONTENT_CACHE, RECOMMENDATIONS_CACHE,
+};
 use crate::VideoServerInfo;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use sqlx;
 
 /// Global state for loaded extensions (stores just the code, not runtimes)
@@ -63,7 +69,17 @@ pub async fn search_anime(
     extension_id: String,
     query: String,
     page: u32,
+    allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::search_key(&extension_id, &query, page, allow_adult);
+    if let Some(cached) = SEARCH_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for search: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -75,12 +91,18 @@ pub async fn search_anime(
     // Release lock before creating runtime
     drop(extensions);
 
-    // Create runtime on-demand (not ideal for performance, but works for MVP)
-    let runtime = ExtensionRuntime::new(extension)
+    // Create runtime on-demand with NSFW setting
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.search(&query, page)
-        .map_err(|e| format!("Search failed: {}", e))
+    let results = runtime.search(&query, page)
+        .map_err(|e| format!("Search failed: {}", e))?;
+
+    // Cache the results
+    SEARCH_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached search results");
+
+    Ok(results)
 }
 
 /// Get detailed information about an anime
@@ -90,6 +112,13 @@ pub async fn get_anime_details(
     extension_id: String,
     anime_id: String,
 ) -> Result<MediaDetails, String> {
+    // Check cache first
+    let cache_key = cache::details_key(&extension_id, &anime_id);
+    if let Some(cached) = ANIME_DETAILS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for anime details: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -103,8 +132,14 @@ pub async fn get_anime_details(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_details(&anime_id)
-        .map_err(|e| format!("Failed to get details: {}", e))
+    let details = runtime.get_details(&anime_id)
+        .map_err(|e| format!("Failed to get details: {}", e))?;
+
+    // Cache the results
+    ANIME_DETAILS_CACHE.insert(cache_key, details.clone());
+    log::debug!("Cached anime details");
+
+    Ok(details)
 }
 
 /// Get video sources for an episode
@@ -114,6 +149,13 @@ pub async fn get_video_sources(
     extension_id: String,
     episode_id: String,
 ) -> Result<VideoSources, String> {
+    // Check cache first
+    let cache_key = cache::sources_key(&extension_id, &episode_id);
+    if let Some(cached) = VIDEO_SOURCES_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for video sources: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -127,8 +169,200 @@ pub async fn get_video_sources(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_sources(&episode_id)
-        .map_err(|e| format!("Failed to get sources: {}", e))
+    let sources = runtime.get_sources(&episode_id)
+        .map_err(|e| format!("Failed to get sources: {}", e))?;
+
+    // Cache the results
+    VIDEO_SOURCES_CACHE.insert(cache_key, sources.clone());
+    log::debug!("Cached video sources");
+
+    Ok(sources)
+}
+
+/// Event name for anime discover streaming
+pub const ANIME_DISCOVER_EVENT: &str = "anime-discover-results";
+
+/// Event name for manga discover streaming
+pub const MANGA_DISCOVER_EVENT: &str = "manga-discover-results";
+
+/// Event payload for streaming discover results
+#[derive(Clone, serde::Serialize)]
+pub struct DiscoverResultsEvent {
+    pub results: Vec<SearchResult>,
+    pub page: u32,
+    pub has_next_page: bool,
+    pub is_last: bool,
+    pub total_results: usize,
+}
+
+/// Stream anime discover results via SSE (Server-Sent Events)
+/// Emits results progressively as each page loads
+#[tauri::command]
+pub async fn stream_discover_anime(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    sort_type: Option<String>,
+    genres: Vec<String>,
+    allow_adult: Option<bool>,
+    pages_to_fetch: Option<u32>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+    let pages_to_fetch = pages_to_fetch.unwrap_or(3);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut has_more_pages = true;
+
+    // Fetch pages progressively and emit results
+    for page in 1..=pages_to_fetch {
+        if !has_more_pages {
+            break;
+        }
+
+        // Check cache for this page
+        let cache_key = cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult);
+
+        let page_results = if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+            log::debug!("Cache hit for stream discover page {}: {}", page, cache_key);
+            cached
+        } else {
+            let results = runtime.discover(page, sort_type.clone(), genres.clone())
+                .map_err(|e| format!("Discover failed: {}", e))?;
+
+            // Cache this page's results
+            DISCOVER_CACHE.insert(cache_key, results.clone());
+            results
+        };
+
+        has_more_pages = page_results.has_next_page;
+
+        // Deduplicate and collect new results
+        let mut new_results: Vec<SearchResult> = Vec::new();
+        for item in page_results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                new_results.push(item.clone());
+                all_results.push(item);
+            }
+        }
+
+        let is_last = page == pages_to_fetch || !has_more_pages;
+        let new_count = new_results.len();
+
+        // Emit this page's results
+        if !new_results.is_empty() || is_last {
+            let _ = app.emit(ANIME_DISCOVER_EVENT, DiscoverResultsEvent {
+                results: new_results,
+                page,
+                has_next_page: has_more_pages,
+                is_last,
+                total_results: all_results.len(),
+            });
+            log::debug!("Emitted anime discover page {} ({} new results, {} total)", page, new_count, all_results.len());
+        }
+    }
+
+    log::info!("Streamed {} pages of anime discover results ({} total items)", pages_to_fetch.min(3), all_results.len());
+    Ok(())
+}
+
+/// Stream manga discover results via SSE (Server-Sent Events)
+/// Emits results progressively as each page loads
+#[tauri::command]
+pub async fn stream_discover_manga(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    sort_type: Option<String>,
+    genres: Vec<String>,
+    allow_adult: Option<bool>,
+    pages_to_fetch: Option<u32>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+    let pages_to_fetch = pages_to_fetch.unwrap_or(3);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut has_more_pages = true;
+
+    // Fetch pages progressively and emit results
+    for page in 1..=pages_to_fetch {
+        if !has_more_pages {
+            break;
+        }
+
+        // Check cache for this page (use manga: prefix)
+        let cache_key = format!("manga:{}", cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult));
+
+        let page_results = if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+            log::debug!("Cache hit for stream manga discover page {}: {}", page, cache_key);
+            cached
+        } else {
+            let results = runtime.discover(page, sort_type.clone(), genres.clone())
+                .map_err(|e| format!("Manga discover failed: {}", e))?;
+
+            // Cache this page's results
+            DISCOVER_CACHE.insert(cache_key, results.clone());
+            results
+        };
+
+        has_more_pages = page_results.has_next_page;
+
+        // Deduplicate and collect new results
+        let mut new_results: Vec<SearchResult> = Vec::new();
+        for item in page_results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                new_results.push(item.clone());
+                all_results.push(item);
+            }
+        }
+
+        let is_last = page == pages_to_fetch || !has_more_pages;
+        let new_count = new_results.len();
+
+        // Emit this page's results
+        if !new_results.is_empty() || is_last {
+            let _ = app.emit(MANGA_DISCOVER_EVENT, DiscoverResultsEvent {
+                results: new_results,
+                page,
+                has_next_page: has_more_pages,
+                is_last,
+                total_results: all_results.len(),
+            });
+            log::debug!("Emitted manga discover page {} ({} new results, {} total)", page, new_count, all_results.len());
+        }
+    }
+
+    log::info!("Streamed {} pages of manga discover results ({} total items)", pages_to_fetch.min(3), all_results.len());
+    Ok(())
 }
 
 /// Discover anime with filters (trending, top-rated, by genre, etc.)
@@ -139,7 +373,17 @@ pub async fn discover_anime(
     page: u32,
     sort_type: Option<String>,
     genres: Vec<String>,
+    allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult);
+    if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for discover: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -150,11 +394,253 @@ pub async fn discover_anime(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::new(extension)
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.discover(page, sort_type, genres)
-        .map_err(|e| format!("Discover failed: {}", e))
+    let results = runtime.discover(page, sort_type, genres)
+        .map_err(|e| format!("Discover failed: {}", e))?;
+
+    // Cache the results
+    DISCOVER_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached discover results");
+
+    Ok(results)
+}
+
+/// Get home page content with all categories in a single call
+/// This is more efficient than multiple discover calls
+#[tauri::command]
+pub async fn get_home_content(
+    state: State<'_, AppState>,
+    extension_id: String,
+    allow_adult: Option<bool>,
+) -> Result<HomeContent, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::home_content_key(&extension_id, allow_adult);
+    if let Some(cached) = HOME_CONTENT_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for home content: {}", cache_key);
+        return Ok(cached);
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    // Fetch 5 pages (100 items) and categorize
+    let content = runtime.get_home_content(5)
+        .map_err(|e| format!("Failed to get home content: {}", e))?;
+
+    // Cache the results
+    HOME_CONTENT_CACHE.insert(cache_key, content.clone());
+    log::debug!("Cached home content");
+
+    Ok(content)
+}
+
+/// Event name for home content streaming
+pub const HOME_CONTENT_EVENT: &str = "home-content-category";
+
+/// Event payload for streaming home content
+#[derive(Clone, serde::Serialize)]
+pub struct HomeCategoryEvent {
+    pub category: HomeCategory,
+    pub is_last: bool,
+    pub featured: Option<SearchResult>,
+}
+
+/// Stream home content categories via SSE (Server-Sent Events)
+/// Emits each category as it becomes available for progressive loading
+#[tauri::command]
+pub async fn stream_home_content(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    extension_id: String,
+    allow_adult: Option<bool>,
+) -> Result<(), String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first - if cached, emit all at once
+    let cache_key = cache::home_content_key(&extension_id, allow_adult);
+    if let Some(cached) = HOME_CONTENT_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for streaming home content: {}", cache_key);
+        let total = cached.categories.len();
+        for (i, category) in cached.categories.into_iter().enumerate() {
+            let is_last = i == total - 1;
+            let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+                category,
+                is_last,
+                featured: if i == 0 { cached.featured.clone() } else { None },
+            });
+        }
+        return Ok(());
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    // Fetch and emit categories progressively
+    let mut all_results: Vec<SearchResult> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut categories_emitted = 0;
+
+    // Fetch page 1 - emit Trending Now immediately
+    if let Ok(results) = runtime.discover(1, Some("view".to_string()), vec![]) {
+        for item in results.results {
+            if !seen_ids.contains(&item.id) {
+                seen_ids.insert(item.id.clone());
+                all_results.push(item);
+            }
+        }
+
+        // Emit Trending Now (first 20 items)
+        let trending: Vec<SearchResult> = all_results.iter().take(20).cloned().collect();
+        if !trending.is_empty() {
+            let featured = trending.first().cloned();
+            let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+                category: HomeCategory {
+                    id: "trending".to_string(),
+                    title: "Trending Now".to_string(),
+                    items: trending,
+                },
+                is_last: false,
+                featured,
+            });
+            categories_emitted += 1;
+            log::debug!("Emitted Trending Now category");
+        }
+    }
+
+    // Fetch pages 2-3 for more data, then emit Top Rated
+    for page in 2..=3 {
+        if let Ok(results) = runtime.discover(page, Some("view".to_string()), vec![]) {
+            for item in results.results {
+                if !seen_ids.contains(&item.id) {
+                    seen_ids.insert(item.id.clone());
+                    all_results.push(item);
+                }
+            }
+        }
+    }
+
+    // Emit Top Rated (sorted by rating)
+    let mut by_rating = all_results.clone();
+    by_rating.sort_by(|a, b| {
+        let rating_a = a.rating.unwrap_or(0.0);
+        let rating_b = b.rating.unwrap_or(0.0);
+        rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let top_rated: Vec<SearchResult> = by_rating.into_iter().take(20).collect();
+    if !top_rated.is_empty() {
+        let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+            category: HomeCategory {
+                id: "top-rated".to_string(),
+                title: "Top Rated".to_string(),
+                items: top_rated,
+            },
+            is_last: false,
+            featured: None,
+        });
+        categories_emitted += 1;
+        log::debug!("Emitted Top Rated category");
+    }
+
+    // Fetch pages 4-5 for Recently Updated
+    for page in 4..=5 {
+        if let Ok(results) = runtime.discover(page, Some("view".to_string()), vec![]) {
+            for item in results.results {
+                if !seen_ids.contains(&item.id) {
+                    seen_ids.insert(item.id.clone());
+                    all_results.push(item);
+                }
+            }
+        }
+    }
+
+    // Emit Recently Updated (items 21-40)
+    let recently_updated: Vec<SearchResult> = all_results.iter()
+        .skip(20)
+        .take(20)
+        .cloned()
+        .collect();
+    if !recently_updated.is_empty() {
+        let _ = app.emit(HOME_CONTENT_EVENT, HomeCategoryEvent {
+            category: HomeCategory {
+                id: "recently-updated".to_string(),
+                title: "Recently Updated".to_string(),
+                items: recently_updated.clone(),
+            },
+            is_last: true,
+            featured: None,
+        });
+        categories_emitted += 1;
+        log::debug!("Emitted Recently Updated category");
+    }
+
+    // Cache the complete content for future requests
+    let featured = all_results.iter()
+        .max_by(|a, b| {
+            let rating_a = a.rating.unwrap_or(0.0);
+            let rating_b = b.rating.unwrap_or(0.0);
+            rating_a.partial_cmp(&rating_b).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .cloned();
+
+    let mut categories = Vec::new();
+    let trending: Vec<SearchResult> = all_results.iter().take(20).cloned().collect();
+    if !trending.is_empty() {
+        categories.push(HomeCategory {
+            id: "trending".to_string(),
+            title: "Trending Now".to_string(),
+            items: trending,
+        });
+    }
+    let mut by_rating = all_results.clone();
+    by_rating.sort_by(|a, b| {
+        let rating_a = a.rating.unwrap_or(0.0);
+        let rating_b = b.rating.unwrap_or(0.0);
+        rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let top_rated: Vec<SearchResult> = by_rating.into_iter().take(20).collect();
+    if !top_rated.is_empty() {
+        categories.push(HomeCategory {
+            id: "top-rated".to_string(),
+            title: "Top Rated".to_string(),
+            items: top_rated,
+        });
+    }
+    if !recently_updated.is_empty() {
+        categories.push(HomeCategory {
+            id: "recently-updated".to_string(),
+            title: "Recently Updated".to_string(),
+            items: recently_updated,
+        });
+    }
+
+    HOME_CONTENT_CACHE.insert(cache_key, HomeContent { featured, categories });
+    log::info!("Streamed {} categories for home content", categories_emitted);
+
+    Ok(())
 }
 
 /// Get anime recommendations (trending/latest)
@@ -162,7 +648,17 @@ pub async fn discover_anime(
 pub async fn get_recommendations(
     state: State<'_, AppState>,
     extension_id: String,
+    allow_adult: Option<bool>,
 ) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first
+    let cache_key = cache::recommendations_key(&extension_id, allow_adult);
+    if let Some(cached) = RECOMMENDATIONS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for recommendations: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -173,11 +669,17 @@ pub async fn get_recommendations(
 
     drop(extensions);
 
-    let runtime = ExtensionRuntime::new(extension)
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_recommendations()
-        .map_err(|e| format!("Get recommendations failed: {}", e))
+    let results = runtime.get_recommendations()
+        .map_err(|e| format!("Get recommendations failed: {}", e))?;
+
+    // Cache the results
+    RECOMMENDATIONS_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached recommendations");
+
+    Ok(results)
 }
 
 /// Get available tags (genres and studios)
@@ -187,6 +689,13 @@ pub async fn get_tags(
     extension_id: String,
     page: u32,
 ) -> Result<TagsResult, String> {
+    // Check cache first
+    let cache_key = cache::tags_key(&extension_id, page);
+    if let Some(cached) = TAGS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for tags: {}", cache_key);
+        return Ok(cached);
+    }
+
     let extensions = state.extensions.lock()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
@@ -200,8 +709,14 @@ pub async fn get_tags(
     let runtime = ExtensionRuntime::new(extension)
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
-    runtime.get_tags(page)
-        .map_err(|e| format!("Get tags failed: {}", e))
+    let tags = runtime.get_tags(page)
+        .map_err(|e| format!("Get tags failed: {}", e))?;
+
+    // Cache the results
+    TAGS_CACHE.insert(cache_key, tags.clone());
+    log::debug!("Cached tags");
+
+    Ok(tags)
 }
 
 /// List all loaded extensions
@@ -217,6 +732,246 @@ pub async fn list_extensions(
         .collect();
 
     Ok(metadata)
+}
+
+// ==================== Manga Commands ====================
+
+/// Search for manga using a specific extension
+#[tauri::command]
+pub async fn search_manga(
+    state: State<'_, AppState>,
+    extension_id: String,
+    query: String,
+    page: u32,
+    allow_adult: Option<bool>,
+) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first (use manga: prefix to differentiate from anime)
+    let cache_key = format!("manga:{}", cache::search_key(&extension_id, &query, page, allow_adult));
+    if let Some(cached) = SEARCH_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga search: {}", cache_key);
+        return Ok(cached);
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let results = runtime.search(&query, page)
+        .map_err(|e| format!("Manga search failed: {}", e))?;
+
+    // Cache the results
+    SEARCH_CACHE.insert(cache_key, results.clone());
+    log::debug!("Cached manga search results");
+
+    Ok(results)
+}
+
+/// Get detailed information about a manga
+#[tauri::command]
+pub async fn get_manga_details(
+    state: State<'_, AppState>,
+    extension_id: String,
+    manga_id: String,
+    allow_adult: Option<bool>,
+) -> Result<MangaDetails, String> {
+    // Check cache first
+    let cache_key = cache::details_key(&extension_id, &manga_id);
+    if let Some(cached) = MANGA_DETAILS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga details: {}", cache_key);
+        return Ok(cached);
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult.unwrap_or(false))
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let details = runtime.get_manga_details(&manga_id)
+        .map_err(|e| format!("Failed to get manga details: {}", e))?;
+
+    // Cache the results
+    MANGA_DETAILS_CACHE.insert(cache_key, details.clone());
+    log::debug!("Cached manga details");
+
+    Ok(details)
+}
+
+/// Get chapter images for reading
+#[tauri::command]
+pub async fn get_chapter_images(
+    state: State<'_, AppState>,
+    extension_id: String,
+    chapter_id: String,
+) -> Result<ChapterImages, String> {
+    // Check cache first
+    let cache_key = cache::chapter_images_key(&extension_id, &chapter_id);
+    if let Some(cached) = CHAPTER_IMAGES_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for chapter images: {}", cache_key);
+        return Ok(cached);
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::new(extension)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let images = runtime.get_chapter_images(&chapter_id)
+        .map_err(|e| format!("Failed to get chapter images: {}", e))?;
+
+    // Cache the results
+    CHAPTER_IMAGES_CACHE.insert(cache_key, images.clone());
+    log::debug!("Cached chapter images");
+
+    Ok(images)
+}
+
+/// Discover manga with filters (trending, top-rated, by genre)
+#[tauri::command]
+pub async fn discover_manga(
+    state: State<'_, AppState>,
+    extension_id: String,
+    page: u32,
+    sort_type: Option<String>,
+    genres: Vec<String>,
+    allow_adult: Option<bool>,
+) -> Result<SearchResults, String> {
+    let allow_adult = allow_adult.unwrap_or(false);
+
+    // Check cache first (use manga: prefix to differentiate from anime)
+    let cache_key = format!("manga:{}", cache::discover_key(&extension_id, page, sort_type.as_deref(), &genres, allow_adult));
+    if let Some(cached) = DISCOVER_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga discover: {}", cache_key);
+        return Ok(cached);
+    }
+
+    log::debug!("[Manga] discover_manga called with genres: {:?}", genres);
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::with_options(extension, allow_adult)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let result = runtime.discover(page, sort_type, genres.clone())
+        .map_err(|e| format!("Manga discover failed: {}", e))?;
+
+    log::debug!("[Manga] discover_manga returned {} results for genres {:?}", result.results.len(), genres);
+
+    // Cache the results
+    DISCOVER_CACHE.insert(cache_key, result.clone());
+    log::debug!("Cached manga discover results");
+
+    Ok(result)
+}
+
+/// Get available manga tags (genres)
+#[tauri::command]
+pub async fn get_manga_tags(
+    state: State<'_, AppState>,
+    extension_id: String,
+    page: u32,
+) -> Result<TagsResult, String> {
+    // Check cache first (use manga: prefix to differentiate from anime)
+    let cache_key = format!("manga:{}", cache::tags_key(&extension_id, page));
+    if let Some(cached) = TAGS_CACHE.get(&cache_key) {
+        log::debug!("Cache hit for manga tags: {}", cache_key);
+        return Ok(cached);
+    }
+
+    let extensions = state.extensions.lock()
+        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+
+    let extension = extensions.iter()
+        .find(|ext| ext.metadata.id == extension_id)
+        .ok_or_else(|| format!("Extension not found: {}", extension_id))?
+        .clone();
+
+    drop(extensions);
+
+    let runtime = ExtensionRuntime::new(extension)
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    let tags = runtime.get_tags(page)
+        .map_err(|e| format!("Get manga tags failed: {}", e))?;
+
+    // Cache the results
+    TAGS_CACHE.insert(cache_key, tags.clone());
+    log::debug!("Cached manga tags");
+
+    Ok(tags)
+}
+
+/// Proxy image request to avoid CORS issues (for manga pages)
+#[tauri::command]
+pub async fn proxy_image_request(
+    url: String,
+) -> Result<Vec<u8>, String> {
+    log::debug!("Proxying image request");
+
+    use std::io::Read;
+
+    let request = ureq::get(&url)
+        .set("Referer", "https://allmanga.to")
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
+        .set("Origin", "https://allmanga.to");
+
+    match request.call() {
+        Ok(response) => {
+            let content_length = response.header("Content-Length")
+                .and_then(|v| v.parse::<usize>().ok());
+
+            // Pre-allocate based on content length, cap at 50MB for images
+            let initial_capacity = content_length
+                .map(|l| l.min(50 * 1024 * 1024))
+                .unwrap_or(1024 * 1024);
+
+            let mut bytes = Vec::with_capacity(initial_capacity);
+
+            response.into_reader()
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("Failed to read image: {}", e))?;
+
+            Ok(bytes)
+        }
+        Err(e) => {
+            log::error!("Image proxy error: {:?}", e);
+            Err(format!("Image proxy request failed: {}", e))
+        }
+    }
 }
 
 /// Proxy video request to avoid CORS issues
@@ -652,6 +1407,90 @@ pub async fn remove_from_continue_watching(
     Ok(())
 }
 
+// ==================== Reading History Commands ====================
+
+/// Save or update reading progress for a chapter
+#[tauri::command]
+pub async fn save_reading_progress(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+    chapter_number: f64,
+    current_page: i32,
+    total_pages: Option<i32>,
+    completed: bool,
+) -> Result<(), String> {
+    use crate::database::reading_history::{save_reading_progress as save_progress, ReadingProgress};
+
+    let progress = ReadingProgress {
+        media_id,
+        chapter_id,
+        chapter_number,
+        current_page,
+        total_pages,
+        completed,
+    };
+
+    save_progress(state.database.pool(), &progress)
+        .await
+        .map_err(|e| format!("Failed to save reading progress: {}", e))
+}
+
+/// Get reading progress for a specific chapter
+#[tauri::command]
+pub async fn get_reading_progress(
+    state: State<'_, AppState>,
+    chapter_id: String,
+) -> Result<Option<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_reading_progress as get_progress;
+
+    get_progress(state.database.pool(), &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to get reading progress: {}", e))
+}
+
+/// Get the most recent reading progress for a manga (for Resume Reading feature)
+#[tauri::command]
+pub async fn get_latest_reading_progress_for_media(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_latest_reading_progress_for_media as get_latest;
+
+    get_latest(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get latest reading progress: {}", e))
+}
+
+/// Get continue reading list (recently read chapters that aren't completed)
+#[tauri::command]
+pub async fn get_continue_reading(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_continue_reading as get_continue;
+
+    get_continue(state.database.pool(), limit)
+        .await
+        .map_err(|e| format!("Failed to get continue reading: {}", e))
+}
+
+/// Remove manga from continue reading (deletes all reading history for that manga)
+#[tauri::command]
+pub async fn remove_from_continue_reading_manga(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<(), String> {
+    use crate::database::reading_history::delete_manga_reading_history;
+
+    delete_manga_reading_history(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to remove from continue reading: {}", e))?;
+
+    log::debug!("Removed manga {} from continue reading", media_id);
+    Ok(())
+}
+
 // ==================== Library Commands ====================
 
 /// Add media to library
@@ -793,6 +1632,19 @@ pub async fn get_continue_watching_with_details(
         .map_err(|e| format!("Failed to get continue watching: {}", e))
 }
 
+/// Get continue reading with full media details
+#[tauri::command]
+pub async fn get_continue_reading_with_details(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::media::ContinueReadingEntry>, String> {
+    use crate::database::media::get_continue_reading_with_media;
+
+    get_continue_reading_with_media(state.database.pool(), limit)
+        .await
+        .map_err(|e| format!("Failed to get continue reading: {}", e))
+}
+
 /// Get downloads with full media details
 #[tauri::command]
 pub async fn get_downloads_with_media(
@@ -929,7 +1781,6 @@ pub async fn get_proxy_video_url(
 // ==================== System Stats Commands ====================
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Emitter;
 
 /// Event names for streaming
 pub const SYSTEM_STATS_EVENT: &str = "system-stats";
@@ -1315,5 +2166,129 @@ pub async fn start_logs_stream(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn stop_logs_stream() -> Result<(), String> {
     LOGS_STREAMING.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+// ==================== Chapter Download Commands ====================
+
+/// Start downloading a manga chapter
+#[tauri::command]
+pub async fn start_chapter_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    download_manager: State<'_, DownloadManager>,
+    media_id: String,
+    media_title: String,
+    chapter_id: String,
+    chapter_number: f64,
+    image_urls: Vec<String>,
+) -> Result<String, String> {
+    // Use the same downloads directory as anime downloads
+    let downloads_dir = PathBuf::from(download_manager.get_downloads_directory());
+
+    chapter_downloads::start_chapter_download(
+        state.database.pool(),
+        app,
+        downloads_dir,
+        &media_id,
+        &media_title,
+        &chapter_id,
+        chapter_number,
+        image_urls,
+    )
+    .await
+    .map_err(|e| format!("Failed to start chapter download: {}", e))
+}
+
+/// Get chapter download progress
+#[tauri::command]
+pub async fn get_chapter_download_progress(
+    state: State<'_, AppState>,
+    download_id: String,
+) -> Result<Option<chapter_downloads::ChapterDownloadProgress>, String> {
+    chapter_downloads::get_chapter_download_progress(state.database.pool(), &download_id)
+        .await
+        .map_err(|e| format!("Failed to get chapter download progress: {}", e))
+}
+
+/// Check if a chapter is downloaded
+#[tauri::command]
+pub async fn is_chapter_downloaded(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<bool, String> {
+    chapter_downloads::is_chapter_downloaded(state.database.pool(), &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to check chapter download status: {}", e))
+}
+
+/// Get downloaded chapter images (local paths)
+#[tauri::command]
+pub async fn get_downloaded_chapter_images(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<Vec<String>, String> {
+    chapter_downloads::get_downloaded_chapter_images(state.database.pool(), &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to get downloaded chapter images: {}", e))
+}
+
+/// Delete a chapter download
+#[tauri::command]
+pub async fn delete_chapter_download(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<(), String> {
+    chapter_downloads::delete_chapter_download(state.database.pool(), &media_id, &chapter_id)
+        .await
+        .map_err(|e| format!("Failed to delete chapter download: {}", e))
+}
+
+/// List all chapter downloads for a manga
+#[tauri::command]
+pub async fn list_chapter_downloads(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Vec<chapter_downloads::ChapterDownloadProgress>, String> {
+    chapter_downloads::list_chapter_downloads(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to list chapter downloads: {}", e))
+}
+
+/// Get all downloaded manga with chapter counts
+#[tauri::command]
+pub async fn get_downloaded_manga(
+    state: State<'_, AppState>,
+) -> Result<Vec<chapter_downloads::DownloadedManga>, String> {
+    chapter_downloads::get_all_downloaded_manga(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get downloaded manga: {}", e))
+}
+
+/// List ALL chapter downloads across all manga (for Download Manager)
+#[tauri::command]
+pub async fn list_all_chapter_downloads(
+    state: State<'_, AppState>,
+) -> Result<Vec<chapter_downloads::ChapterDownloadWithTitle>, String> {
+    chapter_downloads::list_all_chapter_downloads(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to list all chapter downloads: {}", e))
+}
+
+// ==================== Cache Management Commands ====================
+
+/// Get cache statistics
+#[tauri::command]
+pub async fn get_cache_stats() -> Result<cache::CacheStats, String> {
+    Ok(cache::get_cache_stats())
+}
+
+/// Clear all API caches
+#[tauri::command]
+pub async fn clear_api_cache() -> Result<(), String> {
+    cache::clear_all_caches();
     Ok(())
 }

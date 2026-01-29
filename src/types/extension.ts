@@ -83,3 +83,31 @@ export interface VideoSources {
   sources: VideoSource[]
   subtitles: Subtitle[]
 }
+
+// ==================== Manga Types ====================
+
+export interface Chapter {
+  id: string
+  number: number
+  title?: string
+  thumbnail?: string
+  releaseDate?: string
+}
+
+export interface ChapterImage {
+  url: string
+  page: number
+  width?: number
+  height?: number
+}
+
+export interface ChapterImages {
+  images: ChapterImage[]
+  total_pages: number
+  title?: string
+}
+
+export interface MangaDetails extends Omit<MediaDetails, 'episodes'> {
+  chapters: Chapter[]
+  totalChapters?: number
+}

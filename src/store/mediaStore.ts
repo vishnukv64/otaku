@@ -27,8 +27,8 @@ interface MediaState {
 
   // Actions
   setSearchQuery: (query: string) => void
-  search: (extensionId: string, query: string, page?: number) => Promise<void>
-  loadMoreResults: (extensionId: string) => Promise<void>
+  search: (extensionId: string, query: string, page?: number, allowAdult?: boolean) => Promise<void>
+  loadMoreResults: (extensionId: string, allowAdult?: boolean) => Promise<void>
   selectMedia: (extensionId: string, animeId: string) => Promise<void>
   clearSearch: () => void
 }
@@ -47,11 +47,11 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
 
-  search: async (extensionId, query, page = 1) => {
+  search: async (extensionId, query, page = 1, allowAdult = false) => {
     set({ searchLoading: true, searchError: null, searchQuery: query })
 
     try {
-      const results = await tauri.searchAnime(extensionId, query, page)
+      const results = await tauri.searchAnime(extensionId, query, page, allowAdult)
 
       // Deduplicate results to avoid React key warnings
       const existingResults = page === 1 ? [] : get().searchResults
@@ -78,12 +78,12 @@ export const useMediaStore = create<MediaState>((set, get) => ({
     }
   },
 
-  loadMoreResults: async (extensionId) => {
+  loadMoreResults: async (extensionId, allowAdult = false) => {
     const { currentPage, hasNextPage, searchQuery, searchLoading } = get()
 
     if (!hasNextPage || searchLoading) return
 
-    await get().search(extensionId, searchQuery, currentPage + 1)
+    await get().search(extensionId, searchQuery, currentPage + 1, allowAdult)
   },
 
   selectMedia: async (extensionId, animeId) => {

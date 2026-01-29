@@ -28,11 +28,15 @@ pub struct LibraryEntryWithMedia {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum LibraryStatus {
+    // Anime statuses
     Watching,
     Completed,
     OnHold,
     Dropped,
     PlanToWatch,
+    // Manga statuses
+    Reading,
+    PlanToRead,
 }
 
 impl LibraryStatus {
@@ -43,6 +47,8 @@ impl LibraryStatus {
             LibraryStatus::OnHold => "on_hold",
             LibraryStatus::Dropped => "dropped",
             LibraryStatus::PlanToWatch => "plan_to_watch",
+            LibraryStatus::Reading => "reading",
+            LibraryStatus::PlanToRead => "plan_to_read",
         }
     }
 
@@ -53,6 +59,8 @@ impl LibraryStatus {
             "on_hold" => Some(LibraryStatus::OnHold),
             "dropped" => Some(LibraryStatus::Dropped),
             "plan_to_watch" => Some(LibraryStatus::PlanToWatch),
+            "reading" => Some(LibraryStatus::Reading),
+            "plan_to_read" => Some(LibraryStatus::PlanToRead),
             _ => None,
         }
     }

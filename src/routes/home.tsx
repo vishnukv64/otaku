@@ -1,49 +1,56 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Loader2, AlertCircle } from 'lucide-react'
-import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
+import {
+  loadExtension,
+  streamHomeContent,
+  onHomeContentCategory,
+  type HomeCategory,
+  type HomeCategoryEvent,
+} from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
+import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
+import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
+import { useSettingsStore } from '@/store/settingsStore'
 import type { SearchResult } from '@/types/extension'
 
 export const Route = createFileRoute('/home')({
   component: HomeScreen,
 })
 
-// Content categories for the home page
-const CATEGORIES = [
-  { id: 'trending', title: 'Trending Now', sortType: 'view', genres: [] },
-  { id: 'top-rated', title: 'Top Rated Anime', sortType: 'score', genres: [] },
-  { id: 'recently-updated', title: 'Recently Updated', sortType: 'update', genres: [] },
-  { id: 'action', title: 'Action & Adventure', sortType: 'score', genres: ['Action'] },
-  { id: 'romance', title: 'Romance', sortType: 'score', genres: ['Romance'] },
-  { id: 'comedy', title: 'Comedy', sortType: 'score', genres: ['Comedy'] },
-  { id: 'thriller', title: 'Thriller & Mystery', sortType: 'score', genres: ['Thriller', 'Mystery'] },
-  { id: 'fantasy', title: 'Fantasy & Magic', sortType: 'score', genres: ['Fantasy'] },
-]
-
-interface CategoryContent {
-  id: string
-  items: SearchResult[]
-  loading: boolean
-  error: string | null
-}
-
 function HomeScreen() {
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [extensionId, setExtensionId] = useState<string | null>(null)
+  const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
-  const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
+  const [categories, setCategories] = useState<HomeCategory[]>([])
+  const [streamComplete, setStreamComplete] = useState(false)
 
-  // Load extension on mount
+  // Track if we've started streaming to avoid duplicate calls
+  const streamingRef = useRef(false)
+
+  // Load extensions on mount
   useEffect(() => {
-    const initExtension = async () => {
+    const initExtensions = async () => {
       try {
-        const metadata = await loadExtension(ALLANIME_EXTENSION)
-        setExtensionId(metadata.id)
+        // Load anime extension
+        const animeMetadata = await loadExtension(ALLANIME_EXTENSION)
+        setExtensionId(animeMetadata.id)
+
+        // Load manga extension (non-blocking)
+        try {
+          const mangaMetadata = await loadExtension(ALLANIME_MANGA_EXTENSION)
+          setMangaExtensionId(mangaMetadata.id)
+        } catch (mangaErr) {
+          console.error('Failed to load manga extension:', mangaErr)
+        }
+
         setLoading(false)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load extension')
@@ -51,62 +58,90 @@ function HomeScreen() {
       }
     }
 
-    initExtension()
+    initExtensions()
   }, [])
 
-  // Load content for all categories
+  // Handle incoming category events
+  const handleCategoryEvent = useCallback((event: HomeCategoryEvent) => {
+    console.log('[SSE] Received category:', event.category.title, 'is_last:', event.is_last)
+
+    // Add the category to state (avoid duplicates)
+    setCategories(prev => {
+      const exists = prev.some(c => c.id === event.category.id)
+      if (exists) {
+        return prev.map(c => c.id === event.category.id ? event.category : c)
+      }
+      return [...prev, event.category]
+    })
+
+    // Set featured anime from first event if available
+    if (event.featured) {
+      setFeaturedAnime(event.featured)
+    }
+
+    // Mark stream as complete when last category received
+    if (event.is_last) {
+      setStreamComplete(true)
+      console.log('[SSE] Stream complete')
+    }
+  }, [])
+
+  // Stream home content via SSE
   useEffect(() => {
-    if (!extensionId) return
+    if (!extensionId || streamingRef.current) return
 
-    const loadCategories = async () => {
-      // Initialize categories state
-      const initialState: Record<string, CategoryContent> = {}
-      CATEGORIES.forEach(cat => {
-        initialState[cat.id] = { id: cat.id, items: [], loading: true, error: null }
-      })
-      setCategories(initialState)
+    let unsubscribe: (() => void) | null = null
 
-      // Load each category
-      for (const category of CATEGORIES) {
-        try {
-          const results = await discoverAnime(
-            extensionId,
-            1,
-            category.sortType,
-            category.genres
-          )
+    // Track mounted state for safe async cleanup
+    let isMounted = true
 
-          setCategories(prev => ({
-            ...prev,
-            [category.id]: {
-              id: category.id,
-              items: results.results,
-              loading: false,
-              error: null,
-            },
-          }))
+    const startStreaming = async () => {
+      streamingRef.current = true
+      setCategories([])
+      setStreamComplete(false)
 
-          // Use first result from trending as featured
-          if (category.id === 'trending' && results.results.length > 0 && !featuredAnime) {
-            setFeaturedAnime(results.results[0])
+      try {
+        // Set up event listener FIRST
+        const unsub = await onHomeContentCategory((event) => {
+          // Only process events if still mounted
+          if (isMounted) {
+            handleCategoryEvent(event)
           }
-        } catch (err) {
-          setCategories(prev => ({
-            ...prev,
-            [category.id]: {
-              id: category.id,
-              items: [],
-              loading: false,
-              error: err instanceof Error ? err.message : 'Failed to load',
-            },
-          }))
+        })
+        console.log('[SSE] Listener set up, starting stream...')
+
+        // Store unsubscribe if still mounted, otherwise cleanup immediately
+        if (isMounted) {
+          unsubscribe = unsub
+        } else {
+          unsub()
+          return
+        }
+
+        // Then start streaming
+        await streamHomeContent(extensionId, nsfwFilter)
+        console.log('[SSE] Stream command completed')
+      } catch (err) {
+        console.error('Failed to stream home content:', err)
+        if (isMounted) {
+          setStreamComplete(true)
         }
       }
     }
 
-    loadCategories()
+    startStreaming()
+
+    // Cleanup on unmount
+    return () => {
+      isMounted = false
+      if (unsubscribe) {
+        unsubscribe()
+      }
+      streamingRef.current = false
+    }
+    // Note: handleCategoryEvent is stable (empty deps) and used inside closure, so not needed in deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensionId])
+  }, [extensionId, nsfwFilter])
 
   const handleWatch = () => {
     // TODO: Navigate to watch screen or show details
@@ -140,6 +175,11 @@ function HomeScreen() {
     )
   }
 
+  // Show skeleton loaders for categories not yet loaded
+  const expectedCategories = ['trending', 'top-rated', 'recently-updated']
+  const loadedCategoryIds = new Set(categories.map(c => c.id))
+  const pendingCategories = expectedCategories.filter(id => !loadedCategoryIds.has(id))
+
   return (
     <div className="min-h-[calc(100vh-4rem)] pb-12">
       <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
@@ -152,22 +192,39 @@ function HomeScreen() {
           />
         )}
 
-        {/* Content Carousels */}
-        <div className="space-y-8">
-          {CATEGORIES.map(category => {
-            const content = categories[category.id]
-            if (!content) return null
+        {/* Continue Watching Section */}
+        {extensionId && (
+          <ContinueWatchingSection extensionId={extensionId} />
+        )}
 
-            return (
-              <MediaCarousel
-                key={category.id}
-                title={category.title}
-                items={content.items}
-                loading={content.loading}
-                onItemClick={handleMediaClick}
-              />
-            )
-          })}
+        {/* Continue Reading Section */}
+        {mangaExtensionId && (
+          <ContinueReadingSection extensionId={mangaExtensionId} />
+        )}
+
+        {/* Content Carousels - Progressive Loading */}
+        <div className="space-y-8">
+          {/* Render loaded categories */}
+          {categories.map(category => (
+            <MediaCarousel
+              key={category.id}
+              title={category.title}
+              items={category.items}
+              loading={false}
+              onItemClick={handleMediaClick}
+            />
+          ))}
+
+          {/* Show skeleton loaders for pending categories */}
+          {!streamComplete && pendingCategories.map(id => (
+            <MediaCarousel
+              key={`skeleton-${id}`}
+              title="Loading..."
+              items={[]}
+              loading={true}
+              onItemClick={handleMediaClick}
+            />
+          ))}
         </div>
       </div>
     </div>

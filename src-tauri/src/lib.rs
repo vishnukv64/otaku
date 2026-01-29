@@ -253,6 +253,9 @@ pub fn run() {
       commands::load_extension,
       commands::search_anime,
       commands::discover_anime,
+      commands::stream_discover_anime,
+      commands::get_home_content,
+      commands::stream_home_content,
       commands::get_recommendations,
       commands::get_tags,
       commands::get_anime_details,
@@ -260,6 +263,24 @@ pub fn run() {
       commands::list_extensions,
       commands::proxy_video_request,
       commands::proxy_hls_playlist,
+      // Manga
+      commands::search_manga,
+      commands::get_manga_details,
+      commands::get_chapter_images,
+      commands::discover_manga,
+      commands::stream_discover_manga,
+      commands::get_manga_tags,
+      commands::proxy_image_request,
+      // Chapter Downloads
+      commands::start_chapter_download,
+      commands::get_chapter_download_progress,
+      commands::is_chapter_downloaded,
+      commands::get_downloaded_chapter_images,
+      commands::delete_chapter_download,
+      commands::list_chapter_downloads,
+      commands::get_downloaded_manga,
+      commands::list_all_chapter_downloads,
+      // Episode Downloads
       commands::start_download,
       commands::get_download_progress,
       commands::list_downloads,
@@ -280,6 +301,12 @@ pub fn run() {
       commands::get_latest_watch_progress_for_media,
       commands::get_continue_watching,
       commands::remove_from_continue_watching,
+      // Reading History
+      commands::save_reading_progress,
+      commands::get_reading_progress,
+      commands::get_latest_reading_progress_for_media,
+      commands::get_continue_reading,
+      commands::remove_from_continue_reading_manga,
       // Library
       commands::add_to_library,
       commands::remove_from_library,
@@ -291,6 +318,7 @@ pub fn run() {
       // Media
       commands::save_media_details,
       commands::get_continue_watching_with_details,
+      commands::get_continue_reading_with_details,
       commands::get_downloads_with_media,
       // Data Management
       commands::clear_all_watch_history,
@@ -311,6 +339,9 @@ pub fn run() {
       commands::get_log_file_path,
       commands::start_logs_stream,
       commands::stop_logs_stream,
+      // Cache Management
+      commands::get_cache_stats,
+      commands::clear_api_cache,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

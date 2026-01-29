@@ -1,12 +1,21 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Loader2, AlertCircle, X, ChevronDown, ChevronUp, Filter } from 'lucide-react'
+import { Search, Loader2, AlertCircle, X, Sparkles } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
-import { loadExtension, getRecommendations, discoverAnime, getTags, type Tag } from '@/utils/tauri-commands'
+import {
+  loadExtension,
+  discoverAnime,
+  getContinueWatchingWithDetails,
+  streamDiscoverAnime,
+  onAnimeDiscoverResults,
+  type DiscoverResultsEvent,
+} from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
+import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -22,7 +31,10 @@ const EXTENSION_CODE = ALLANIME_EXTENSION
 
 function AnimeScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
+  const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -30,26 +42,11 @@ function AnimeScreen() {
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [recommendations, setRecommendations] = useState<SearchResult[]>([])
   const [recommendationsLoading, setRecommendationsLoading] = useState(false)
-  const [selectedGenres, setSelectedGenres] = useState<string[]>([])
-  const [availableTags, setAvailableTags] = useState<Tag[]>([])
-  const [_availableStudios, setAvailableStudios] = useState<Tag[]>([])
-  const [tagsLoading, setTagsLoading] = useState(false)
-  const [showAllGenres, setShowAllGenres] = useState(false)
-  const [filterExpanded, setFilterExpanded] = useState(true)
-
-  // Toggle genre selection
-  const toggleGenre = useCallback((genre: string) => {
-    setSelectedGenres(prev =>
-      prev.includes(genre)
-        ? prev.filter(g => g !== genre)
-        : [...prev, genre]
-    )
-  }, [])
-
-  // Clear all genre selections
-  const clearGenres = useCallback(() => {
-    setSelectedGenres([])
-  }, [])
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [hasNextPage, setHasNextPage] = useState(true)
+  const [userWatchingGenres, setUserWatchingGenres] = useState<string[]>([])
+  const [hasWatchHistory, setHasWatchHistory] = useState(false)
 
   // Grid density class mapping (extended for 4K displays)
   const gridClasses = {
@@ -83,76 +80,180 @@ function AnimeScreen() {
     initExtension()
   }, [])
 
-  // Load available tags when extension is ready
+  // Load user's watching genres for personalized recommendations
   useEffect(() => {
-    const loadTags = async () => {
-      if (!extensionId) return
-
-      setTagsLoading(true)
+    const loadUserGenres = async () => {
       try {
-        // Load multiple pages to get more tags
-        const allGenres: Tag[] = []
-        const allStudios: Tag[] = []
+        const continueWatching = await getContinueWatchingWithDetails(20)
+        console.log('[Anime] Continue watching entries:', continueWatching.length)
 
-        for (let page = 1; page <= 3; page++) {
-          const result = await getTags(extensionId, page)
-          allGenres.push(...result.genres)
-          allStudios.push(...result.studios)
-          if (!result.has_next_page) break
+        if (continueWatching.length > 0) {
+          setHasWatchHistory(true)
+
+          // Count genre occurrences from all watching history
+          const genreCounts = new Map<string, number>()
+          continueWatching.forEach(entry => {
+            console.log('[Anime] Entry genres for', entry.media.title, ':', entry.media.genres)
+            if (entry.media.genres) {
+              try {
+                const genres = JSON.parse(entry.media.genres)
+                if (Array.isArray(genres)) {
+                  // Count each genre occurrence (use original case from API)
+                  genres.forEach((g: string) => {
+                    genreCounts.set(g, (genreCounts.get(g) || 0) + 1)
+                  })
+                }
+              } catch {
+                // Genres might be a comma-separated string
+                entry.media.genres.split(',').forEach(g => {
+                  const genre = g.trim()
+                  genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1)
+                })
+              }
+            }
+          })
+
+          // Sort by count (descending) and get top 4 genres
+          const sortedGenres = Array.from(genreCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+            .map(([genre]) => genre)
+
+          console.log('[Anime] Top genres from watch history:', sortedGenres, 'counts:', Object.fromEntries(genreCounts))
+          setUserWatchingGenres(sortedGenres)
         }
-
-        // Deduplicate and sort by count
-        const uniqueGenres = Array.from(new Map(allGenres.map(t => [t.slug, t])).values())
-          .sort((a, b) => b.count - a.count)
-        const uniqueStudios = Array.from(new Map(allStudios.map(t => [t.slug, t])).values())
-          .sort((a, b) => b.count - a.count)
-
-        setAvailableTags(uniqueGenres)
-        setAvailableStudios(uniqueStudios)
       } catch (err) {
-        console.error('Failed to load tags:', err)
-      } finally {
-        setTagsLoading(false)
+        console.error('Failed to load user watching genres:', err)
       }
     }
 
-    loadTags()
-  }, [extensionId])
+    loadUserGenres()
+  }, [])
 
-  // Load recommendations or filtered results when extension is ready or genres change
+  // Track seen IDs to avoid duplicates across SSE events
+  const seenIdsRef = useRef<Set<string>>(new Set())
+
+  // Handle SSE discover results
+  const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
+    // Deduplicate results using ref to track seen IDs
+    const newUniqueResults = event.results.filter(item => {
+      if (seenIdsRef.current.has(item.id)) return false
+      seenIdsRef.current.add(item.id)
+      return true
+    })
+
+    if (newUniqueResults.length > 0) {
+      setRecommendations(prev => [...prev, ...newUniqueResults])
+    }
+
+    // Update pagination state
+    setCurrentPage(event.page)
+    setHasNextPage(event.has_next_page)
+
+    // Mark loading complete when last page is received
+    if (event.is_last) {
+      setRecommendationsLoading(false)
+    }
+  }, [])
+
+  // Load recommendations via SSE (streams 3 pages progressively)
   useEffect(() => {
-    const loadAnime = async () => {
-      if (!extensionId) return
+    if (!extensionId) return
 
-      setRecommendationsLoading(true)
+    // Reset state for new stream
+    setRecommendationsLoading(true)
+    setRecommendations([])
+    seenIdsRef.current.clear()
+    setCurrentPage(1)
+    setHasNextPage(true)
+
+    // Track mounted state to handle async cleanup properly
+    let isMounted = true
+    let unsubscribe: (() => void) | null = null
+
+    const startStreaming = async () => {
       try {
-        let results
-        if (selectedGenres.length > 0) {
-          // Filter by genres using discover endpoint
-          results = await discoverAnime(extensionId, 1, 'score', selectedGenres)
-        } else {
-          // Default recommendations
-          results = await getRecommendations(extensionId)
-        }
-
-        // Deduplicate results by ID to avoid React key warnings
-        const uniqueResults = results.results.reduce((acc, item) => {
-          if (!acc.find(existing => existing.id === item.id)) {
-            acc.push(item)
+        // Set up listener first
+        const unsub = await onAnimeDiscoverResults((event) => {
+          // Only process events if still mounted
+          if (isMounted) {
+            handleDiscoverResults(event)
           }
-          return acc
-        }, [] as SearchResult[])
+        })
 
-        setRecommendations(uniqueResults)
+        // Store unsubscribe if still mounted, otherwise cleanup immediately
+        if (isMounted) {
+          unsubscribe = unsub
+        } else {
+          unsub()
+          return
+        }
+
+        // Start streaming (fetches 3 pages progressively)
+        await streamDiscoverAnime(extensionId, 'score', userWatchingGenres, nsfwFilter, 3)
       } catch (err) {
-        console.error('Failed to load anime:', err)
-      } finally {
-        setRecommendationsLoading(false)
+        console.error('Failed to stream anime:', err)
+        if (isMounted) {
+          setRecommendationsLoading(false)
+        }
       }
     }
 
-    loadAnime()
-  }, [extensionId, selectedGenres])
+    startStreaming()
+
+    return () => {
+      isMounted = false
+      unsubscribe?.()
+    }
+    // Note: handleDiscoverResults is stable (empty deps) and used inside closure, so not needed in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extensionId, userWatchingGenres, nsfwFilter])
+
+  // Load more recommendations when scrolling to bottom
+  // SSE loads pages 1-3 initially, so infinite scroll starts from page 4
+  const loadMoreRecommendations = useCallback(async () => {
+    if (!extensionId || loadingMore || !hasNextPage || searchInput) return
+
+    setLoadingMore(true)
+    try {
+      // Start from page after SSE (which loads pages 1-3)
+      const nextPage = Math.max(currentPage + 1, 4)
+      const results = await discoverAnime(extensionId, nextPage, 'score', userWatchingGenres, nsfwFilter)
+
+      // Deduplicate using the seenIds ref
+      const newResults = results.results.filter(item => {
+        if (seenIdsRef.current.has(item.id)) return false
+        seenIdsRef.current.add(item.id)
+        return true
+      })
+
+      setRecommendations(prev => [...prev, ...newResults])
+      setCurrentPage(nextPage)
+      setHasNextPage(results.has_next_page)
+    } catch (err) {
+      console.error('Failed to load more anime:', err)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userWatchingGenres, nsfwFilter])
+
+  // Intersection observer for infinite scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !loadingMore && !recommendationsLoading) {
+          loadMoreRecommendations()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [hasNextPage, loadingMore, recommendationsLoading, loadMoreRecommendations])
 
   // Debounced instant search - triggers as user types
   useEffect(() => {
@@ -168,12 +269,12 @@ function AnimeScreen() {
 
     // Debounce the search
     const timer = setTimeout(() => {
-      search(extensionId, searchInput, 1)
+      search(extensionId, searchInput, 1, nsfwFilter)
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchInput, extensionId])
+  }, [searchInput, extensionId, nsfwFilter])
 
   // Clear search input
   const handleClearSearch = useCallback(() => {
@@ -258,118 +359,12 @@ function AnimeScreen() {
           )}
         </div>
 
-        {/* Genre Filter - only show when not searching */}
-        {!searchInput && (
-          <div className="mt-6">
-            {/* Filter Header */}
-            <button
-              onClick={() => setFilterExpanded(!filterExpanded)}
-              className="flex items-center gap-2 text-[var(--color-text-secondary)] hover:text-white transition-colors mb-3"
-            >
-              <Filter size={18} />
-              <span className="font-medium">Filters</span>
-              {selectedGenres.length > 0 && (
-                <span className="px-2 py-0.5 bg-[var(--color-accent-primary)] text-white text-xs rounded-full">
-                  {selectedGenres.length}
-                </span>
-              )}
-              {filterExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-            </button>
-
-            {filterExpanded && (
-              <div className="space-y-4">
-                {/* Tags loading state */}
-                {tagsLoading ? (
-                  <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">Loading genres...</span>
-                  </div>
-                ) : (
-                  <>
-                    {/* Genre chips */}
-                    <div className="flex flex-wrap gap-2">
-                      {/* All button to clear filters */}
-                      <button
-                        onClick={clearGenres}
-                        className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                          selectedGenres.length === 0
-                            ? 'bg-[var(--color-accent-primary)] text-white'
-                            : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
-                        }`}
-                      >
-                        All
-                      </button>
-
-                      {/* Dynamic genre chips from API */}
-                      {(showAllGenres ? availableTags : availableTags.slice(0, 20)).map((tag) => (
-                        <button
-                          key={tag.slug}
-                          onClick={() => toggleGenre(tag.name)}
-                          className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-2 ${
-                            selectedGenres.includes(tag.name)
-                              ? 'bg-[var(--color-accent-primary)] text-white'
-                              : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
-                          }`}
-                        >
-                          <span>{tag.name}</span>
-                          <span className={`text-xs ${
-                            selectedGenres.includes(tag.name)
-                              ? 'text-white/70'
-                              : 'text-[var(--color-text-muted)]'
-                          }`}>
-                            {tag.count.toLocaleString()}
-                          </span>
-                        </button>
-                      ))}
-
-                      {/* Show more/less button */}
-                      {availableTags.length > 20 && (
-                        <button
-                          onClick={() => setShowAllGenres(!showAllGenres)}
-                          className="px-4 py-2 rounded-full text-sm font-medium bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] hover:text-white transition-colors"
-                        >
-                          {showAllGenres ? 'Show Less' : `+${availableTags.length - 20} More`}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Selected genres summary */}
-                    {selectedGenres.length > 0 && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-[var(--color-text-muted)]">
-                          Filtering by:
-                        </span>
-                        <div className="flex flex-wrap gap-1">
-                          {selectedGenres.map(genre => (
-                            <span
-                              key={genre}
-                              className="px-2 py-1 bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)] rounded text-xs font-medium flex items-center gap-1"
-                            >
-                              {genre}
-                              <button
-                                onClick={() => toggleGenre(genre)}
-                                className="hover:text-white"
-                              >
-                                <X size={12} />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                        <button
-                          onClick={clearGenres}
-                          className="text-[var(--color-text-muted)] hover:text-white text-xs underline"
-                        >
-                          Clear all
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
       </div>
+
+      {/* Continue Watching Section - Below search */}
+      {extensionId && !searchInput && (
+        <ContinueWatchingSection extensionId={extensionId} />
+      )}
 
       {/* Search Results */}
       {searchInput && (
@@ -386,6 +381,7 @@ function AnimeScreen() {
                     key={item.id}
                     media={item}
                     onClick={() => setSelectedMedia(item)}
+                    status={getStatus(item.id)}
                   />
                 ))}
               </div>
@@ -411,61 +407,53 @@ function AnimeScreen() {
         </div>
       )}
 
-      {/* Recommendations / Empty State */}
+      {/* Recommendations / Browse */}
       {!searchInput && (
         <div>
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            {hasWatchHistory && userWatchingGenres.length > 0 ? (
+              <>
+                <Sparkles className="w-5 h-5 text-[var(--color-accent-primary)]" />
+                Recommended for You
+              </>
+            ) : (
+              'Popular Anime'
+            )}
+          </h2>
+
           {recommendationsLoading ? (
-            <div className="flex flex-col items-center justify-center py-20">
-              <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)] mb-4" />
-              <p className="text-lg text-[var(--color-text-secondary)]">
-                {selectedGenres.length > 0
-                  ? `Finding ${selectedGenres.slice(0, 2).join(' & ')} anime...`
-                  : 'Loading recommendations...'}
-              </p>
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
             </div>
           ) : recommendations.length > 0 ? (
-            <div>
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                <svg className="w-7 h-7 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                {selectedGenres.length > 0
-                  ? `${selectedGenres.slice(0, 3).join(' & ')}${selectedGenres.length > 3 ? ` +${selectedGenres.length - 3}` : ''} Anime`
-                  : 'Recommended Anime'}
-              </h2>
+            <>
               <div className={`grid ${gridClasses}`}>
                 {recommendations.map((item) => (
                   <MediaCard
                     key={item.id}
                     media={item}
                     onClick={() => setSelectedMedia(item)}
+                    status={getStatus(item.id)}
                   />
                 ))}
               </div>
-            </div>
-          ) : selectedGenres.length > 0 ? (
-            <div className="text-center py-20">
-              <div className="text-6xl mb-6">🎭</div>
-              <h2 className="text-2xl font-semibold mb-3">No Results Found</h2>
-              <p className="text-[var(--color-text-secondary)] max-w-md mx-auto">
-                No anime found for the selected genres. Try selecting fewer genres or different combinations.
-              </p>
-              <button
-                onClick={clearGenres}
-                className="mt-6 px-6 py-2 bg-[var(--color-accent-primary)] text-white rounded-lg hover:bg-[var(--color-accent-primary-hover)] transition-colors"
-              >
-                Clear Filters
-              </button>
-            </div>
+
+              {/* Infinite scroll sentinel */}
+              <div ref={loadMoreRef} className="py-8 flex items-center justify-center">
+                {loadingMore && (
+                  <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+                )}
+                {!hasNextPage && recommendations.length > 0 && (
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    You've reached the end
+                  </p>
+                )}
+              </div>
+            </>
           ) : (
-            <div className="text-center py-20">
-              <div className="text-6xl mb-6">🔍</div>
-              <h2 className="text-2xl font-semibold mb-3">Start Searching</h2>
-              <p className="text-[var(--color-text-secondary)] max-w-md mx-auto">
-                Use the search bar above to find anime. Try searching for "Demon Slayer", "Naruto", or any other anime title!
-              </p>
-              <p className="mt-4 text-sm text-[var(--color-text-muted)]">
-                Using: AllAnime (Real Data)
+            <div className="text-center py-12">
+              <p className="text-[var(--color-text-secondary)]">
+                No anime found
               </p>
             </div>
           )}
@@ -478,7 +466,11 @@ function AnimeScreen() {
           media={selectedMedia}
           extensionId={extensionId}
           isOpen={true}
-          onClose={() => setSelectedMedia(null)}
+          onClose={() => {
+            setSelectedMedia(null)
+            // Refresh status to update badges if user changed library/favorite status
+            refreshStatus()
+          }}
           onMediaChange={setSelectedMedia}
         />
       )}

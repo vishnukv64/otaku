@@ -3,21 +3,33 @@
  *
  * Displays anime/manga with cover image, title, and metadata.
  * Features Netflix-style hover scale effect (1.15x).
+ * Supports status badges for library, favorites, and watch/read progress.
  */
 
 import type { SearchResult } from '@/types/extension'
+import type { MediaStatus } from '@/contexts/MediaStatusContext'
+import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
+import { Heart, BookmarkCheck } from 'lucide-react'
 
 interface MediaCardProps {
   media: SearchResult
   onClick?: () => void
+  /** Progress bar for continue watching/reading */
   progress?: {
     current: number
     total: number
     episodeNumber?: number
   }
+  /** Media status from useMediaStatus hook */
+  status?: MediaStatus
 }
 
-export function MediaCard({ media, onClick, progress }: MediaCardProps) {
+export function MediaCard({ media, onClick, progress, status }: MediaCardProps) {
+  // Determine which badges to show
+  const showFavorite = status?.isFavorite
+  const showLibraryStatus = status?.inLibrary && status.libraryStatus && !progress
+  const showInProgress = !progress && (status?.isWatching || status?.isReading)
+
   return (
     <button
       className="group cursor-pointer w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-primary)] rounded-md"
@@ -37,6 +49,37 @@ export function MediaCard({ media, onClick, progress }: MediaCardProps) {
             📺
           </div>
         )}
+
+        {/* Status Badges - Top Right Corner (horizontal layout) */}
+        <div className="absolute top-1.5 right-1.5 flex flex-row items-center gap-1">
+          {/* Currently Watching/Reading Badge */}
+          {showInProgress && (
+            <div
+              className="px-1.5 py-0.5 bg-blue-500/90 text-white text-[10px] font-semibold rounded"
+              title={status?.isWatching ? 'Currently Watching' : 'Currently Reading'}
+            >
+              {status?.isWatching ? 'Watching' : 'Reading'}
+            </div>
+          )}
+
+          {/* In Library Badge (only show if not showing progress) */}
+          {showLibraryStatus && !showInProgress && (
+            <div
+              className={`px-1.5 py-0.5 ${getStatusColor(status.libraryStatus!)} text-white text-[10px] font-semibold rounded flex items-center gap-1`}
+              title={`In Library: ${getShortStatusLabel(status.libraryStatus!)}`}
+            >
+              <BookmarkCheck size={10} />
+              <span className="hidden sm:inline">{getShortStatusLabel(status.libraryStatus!)}</span>
+            </div>
+          )}
+
+          {/* Favorite Badge */}
+          {showFavorite && (
+            <div className="p-1 bg-red-500/90 rounded" title="Favorite">
+              <Heart size={12} className="text-white fill-white" />
+            </div>
+          )}
+        </div>
 
         {/* Progress Bar */}
         {progress && (

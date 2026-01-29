@@ -1,6 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Search, Settings, Menu, X, Download } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Search, Settings, Menu, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
 import { ToastContainer } from '@/components/ui/Toast'
 import { DownloadManager } from '@/components/player/DownloadManager'
@@ -25,6 +25,66 @@ export function TopNav({ onSearchClick }: TopNavProps) {
   const currentPath = routerState.location.pathname
   const { activeCount, toasts } = useDownloadStatus()
 
+  // Navigation state - track history position for back/forward buttons
+  const [navState, setNavState] = useState(() => {
+    // Initialize from history.state on mount
+    const currentIndex = window.history.state?.historyIndex ?? 0
+    const maxIndex = window.history.state?.maxHistoryIndex ?? 0
+    if (window.history.state?.historyIndex === undefined) {
+      window.history.replaceState({ ...window.history.state, historyIndex: 0, maxHistoryIndex: 0 }, '')
+    }
+    return { historyIndex: currentIndex, maxHistoryIndex: maxIndex }
+  })
+
+  // Derive canGoBack/canGoForward from state
+  const canGoBack = navState.historyIndex > 0
+  const canGoForward = navState.historyIndex < navState.maxHistoryIndex
+
+  // Handle back navigation
+  const handleBack = useCallback(() => {
+    window.history.back()
+  }, [])
+
+  // Handle forward navigation
+  const handleForward = useCallback(() => {
+    window.history.forward()
+  }, [])
+
+  // Listen for history changes (popstate + custom event for new navigations)
+  useEffect(() => {
+    const updateNavState = () => {
+      const index = window.history.state?.historyIndex ?? 0
+      const max = window.history.state?.maxHistoryIndex ?? index
+      setNavState({ historyIndex: index, maxHistoryIndex: max })
+    }
+
+    window.addEventListener('popstate', updateNavState)
+    window.addEventListener('historyupdate', updateNavState)
+
+    return () => {
+      window.removeEventListener('popstate', updateNavState)
+      window.removeEventListener('historyupdate', updateNavState)
+    }
+  }, [])
+
+  // Update history.state on route changes and dispatch event to trigger state update
+  useEffect(() => {
+    const currentStateIndex = window.history.state?.historyIndex
+
+    if (currentStateIndex === undefined) {
+      // New navigation (not back/forward) - increment index
+      const currentMax = window.history.state?.maxHistoryIndex ?? 0
+      const newIndex = currentMax + 1
+      window.history.replaceState({
+        ...window.history.state,
+        historyIndex: newIndex,
+        maxHistoryIndex: newIndex
+      }, '')
+      // Dispatch custom event to trigger state update (setState happens in event handler)
+      window.dispatchEvent(new Event('historyupdate'))
+    }
+  }, [currentPath])
+
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 0)
@@ -42,8 +102,8 @@ export function TopNav({ onSearchClick }: TopNavProps) {
     >
       <div className="max-w-4k mx-auto px-4 sm:px-6 lg:px-8 3xl:px-12">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <div className="flex items-center gap-8">
+          {/* Logo & Navigation Buttons */}
+          <div className="flex items-center gap-6">
             <Link
               to="/"
               className="flex items-center gap-2 hover:opacity-80 transition-opacity"
@@ -58,6 +118,36 @@ export function TopNav({ onSearchClick }: TopNavProps) {
                 OTAKU
               </span>
             </Link>
+
+            {/* Back/Forward Buttons */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleBack}
+                disabled={!canGoBack}
+                className={`p-1.5 rounded-md transition-colors ${
+                  canGoBack
+                    ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+                    : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
+                }`}
+                aria-label="Go back"
+                title="Go back"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={handleForward}
+                disabled={!canGoForward}
+                className={`p-1.5 rounded-md transition-colors ${
+                  canGoForward
+                    ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+                    : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
+                }`}
+                aria-label="Go forward"
+                title="Go forward"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
 
             {/* Desktop Navigation Links */}
             <div className="hidden md:flex items-center gap-6">

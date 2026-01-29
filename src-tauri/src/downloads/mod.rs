@@ -6,6 +6,9 @@
 // - Pause/resume/cancel operations
 // - Concurrent downloads (max 3)
 // - File integrity verification
+// - Chapter downloads for manga
+
+pub mod chapter_downloads;
 
 use std::path::PathBuf;
 use std::sync::Arc;

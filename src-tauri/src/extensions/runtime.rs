@@ -6,9 +6,10 @@
 // - Safe HTTP fetch wrapper with domain validation
 
 use super::extension::Extension;
-use super::types::{ExtensionMetadata, MediaDetails, SearchResults, TagsResult, VideoSources};
+use super::types::{ChapterImages, ExtensionMetadata, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, TagsResult, VideoSources};
 use anyhow::{anyhow, Result};
 use rquickjs::{Context, Runtime};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Extension runtime for executing JavaScript code safely
@@ -22,6 +23,11 @@ pub struct ExtensionRuntime {
 impl ExtensionRuntime {
     /// Create a new runtime for an extension
     pub fn new(extension: Extension) -> Result<Self> {
+        Self::with_options(extension, false)
+    }
+
+    /// Create a new runtime with options
+    pub fn with_options(extension: Extension, allow_adult: bool) -> Result<Self> {
         let runtime = Runtime::new()?;
         let context = Context::full(&runtime)?;
 
@@ -31,18 +37,22 @@ impl ExtensionRuntime {
             context,
         };
 
-        // Initialize the sandbox
-        ext_runtime.setup_sandbox()?;
+        // Initialize the sandbox with options
+        ext_runtime.setup_sandbox_with_options(allow_adult)?;
 
         Ok(ext_runtime)
     }
 
-    /// Set up the sandboxed environment
-    fn setup_sandbox(&self) -> Result<()> {
+    /// Set up the sandboxed environment with options
+    fn setup_sandbox_with_options(&self, allow_adult: bool) -> Result<()> {
         self.context.with(|ctx| {
-            // Remove dangerous globals
-            ctx.eval::<(), _>(
+            // Inject the allowAdult setting as a global variable
+            let allow_adult_js = if allow_adult { "true" } else { "false" };
+            ctx.eval::<(), _>(format!(
                 r#"
+                // Inject NSFW/adult content setting
+                globalThis.__allowAdult = {};
+
                 // Remove Node.js globals
                 delete globalThis.require;
                 delete globalThis.process;
@@ -56,16 +66,16 @@ impl ExtensionRuntime {
                 delete globalThis.Function;
 
                 // Add safe console for debugging
-                globalThis.console = {
-                    log: function(...args) {
+                globalThis.console = {{
+                    log: function(...args) {{
                         // Messages will be captured by Rust
                         __log(JSON.stringify(args));
-                    },
-                    error: function(...args) {
+                    }},
+                    error: function(...args) {{
                         __log("ERROR: " + JSON.stringify(args));
-                    }
-                };
-            "#,
+                    }}
+                }};
+            "#, allow_adult_js).as_str(),
             )?;
 
             // Register __fetch as a Rust function using ureq (pure sync, no tokio)
@@ -296,6 +306,148 @@ impl ExtensionRuntime {
     #[allow(dead_code)]
     pub fn metadata(&self) -> &ExtensionMetadata {
         &self.extension.metadata
+    }
+
+    // ==================== Home Content Methods ====================
+
+    /// Fetch bulk content and categorize it for the home page
+    /// This makes a single API call and sorts/filters in Rust
+    pub fn get_home_content(&self, pages: u32) -> Result<HomeContent> {
+        // Fetch multiple pages to get a larger pool of anime
+        let mut all_results: Vec<SearchResult> = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
+
+        // Fetch trending/popular content (multiple pages)
+        for page in 1..=pages {
+            if let Ok(results) = self.discover(page, Some("view".to_string()), vec![]) {
+                for item in results.results {
+                    if !seen_ids.contains(&item.id) {
+                        seen_ids.insert(item.id.clone());
+                        all_results.push(item);
+                    }
+                }
+            }
+        }
+
+        log::info!("Fetched {} unique anime for home content", all_results.len());
+
+        // Log sample ratings to debug
+        for (i, item) in all_results.iter().take(5).enumerate() {
+            log::info!("Item {}: {} - rating: {:?}", i, item.title, item.rating);
+        }
+
+        // Create categories from the pool
+        let mut categories = Vec::new();
+
+        // 1. Trending Now - first 20 items (already sorted by popularity/views from API)
+        let trending: Vec<SearchResult> = all_results.iter().take(20).cloned().collect();
+        log::info!("Trending category has {} items", trending.len());
+        if !trending.is_empty() {
+            categories.push(HomeCategory {
+                id: "trending".to_string(),
+                title: "Trending Now".to_string(),
+                items: trending,
+            });
+        }
+
+        // 2. Top Rated - sort by rating and take top 20
+        let mut by_rating = all_results.clone();
+        by_rating.sort_by(|a, b| {
+            let rating_a = a.rating.unwrap_or(0.0);
+            let rating_b = b.rating.unwrap_or(0.0);
+            rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let top_rated: Vec<SearchResult> = by_rating.into_iter().take(20).collect();
+        log::info!("Top Rated category has {} items, first item rating: {:?}",
+            top_rated.len(),
+            top_rated.first().map(|r| r.rating));
+        if !top_rated.is_empty() {
+            categories.push(HomeCategory {
+                id: "top-rated".to_string(),
+                title: "Top Rated".to_string(),
+                items: top_rated,
+            });
+        }
+
+        // 3. Recently Updated - use items from later pages (more recent)
+        let recently_updated: Vec<SearchResult> = all_results.iter()
+            .skip(20) // Skip the trending ones
+            .take(20)
+            .cloned()
+            .collect();
+        if !recently_updated.is_empty() {
+            categories.push(HomeCategory {
+                id: "recently-updated".to_string(),
+                title: "Recently Updated".to_string(),
+                items: recently_updated,
+            });
+        }
+
+        // Featured anime - highest rated from the pool
+        let featured = all_results.iter()
+            .max_by(|a, b| {
+                let rating_a = a.rating.unwrap_or(0.0);
+                let rating_b = b.rating.unwrap_or(0.0);
+                rating_a.partial_cmp(&rating_b).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned();
+
+        log::info!("Returning {} categories, featured: {:?}",
+            categories.len(),
+            featured.as_ref().map(|f| &f.title));
+
+        Ok(HomeContent {
+            featured,
+            categories,
+        })
+    }
+
+    // ==================== Manga Methods ====================
+
+    /// Call extension's getDetails method and return as MangaDetails
+    pub fn get_manga_details(&self, id: &str) -> Result<MangaDetails> {
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+            let fn_obj: rquickjs::Function = ext_obj.get("getDetails")?;
+            let result: rquickjs::Value = fn_obj.call((id,))?;
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify manga details"))?
+                .to_string()?;
+
+            let details: MangaDetails = serde_json::from_str(&json_str)?;
+
+            Ok(details)
+        })
+    }
+
+    /// Call extension's getChapterImages method
+    pub fn get_chapter_images(&self, chapter_id: &str) -> Result<ChapterImages> {
+        self.context.with(|ctx| {
+            let ext_obj: rquickjs::Object = ctx.eval("extensionObject")?;
+
+            // Check if getChapterImages method exists
+            let chapter_images_fn: Option<rquickjs::Function> = ext_obj.get("getChapterImages").ok();
+
+            let result: rquickjs::Value = if let Some(fn_obj) = chapter_images_fn {
+                fn_obj.call((chapter_id,))?
+            } else {
+                // Return empty result if method doesn't exist
+                return Ok(ChapterImages {
+                    images: vec![],
+                    total_pages: 0,
+                    title: None,
+                });
+            };
+
+            let json_str: String = ctx.json_stringify(result)?
+                .ok_or_else(|| anyhow!("Failed to stringify chapter images"))?
+                .to_string()?;
+
+            let chapter_images: ChapterImages = serde_json::from_str(&json_str)?;
+
+            Ok(chapter_images)
+        })
     }
 }
 

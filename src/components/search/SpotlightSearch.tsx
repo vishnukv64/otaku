@@ -3,17 +3,26 @@
  *
  * A macOS Spotlight-style search modal that can be triggered with Cmd+K
  * from anywhere in the app. Features:
+ * - Global search for both anime AND manga
  * - Instant search with debouncing
  * - Keyboard navigation
  * - Click or Enter to select results
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Loader2, X, Star, Play, ChevronRight } from 'lucide-react'
-import { loadExtension, searchAnime } from '@/utils/tauri-commands'
+import { Search, Loader2, X, Star, ChevronRight, Tv, BookOpen } from 'lucide-react'
+import { loadExtension, searchAnime, searchManga } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
+import { MangaDetailModal } from '@/components/media/MangaDetailModal'
+import { useSettingsStore } from '@/store/settingsStore'
 import type { SearchResult } from '@/types/extension'
+
+// Extended result with media type
+interface GlobalSearchResult extends SearchResult {
+  mediaType: 'anime' | 'manga'
+}
 
 interface SpotlightSearchProps {
   isOpen: boolean
@@ -21,46 +30,68 @@ interface SpotlightSearchProps {
 }
 
 export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
+  const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[]>([])
+  const [results, setResults] = useState<GlobalSearchResult[]>([])
   const [loading, setLoading] = useState(false)
-  const [extensionId, setExtensionId] = useState<string | null>(null)
+  const [animeExtensionId, setAnimeExtensionId] = useState<string | null>(null)
+  const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
+  const [selectedMedia, setSelectedMedia] = useState<GlobalSearchResult | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
 
-  // Load extension on mount
+  // Load both extensions on mount
   useEffect(() => {
-    const initExtension = async () => {
+    const initExtensions = async () => {
       try {
-        const metadata = await loadExtension(ALLANIME_EXTENSION)
-        setExtensionId(metadata.id)
+        const [animeMetadata, mangaMetadata] = await Promise.all([
+          loadExtension(ALLANIME_EXTENSION),
+          loadExtension(ALLANIME_MANGA_EXTENSION)
+        ])
+        setAnimeExtensionId(animeMetadata.id)
+        setMangaExtensionId(mangaMetadata.id)
       } catch (err) {
-        console.error('Failed to load extension:', err)
+        console.error('Failed to load extensions:', err)
       }
     }
-    initExtension()
+    initExtensions()
   }, [])
 
-  // Focus input when modal opens
+  // Focus input when modal opens and handle global Escape key
   useEffect(() => {
     if (isOpen) {
       // Small delay to ensure modal is rendered
       setTimeout(() => {
         inputRef.current?.focus()
       }, 50)
+
+      // Global Escape key handler to prevent fullscreen exit
+      const handleGlobalKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          e.stopPropagation()
+          onClose()
+        }
+      }
+
+      // Use capture phase to intercept before browser handles it
+      document.addEventListener('keydown', handleGlobalKeyDown, true)
+
+      return () => {
+        document.removeEventListener('keydown', handleGlobalKeyDown, true)
+      }
     } else {
       // Reset state when closing
       setQuery('')
       setResults([])
       setSelectedIndex(0)
     }
-  }, [isOpen])
+  }, [isOpen, onClose])
 
-  // Debounced search
+  // Debounced global search (anime + manga)
   useEffect(() => {
-    if (!query.trim() || !extensionId) {
+    if (!query.trim() || !animeExtensionId || !mangaExtensionId) {
       setResults([])
       setLoading(false)
       return
@@ -69,9 +100,32 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     setLoading(true)
     const timer = setTimeout(async () => {
       try {
-        const searchResults = await searchAnime(extensionId, query, 1)
-        // Limit to 8 results for the spotlight
-        setResults(searchResults.results.slice(0, 8))
+        // Search both anime and manga in parallel
+        const [animeResults, mangaResults] = await Promise.all([
+          searchAnime(animeExtensionId, query, 1, nsfwFilter),
+          searchManga(mangaExtensionId, query, 1, nsfwFilter)
+        ])
+
+        // Tag results with their media type
+        const taggedAnime: GlobalSearchResult[] = animeResults.results.slice(0, 5).map(r => ({
+          ...r,
+          mediaType: 'anime' as const
+        }))
+        const taggedManga: GlobalSearchResult[] = mangaResults.results.slice(0, 5).map(r => ({
+          ...r,
+          mediaType: 'manga' as const
+        }))
+
+        // Interleave results (anime, manga, anime, manga...) for variety
+        const combined: GlobalSearchResult[] = []
+        const maxLen = Math.max(taggedAnime.length, taggedManga.length)
+        for (let i = 0; i < maxLen; i++) {
+          if (i < taggedAnime.length) combined.push(taggedAnime[i])
+          if (i < taggedManga.length) combined.push(taggedManga[i])
+        }
+
+        // Limit to 10 results total
+        setResults(combined.slice(0, 10))
         setSelectedIndex(0)
       } catch (err) {
         console.error('Search failed:', err)
@@ -82,9 +136,9 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [query, extensionId])
+  }, [query, animeExtensionId, mangaExtensionId, nsfwFilter])
 
-  const handleSelectResult = (result: SearchResult) => {
+  const handleSelectResult = (result: GlobalSearchResult) => {
     setSelectedMedia(result)
     // Close spotlight immediately when selecting a result
     onClose()
@@ -156,7 +210,7 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Search anime..."
+                  placeholder="Search anime & manga..."
                   className="w-full pl-12 pr-12 py-4 bg-transparent text-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
                   autoComplete="off"
                   autoCorrect="off"
@@ -189,7 +243,7 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
                     <div className="py-2">
                       {results.map((result, index) => (
                         <button
-                          key={result.id}
+                          key={`${result.mediaType}-${result.id}`}
                           onClick={() => handleSelectResult(result)}
                           onMouseEnter={() => setSelectedIndex(index)}
                           className={`w-full flex items-center gap-4 px-4 py-3 text-left transition-colors ${
@@ -199,17 +253,31 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
                           }`}
                         >
                           {/* Thumbnail */}
-                          {result.cover_url ? (
-                            <img
-                              src={result.cover_url}
-                              alt={result.title}
-                              className="w-12 h-16 object-cover rounded-md flex-shrink-0"
-                            />
-                          ) : (
-                            <div className="w-12 h-16 bg-[var(--color-bg-hover)] rounded-md flex items-center justify-center flex-shrink-0">
-                              <Play size={20} className="text-[var(--color-text-muted)]" />
-                            </div>
-                          )}
+                          <div className="relative flex-shrink-0">
+                            {result.cover_url ? (
+                              <img
+                                src={result.cover_url}
+                                alt={result.title}
+                                className="w-12 h-16 object-cover rounded-md"
+                              />
+                            ) : (
+                              <div className="w-12 h-16 bg-[var(--color-bg-hover)] rounded-md flex items-center justify-center">
+                                {result.mediaType === 'anime' ? (
+                                  <Tv size={20} className="text-[var(--color-text-muted)]" />
+                                ) : (
+                                  <BookOpen size={20} className="text-[var(--color-text-muted)]" />
+                                )}
+                              </div>
+                            )}
+                            {/* Media type badge */}
+                            <span className={`absolute -top-1 -right-1 px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                              result.mediaType === 'anime'
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-purple-500 text-white'
+                            }`}>
+                              {result.mediaType === 'anime' ? 'A' : 'M'}
+                            </span>
+                          </div>
 
                           {/* Info */}
                           <div className="flex-1 min-w-0">
@@ -217,6 +285,12 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
                               {result.title}
                             </h3>
                             <div className="flex items-center gap-3 mt-1 text-sm text-[var(--color-text-secondary)]">
+                              <span className={`flex items-center gap-1 ${
+                                result.mediaType === 'anime' ? 'text-blue-400' : 'text-purple-400'
+                              }`}>
+                                {result.mediaType === 'anime' ? <Tv size={12} /> : <BookOpen size={12} />}
+                                {result.mediaType === 'anime' ? 'Anime' : 'Manga'}
+                              </span>
                               {result.year && <span>{result.year}</span>}
                               {result.rating && (
                                 <span className="flex items-center gap-1">
@@ -262,7 +336,7 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
               {/* Empty State / Hint */}
               {!query && (
                 <div className="py-8 text-center text-[var(--color-text-secondary)]">
-                  <p className="text-sm">Start typing to search for anime</p>
+                  <p className="text-sm">Start typing to search anime & manga</p>
                   <div className="mt-3 flex items-center justify-center gap-4 text-xs text-[var(--color-text-muted)]">
                     <span className="flex items-center gap-1">
                       <kbd className="px-1.5 py-0.5 bg-[var(--color-bg-hover)] rounded">↑↓</kbd>
@@ -285,13 +359,22 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
       )}
 
       {/* Media Detail Modal - rendered outside spotlight so it persists after spotlight closes */}
-      {selectedMedia && extensionId && (
+      {selectedMedia && selectedMedia.mediaType === 'anime' && animeExtensionId && (
         <MediaDetailModal
           media={selectedMedia}
-          extensionId={extensionId}
+          extensionId={animeExtensionId}
           isOpen={true}
           onClose={handleCloseMediaModal}
-          onMediaChange={setSelectedMedia}
+          onMediaChange={(media) => setSelectedMedia(media ? { ...media, mediaType: 'anime' } : null)}
+        />
+      )}
+
+      {/* Manga Detail Modal */}
+      {selectedMedia && selectedMedia.mediaType === 'manga' && mangaExtensionId && (
+        <MangaDetailModal
+          manga={selectedMedia}
+          extensionId={mangaExtensionId}
+          onClose={handleCloseMediaModal}
         />
       )}
     </>

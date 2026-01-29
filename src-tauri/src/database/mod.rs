@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use anyhow::{Result, Context};
 
 pub mod watch_history;
+pub mod reading_history;
 pub mod library;
 pub mod media;
 
@@ -85,6 +86,8 @@ impl Database {
             ("004_downloads_table.sql", include_str!("../../migrations/004_downloads_table.sql")),
             ("005_fix_column_rename.sql", include_str!("../../migrations/005_fix_column_rename.sql")),
             ("006_fix_downloads_table.sql", include_str!("../../migrations/006_fix_downloads_table.sql")),
+            ("007_reading_history.sql", include_str!("../../migrations/007_reading_history.sql")),
+            ("008_add_manga_library_statuses.sql", include_str!("../../migrations/008_add_manga_library_statuses.sql")),
         ];
 
         for (name, migration_sql) in migrations {
