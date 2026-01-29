@@ -75,6 +75,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const currentEpisodeRef = useRef<HTMLButtonElement>(null)
 
   // Get settings from stores
   const playerSettings = usePlayerStore((state) => state.settings)
@@ -589,6 +590,19 @@ export function VideoPlayer({
       video.removeEventListener('leavepictureinpicture', handleLeavePiP)
     }
   }, [])
+
+  // Scroll to current episode when episodes dropdown is opened
+  useEffect(() => {
+    if (showEpisodes && currentEpisodeRef.current) {
+      // Small delay to ensure the dropdown is rendered
+      requestAnimationFrame(() => {
+        currentEpisodeRef.current?.scrollIntoView({
+          behavior: 'instant',
+          block: 'center',
+        })
+      })
+    }
+  }, [showEpisodes])
 
   // Control functions - defined before useEffect that uses them
   const togglePlay = () => {
@@ -1170,6 +1184,7 @@ export function VideoPlayer({
                         {episodes.map((episode) => (
                           <button
                             key={episode.id}
+                            ref={currentEpisode === episode.number ? currentEpisodeRef : null}
                             onClick={() => {
                               onEpisodeSelect?.(episode.id)
                               setShowEpisodes(false)
