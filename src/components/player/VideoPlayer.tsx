@@ -837,24 +837,6 @@ export function VideoPlayer({
     return `${m}:${s.toString().padStart(2, '0')}`
   }
 
-  // Handle mouse movement to show controls and reset auto-hide timer
-  const handleMouseMove = () => {
-    setShowControls(true)
-
-    // Only auto-hide in fullscreen mode when playing (not in PiP)
-    if (isFullscreen && isPlaying && !isPiP) {
-      // Clear existing timer
-      if (hideControlsTimerRef.current) {
-        clearTimeout(hideControlsTimerRef.current)
-      }
-
-      // Set new timer to hide controls after 2 seconds
-      hideControlsTimerRef.current = setTimeout(() => {
-        setShowControls(false)
-      }, 2000)
-    }
-  }
-
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
@@ -867,58 +849,69 @@ export function VideoPlayer({
     }
   }, [])
 
-  // Auto-hide controls when entering fullscreen or resuming playback
+  // Auto-hide controls with document-level mouse tracking
+  // Works in both fullscreen and windowed mode for immersive viewing
   useEffect(() => {
-    let showControlsTimeout: ReturnType<typeof setTimeout> | null = null
+    // Clear any existing timer when dependencies change
+    if (hideControlsTimerRef.current) {
+      clearTimeout(hideControlsTimerRef.current)
+      hideControlsTimerRef.current = null
+    }
 
-    if (!isFullscreen || !isPlaying || isPiP) {
-      // Clear timer when exiting fullscreen, pausing, or in PiP mode
+    // In PiP mode - always show controls
+    if (isPiP) {
+      setShowControls(true)
+      return
+    }
+
+    // Not playing - always show controls (so user can see controls when paused)
+    if (!isPlaying) {
+      setShowControls(true)
+      return
+    }
+
+    // Playing (+ not PiP) - enable auto-hide behavior
+    // Show controls initially
+    setShowControls(true)
+
+    // Start the hide timer
+    const startHideTimer = () => {
       if (hideControlsTimerRef.current) {
         clearTimeout(hideControlsTimerRef.current)
-        hideControlsTimerRef.current = null
       }
-      // Defer setState to avoid synchronous setState in effect body
-      showControlsTimeout = setTimeout(() => {
-        setShowControls(true)
-      }, 0)
-    } else {
-      // When entering fullscreen AND playing (not PiP), start auto-hide timer
-      // Defer setState to avoid synchronous setState in effect body
-      showControlsTimeout = setTimeout(() => {
-        setShowControls(true)
-      }, 0)
-
-      // Clear any existing timer
-      if (hideControlsTimerRef.current) {
-        clearTimeout(hideControlsTimerRef.current)
-      }
-
-      // Start 2-second timer to hide controls
       hideControlsTimerRef.current = setTimeout(() => {
         setShowControls(false)
       }, 2000)
     }
 
+    // Document-level mouse move handler
+    const handleDocumentMouseMove = () => {
+      setShowControls(true)
+      startHideTimer()
+    }
+
+    // Add document-level listener to catch mouse movement anywhere
+    document.addEventListener('mousemove', handleDocumentMouseMove)
+
+    // Start the initial hide timer
+    startHideTimer()
+
     return () => {
-      if (showControlsTimeout) {
-        clearTimeout(showControlsTimeout)
+      document.removeEventListener('mousemove', handleDocumentMouseMove)
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current)
+        hideControlsTimerRef.current = null
       }
     }
-  }, [isFullscreen, isPlaying, isPiP])
+  }, [isPlaying, isPiP])
 
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full bg-black group"
       style={{
-        cursor: isFullscreen && !showControls && !isPiP ? 'none' : 'default',
-      }}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={() => {
-        // Only hide on mouse leave if not in fullscreen or PiP
-        if (!isFullscreen && !isPiP) {
-          setShowControls(false)
-        }
+        // Hide cursor when controls are hidden (immersive mode)
+        cursor: !showControls && !isPiP ? 'none' : 'default',
       }}
     >
       {/* Video Element */}

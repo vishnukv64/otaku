@@ -242,7 +242,7 @@ function WatchPage() {
   }
 
   return (
-    <div className="fixed inset-0 bg-black z-50" style={{ paddingTop: '64px' }}>
+    <div className="fixed inset-0 bg-black z-50">
       {/* Player Container */}
       <div className="w-full h-full">
         {/* Video Player */}
