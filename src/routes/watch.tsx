@@ -100,9 +100,27 @@ function WatchPage() {
           // Non-fatal error, continue anyway
         }
 
-        // Set initial episode if not provided
+        // Set initial episode if not provided - find first unwatched episode
         if (!initialEpisodeId && result.episodes.length > 0) {
-          setCurrentEpisodeId(result.episodes[0].id)
+          // Find the first episode that isn't completed
+          let nextEpisode = result.episodes[0]
+
+          for (const episode of result.episodes) {
+            try {
+              const progress = await getWatchProgress(episode.id)
+              if (!progress || !progress.completed) {
+                // Found an unwatched or incomplete episode
+                nextEpisode = episode
+                break
+              }
+            } catch {
+              // If we can't check progress, assume unwatched
+              nextEpisode = episode
+              break
+            }
+          }
+
+          setCurrentEpisodeId(nextEpisode.id)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load anime details')

@@ -62,7 +62,8 @@ const extensionObject = {
           description: manga.description || '',
           year: manga.airedStart?.year || null,
           status: manga.status || 'Unknown',
-          rating: manga.score ? parseFloat(manga.score) : null
+          rating: manga.score ? parseFloat(manga.score) : null,
+          genres: manga.genres || []
         };
       });
 
@@ -132,7 +133,8 @@ const extensionObject = {
             description: manga.description || '',
             year: manga.airedStart?.year || null,
             status: manga.status || 'Unknown',
-            rating: manga.score ? parseFloat(manga.score) : null
+            rating: manga.score ? parseFloat(manga.score) : null,
+            genres: manga.genres || []
           };
         });
 
@@ -198,7 +200,8 @@ const extensionObject = {
           description: manga.description || '',
           year: manga.airedStart?.year || null,
           status: manga.status || 'Unknown',
-          rating: manga.score ? parseFloat(manga.score) : null
+          rating: manga.score ? parseFloat(manga.score) : null,
+          genres: manga.genres || []
         };
       });
 

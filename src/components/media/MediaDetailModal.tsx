@@ -88,8 +88,8 @@ export function MediaDetailModal({
   })
 
   const handleWatch = (episodeId: string) => {
-    // Close modal first, then navigate to watch page
-    onClose()
+    // Navigate directly - don't call onClose() first as it triggers state updates
+    // that can interfere with navigation. The modal will unmount when the route changes.
     navigate({
       to: '/watch',
       search: {
@@ -958,7 +958,10 @@ export function MediaDetailModal({
                             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                               {/* Play button */}
                               <button
-                                onClick={() => handleWatch(episode.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleWatch(episode.id)
+                                }}
                                 className="w-12 h-12 rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center transform hover:scale-110 transition-transform"
                                 title="Play episode"
                               >

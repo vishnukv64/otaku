@@ -865,6 +865,7 @@ export interface ContinueWatchingEntry {
   episode_number: number
   progress_seconds: number
   duration?: number
+  completed: boolean
   last_watched: string
 }
 

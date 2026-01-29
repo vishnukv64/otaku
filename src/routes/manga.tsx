@@ -24,6 +24,7 @@ import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
+import { filterNsfwContent } from '@/utils/nsfw-filter'
 
 // Debounce delay for instant search (ms)
 const SEARCH_DEBOUNCE_MS = 300
@@ -186,8 +187,9 @@ function MangaScreen() {
         }
 
         // Start streaming (fetches 3 pages progressively)
+        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
         console.log('[Manga] Starting SSE streaming with genres:', userReadingGenres)
-        await streamDiscoverManga(extensionId, 'score', userReadingGenres, nsfwFilter, 3)
+        await streamDiscoverManga(extensionId, 'score', userReadingGenres, !nsfwFilter, 3)
       } catch (err) {
         console.error('Failed to stream manga:', err)
         if (isMounted) {
@@ -215,7 +217,7 @@ function MangaScreen() {
     try {
       // Start from page after SSE (which loads pages 1-3)
       const nextPage = Math.max(currentPage + 1, 4)
-      const results = await discoverManga(extensionId, nextPage, 'score', userReadingGenres, nsfwFilter)
+      const results = await discoverManga(extensionId, nextPage, 'score', userReadingGenres, !nsfwFilter)
 
       // Deduplicate using the seenIds ref
       const newResults = results.results.filter(item => {
@@ -262,10 +264,14 @@ function MangaScreen() {
     }
 
     setSearchLoading(true)
+    // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
     const timer = setTimeout(async () => {
       try {
-        const results = await searchManga(extensionId, searchInput, 1, nsfwFilter)
-        setSearchResults(results.results)
+        const results = await searchManga(extensionId, searchInput, 1, !nsfwFilter)
+        // Also filter on frontend in case API doesn't filter properly
+        // Filter NSFW using both genres and title keywords
+        const filtered = filterNsfwContent(results.results, (item) => item.genres, nsfwFilter, (item) => item.title)
+        setSearchResults(filtered)
       } catch (err) {
         console.error('Search failed:', err)
       } finally {

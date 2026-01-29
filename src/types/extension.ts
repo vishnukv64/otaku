@@ -37,6 +37,8 @@ export interface SearchResult {
   available_episodes?: number
   /** Media type: TV, Movie, OVA, ONA, Special */
   media_type?: string
+  /** Genres for NSFW filtering */
+  genres?: string[]
 }
 
 export interface SearchResults {

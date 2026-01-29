@@ -57,3 +57,11 @@ tokio-util = { version = "0.7", features = ["io"] }
 
 # System metrics
 sysinfo = "0.31"
+
+[profile.dev]
+debug = 0              # No debug symbols (saves ~50% space)
+opt-level = 0          # Fast compilation
+incremental = true     # Keep incremental compilation
+
+[profile.dev.package."*"]
+opt-level = 2          # Optimize dependencies (smaller + faster runtime)

@@ -125,11 +125,12 @@ function LibraryScreen() {
             return entry.media.media_type === mediaFilter
           })
 
-          // Filter out NSFW content if filter is enabled
+          // Filter out NSFW content using genres and title keywords
           filtered = filterNsfwContent(
             filtered,
             entry => entry.media.genres,
-            nsfwFilter
+            nsfwFilter,
+            entry => entry.media.title
           )
 
           setLibrary(filtered)
@@ -200,11 +201,12 @@ function LibraryScreen() {
             if (mediaFilter === 'all') return true
             return entry.media.media_type === mediaFilter
           })
-          // Filter out NSFW content if filter is enabled
+          // Filter out NSFW content using genres and title keywords
           filtered = filterNsfwContent(
             filtered,
             entry => entry.media.genres,
-            nsfwFilter
+            nsfwFilter,
+            entry => entry.media.title
           )
           setLibrary(filtered)
         }

@@ -59,6 +59,9 @@ pub struct SearchResult {
     /// Media type: TV, Movie, OVA, ONA, Special
     #[serde(alias = "mediaType")]
     pub media_type: Option<String>,
+    /// Genres for NSFW filtering
+    #[serde(default)]
+    pub genres: Option<Vec<String>>,
 }
 
 /// Paginated search results

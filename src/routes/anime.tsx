@@ -16,12 +16,12 @@ import {
 } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
-import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
+import { filterNsfwContent } from '@/utils/nsfw-filter'
 
 // Debounce delay for instant search (ms)
 const SEARCH_DEBOUNCE_MS = 300
@@ -111,12 +111,16 @@ function AnimeScreen() {
 
   const {
     searchQuery,
-    searchResults,
+    searchResults: rawSearchResults,
     searchLoading,
     searchError,
     search,
     clearSearch,
   } = useMediaStore()
+
+  // Filter NSFW content from search results on the frontend
+  // Filter NSFW content from search results using both genres and title keywords
+  const searchResults = filterNsfwContent(rawSearchResults, (item) => item.genres, nsfwFilter, (item) => item.title)
 
   // Load AllAnime extension on mount
   useEffect(() => {
@@ -251,7 +255,8 @@ function AnimeScreen() {
         }
 
         // Start streaming (fetches 3 pages progressively)
-        await streamCurrentSeasonAnime(extensionId, nsfwFilter, 3)
+        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
+        await streamCurrentSeasonAnime(extensionId, !nsfwFilter, 3)
       } catch (err) {
         console.error('Failed to stream season anime:', err)
         if (isMounted) {
@@ -275,7 +280,7 @@ function AnimeScreen() {
     setFullSeasonLoadingMore(true)
     try {
       const nextPage = fullSeasonPage + 1
-      const result = await getCurrentSeasonAnime(extensionId, nextPage, nsfwFilter)
+      const result = await getCurrentSeasonAnime(extensionId, nextPage, !nsfwFilter)
 
       // Deduplicate
       const newResults = result.results.filter(item => {
@@ -378,7 +383,8 @@ function AnimeScreen() {
         }
 
         // Start streaming (fetches 3 pages progressively)
-        await streamDiscoverAnime(extensionId, 'score', userWatchingGenres, nsfwFilter, 3)
+        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
+        await streamDiscoverAnime(extensionId, 'score', userWatchingGenres, !nsfwFilter, 3)
       } catch (err) {
         console.error('Failed to stream anime:', err)
         if (isMounted) {
@@ -406,7 +412,7 @@ function AnimeScreen() {
     try {
       // Start from page after SSE (which loads pages 1-3)
       const nextPage = Math.max(currentPage + 1, 4)
-      const results = await discoverAnime(extensionId, nextPage, 'score', userWatchingGenres, nsfwFilter)
+      const results = await discoverAnime(extensionId, nextPage, 'score', userWatchingGenres, !nsfwFilter)
 
       // Deduplicate using the seenIds ref
       const newResults = results.results.filter(item => {
@@ -458,8 +464,9 @@ function AnimeScreen() {
     }
 
     // Debounce the search
+    // nsfwFilter=true means "hide adult content", so allowAdult should be false
     const timer = setTimeout(() => {
-      search(extensionId, searchInput, 1, nsfwFilter)
+      search(extensionId, searchInput, 1, !nsfwFilter)
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
@@ -634,11 +641,6 @@ function AnimeScreen() {
           {activeTab === 'browse' ? (
             // ========== BROWSE TAB ==========
             <div>
-              {/* Continue Watching Section */}
-              {extensionId && (
-                <ContinueWatchingSection extensionId={extensionId} />
-              )}
-
               {/* Recommendations / Popular */}
               <div>
                 <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">

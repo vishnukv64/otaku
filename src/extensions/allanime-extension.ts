@@ -101,7 +101,8 @@ const extensionObject = {
             date: latestEpDate.date
           } : null,
           availableEpisodes: show.availableEpisodes?.sub || null,
-          mediaType: show.type || null
+          mediaType: show.type || null,
+          genres: show.genres || []
         };
       });
 
@@ -173,7 +174,8 @@ const extensionObject = {
               date: latestEpDate.date
             } : null,
             availableEpisodes: show.availableEpisodes?.sub || null,
-            mediaType: show.type || null
+            mediaType: show.type || null,
+            genres: show.genres || []
           };
         });
 
@@ -256,7 +258,8 @@ const extensionObject = {
             date: latestEpDate.date
           } : null,
           availableEpisodes: show.availableEpisodes?.sub || null,
-          mediaType: show.type || null
+          mediaType: show.type || null,
+          genres: show.genres || []
         };
       });
 
@@ -358,7 +361,8 @@ const extensionObject = {
             date: latestEpDate.date
           } : null,
           availableEpisodes: show.availableEpisodes?.sub || null,
-          mediaType: show.type || null
+          mediaType: show.type || null,
+          genres: show.genres || []
         };
       });
 
@@ -663,7 +667,8 @@ const extensionObject = {
             date: latestEpDate.date
           } : null,
           availableEpisodes: show.availableEpisodes?.sub || null,
-          mediaType: show.type || null
+          mediaType: show.type || null,
+          genres: show.genres || []
         };
       });
 

@@ -42,6 +42,8 @@ interface MediaCardProps {
     current: number
     total: number
     episodeNumber?: number
+    /** True when this is the next episode to watch (previous was completed) */
+    isNextEpisode?: boolean
   }
   /** Media status from useMediaStatus hook */
   status?: MediaStatus
@@ -116,8 +118,8 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
           )}
         </div>
 
-        {/* Progress Bar */}
-        {progress && (
+        {/* Progress Bar (only for partially watched, not for next episode) */}
+        {progress && !progress.isNextEpisode && progress.total > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60">
             <div
               className="h-full bg-[var(--color-accent-primary)]"
@@ -139,16 +141,20 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
         {/* Continue Watching Badge */}
         {progress && (
           <>
-            <div className="absolute top-2 left-2 px-2 py-1 bg-[var(--color-accent-primary)] text-white text-xs font-semibold rounded">
-              EP {progress.episodeNumber}
+            <div className={`absolute top-2 left-2 px-2 py-1 text-white text-xs font-semibold rounded ${
+              progress.isNextEpisode ? 'bg-green-500' : 'bg-[var(--color-accent-primary)]'
+            }`}>
+              {progress.isNextEpisode ? `Next: EP ${progress.episodeNumber}` : `EP ${progress.episodeNumber}`}
             </div>
-            {/* Resume indicator on hover */}
+            {/* Resume/Play indicator on hover */}
             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/50">
-              <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent-primary)] rounded-lg">
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
+                progress.isNextEpisode ? 'bg-green-500' : 'bg-[var(--color-accent-primary)]'
+              }`}>
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M8 5v14l11-7z" />
                 </svg>
-                <span className="text-sm font-bold">RESUME</span>
+                <span className="text-sm font-bold">{progress.isNextEpisode ? 'PLAY NEXT' : 'RESUME'}</span>
               </div>
             </div>
           </>

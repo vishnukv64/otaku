@@ -41,6 +41,7 @@ pub struct ContinueWatchingEntry {
     pub episode_number: i32,
     pub progress_seconds: f64,
     pub duration: Option<f64>,
+    pub completed: bool,
     pub last_watched: String,
 }
 
@@ -156,13 +157,32 @@ pub async fn get_media(
 }
 
 /// Get continue watching with media details
-/// Excludes anime where the final episode is >= 90% watched
+/// Includes:
+/// - Incomplete episodes (partially watched)
+/// - Completed episodes if there are more episodes to watch
+/// Excludes:
+/// - Anime where the final episode is completed or >= 90% watched
 pub async fn get_continue_watching_with_media(
     pool: &SqlitePool,
     limit: i32,
 ) -> Result<Vec<ContinueWatchingEntry>> {
+    // Use a CTE to get the most recent watch entry per media, then filter
     let entries = sqlx::query(
         r#"
+        WITH latest_watch AS (
+            SELECT
+                w.*,
+                ROW_NUMBER() OVER (PARTITION BY w.media_id ORDER BY w.last_watched DESC) as rn
+            FROM watch_history w
+            WHERE w.progress_seconds > 0
+        ),
+        max_completed AS (
+            SELECT
+                media_id,
+                MAX(CASE WHEN completed = 1 THEN episode_number ELSE 0 END) as max_completed_ep
+            FROM watch_history
+            GROUP BY media_id
+        )
         SELECT DISTINCT
             m.id, m.extension_id, m.title, m.english_name, m.native_name, m.description,
             m.cover_url, m.banner_url, m.trailer_url, m.media_type, m.content_type, m.status,
@@ -170,22 +190,32 @@ pub async fn get_continue_watching_with_media(
             m.season_quarter, m.season_year,
             m.aired_start_year, m.aired_start_month, m.aired_start_date,
             m.genres, m.created_at, m.updated_at,
-            w.episode_id, w.episode_number, w.progress_seconds, w.duration, w.last_watched
-        FROM watch_history w
-        INNER JOIN media m ON w.media_id = m.id
-        WHERE w.completed = 0
-          AND w.progress_seconds > 0
-          -- Exclude if this is the final episode AND progress >= 90%
+            lw.episode_id, lw.episode_number, lw.progress_seconds, lw.duration, lw.completed, lw.last_watched,
+            mc.max_completed_ep
+        FROM latest_watch lw
+        INNER JOIN media m ON lw.media_id = m.id
+        LEFT JOIN max_completed mc ON lw.media_id = mc.media_id
+        WHERE lw.rn = 1
+          AND (
+            -- Case 1: Episode is not completed (partially watched)
+            lw.completed = 0
+            -- Case 2: Episode is completed but there are more episodes to watch
+            OR (
+                lw.completed = 1
+                AND m.episode_count IS NOT NULL
+                AND COALESCE(mc.max_completed_ep, 0) < m.episode_count
+            )
+          )
+          -- Exclude if final episode is 90%+ watched (nearly complete)
           AND NOT (
             m.episode_count IS NOT NULL
-            AND w.episode_number >= m.episode_count
-            AND w.duration IS NOT NULL
-            AND w.duration > 0
-            AND (w.progress_seconds / w.duration) >= 0.9
+            AND lw.episode_number >= m.episode_count
+            AND lw.completed = 0
+            AND lw.duration IS NOT NULL
+            AND lw.duration > 0
+            AND (lw.progress_seconds / lw.duration) >= 0.9
           )
-        GROUP BY w.media_id
-        HAVING MAX(w.last_watched)
-        ORDER BY w.last_watched DESC
+        ORDER BY lw.last_watched DESC
         LIMIT ?
         "#
     )
@@ -230,6 +260,7 @@ pub async fn get_continue_watching_with_media(
             episode_number: row.try_get("episode_number")?,
             progress_seconds: row.try_get("progress_seconds")?,
             duration: row.try_get("duration")?,
+            completed: row.try_get("completed")?,
             last_watched: row.try_get("last_watched")?,
         });
     }

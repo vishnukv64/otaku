@@ -31,11 +31,12 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
     const loadContinueReading = async () => {
       try {
         const results = await getContinueReadingWithDetails(20)
-        // Filter out NSFW content if filter is enabled
+        // Filter out NSFW content using genres and title keywords
         const filtered = filterNsfwContent(
           results,
           entry => entry.media.genres,
-          nsfwFilter
+          nsfwFilter,
+          entry => entry.media.title
         )
         setContinueReading(filtered)
       } catch (error) {

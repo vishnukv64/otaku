@@ -17,6 +17,7 @@ import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { useSettingsStore } from '@/store/settingsStore'
+import { filterNsfwContent } from '@/utils/nsfw-filter'
 import type { SearchResult } from '@/types/extension'
 
 // Extended result with media type
@@ -101,17 +102,23 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     const timer = setTimeout(async () => {
       try {
         // Search both anime and manga in parallel
+        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
         const [animeResults, mangaResults] = await Promise.all([
-          searchAnime(animeExtensionId, query, 1, nsfwFilter),
-          searchManga(mangaExtensionId, query, 1, nsfwFilter)
+          searchAnime(animeExtensionId, query, 1, !nsfwFilter),
+          searchManga(mangaExtensionId, query, 1, !nsfwFilter)
         ])
 
+        // Filter NSFW content on frontend as well
+        // Filter NSFW using both genres and title keywords
+        const filteredAnime = filterNsfwContent(animeResults.results, (item) => item.genres, nsfwFilter, (item) => item.title)
+        const filteredManga = filterNsfwContent(mangaResults.results, (item) => item.genres, nsfwFilter, (item) => item.title)
+
         // Tag results with their media type
-        const taggedAnime: GlobalSearchResult[] = animeResults.results.slice(0, 5).map(r => ({
+        const taggedAnime: GlobalSearchResult[] = filteredAnime.slice(0, 5).map(r => ({
           ...r,
           mediaType: 'anime' as const
         }))
-        const taggedManga: GlobalSearchResult[] = mangaResults.results.slice(0, 5).map(r => ({
+        const taggedManga: GlobalSearchResult[] = filteredManga.slice(0, 5).map(r => ({
           ...r,
           mediaType: 'manga' as const
         }))

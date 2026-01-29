@@ -32,11 +32,12 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     const loadContinueWatching = async () => {
       try {
         const results = await getContinueWatchingWithDetails(20)
-        // Filter out NSFW content if filter is enabled
+        // Filter out NSFW content using genres and title keywords
         const filtered = filterNsfwContent(
           results,
           entry => entry.media.genres,
-          nsfwFilter
+          nsfwFilter,
+          entry => entry.media.title
         )
         setContinueWatching(filtered)
       } catch (error) {
@@ -86,13 +87,21 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   }
 
   const handleContinueWatching = (entry: ContinueWatchingEntry) => {
+    // If episode is completed, don't pass episodeId - let watch route find next unwatched
+    // Otherwise, resume the specific episode
     navigate({
       to: '/watch',
-      search: {
-        extensionId,
-        animeId: entry.media.id,
-        episodeId: entry.episode_id,
-      },
+      search: entry.completed
+        ? {
+            extensionId,
+            animeId: entry.media.id,
+            // Don't pass episodeId - watch route will find next episode
+          }
+        : {
+            extensionId,
+            animeId: entry.media.id,
+            episodeId: entry.episode_id,
+          },
     })
   }
 
@@ -183,11 +192,20 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                 <MediaCard
                   media={media}
                   onClick={() => handleContinueWatching(entry)}
-                  progress={{
-                    current: entry.progress_seconds,
-                    total: entry.duration || 0,
-                    episodeNumber: entry.episode_number,
-                  }}
+                  progress={entry.completed
+                    ? {
+                        // Show next episode info for completed entries
+                        current: 0,
+                        total: 0,
+                        episodeNumber: entry.episode_number + 1,
+                        isNextEpisode: true,
+                      }
+                    : {
+                        current: entry.progress_seconds,
+                        total: entry.duration || 0,
+                        episodeNumber: entry.episode_number,
+                      }
+                  }
                 />
                 {/* Remove button */}
                 <button

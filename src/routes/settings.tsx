@@ -173,47 +173,6 @@ function SettingsScreen() {
           description="Video playback preferences and behavior"
         >
           <SettingRow
-            label="Default Quality"
-            description="Preferred video quality for new episodes"
-          >
-            <SettingDropdown
-              value={playerSettings.preferredQuality}
-              options={[
-                { value: 'Auto', label: 'Auto' },
-                { value: '1080p', label: '1080p' },
-                { value: '720p', label: '720p' },
-                { value: '480p', label: '480p' },
-                { value: '360p', label: '360p' },
-              ]}
-              onChange={(value) =>
-                updatePlayerSettings({ preferredQuality: value })
-              }
-            />
-          </SettingRow>
-
-          <SettingRow
-            label="Default Playback Speed"
-            description="Default video playback speed"
-          >
-            <SettingDropdown
-              value={String(playerSettings.playbackSpeed)}
-              options={[
-                { value: '0.25', label: '0.25x' },
-                { value: '0.5', label: '0.5x' },
-                { value: '0.75', label: '0.75x' },
-                { value: '1', label: '1x (Normal)' },
-                { value: '1.25', label: '1.25x' },
-                { value: '1.5', label: '1.5x' },
-                { value: '1.75', label: '1.75x' },
-                { value: '2', label: '2x' },
-              ]}
-              onChange={(value) =>
-                updatePlayerSettings({ playbackSpeed: parseFloat(value) })
-              }
-            />
-          </SettingRow>
-
-          <SettingRow
             label="Auto-play Next Episode"
             description="Automatically play the next episode when current one finishes"
           >
@@ -269,27 +228,6 @@ function SettingsScreen() {
               value={settings.downloadLocation}
               onChange={(value) =>
                 settings.updateSettings({ downloadLocation: value })
-              }
-            />
-          </SettingRow>
-
-          <SettingRow
-            label="Default Download Quality"
-            description="Preferred quality for episode downloads"
-          >
-            <SettingDropdown
-              value={settings.defaultDownloadQuality}
-              options={[
-                { value: 'auto', label: 'Auto (Best Available)' },
-                { value: '1080p', label: '1080p' },
-                { value: '720p', label: '720p' },
-                { value: '480p', label: '480p' },
-                { value: '360p', label: '360p' },
-              ]}
-              onChange={(value) =>
-                settings.updateSettings({
-                  defaultDownloadQuality: value as 'auto' | '1080p' | '720p' | '480p' | '360p',
-                })
               }
             />
           </SettingRow>
