@@ -60,10 +60,17 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
     // 1. User is tracking/watching
     // 2. Not in progress view
     // 3. Anime is currently airing (not finished)
-    if (!progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)) {
+    const shouldCheck = !progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)
+
+    if (shouldCheck) {
       hasNewEpisode(media).then(setShowNewBadge).catch(() => setShowNewBadge(false))
-    } else {
-      setShowNewBadge(false)
+    }
+
+    // Cleanup: Reset badge when conditions change
+    return () => {
+      if (!shouldCheck) {
+        setShowNewBadge(false)
+      }
     }
   }, [media, media.id, media.latest_episode, media.status, progress, status?.isTracked, status?.isWatching])
 

@@ -142,6 +142,7 @@ export function MediaStatusProvider({ children }: MediaStatusProviderProps) {
  * Hook to access media status from context
  * Must be used within a MediaStatusProvider
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useMediaStatusContext(): MediaStatusContextValue {
   const context = useContext(MediaStatusContext)
   if (!context) {
@@ -153,6 +154,7 @@ export function useMediaStatusContext(): MediaStatusContextValue {
 /**
  * Get a human-readable label for a library status
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getStatusLabel(status: LibraryStatus): string {
   const labels: Record<LibraryStatus, string> = {
     watching: 'Watching',
@@ -169,6 +171,7 @@ export function getStatusLabel(status: LibraryStatus): string {
 /**
  * Get a short label for a library status (for badges)
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getShortStatusLabel(status: LibraryStatus): string {
   const labels: Record<LibraryStatus, string> = {
     watching: 'Watching',
@@ -185,6 +188,7 @@ export function getShortStatusLabel(status: LibraryStatus): string {
 /**
  * Get color class for a library status badge
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getStatusColor(status: LibraryStatus): string {
   const colors: Record<LibraryStatus, string> = {
     watching: 'bg-blue-500',

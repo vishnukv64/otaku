@@ -167,7 +167,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     }
 
     loadDetails()
-  }, [manga, extensionId, nsfwFilter])
+  }, [manga, extensionId, nsfwFilter, getStatus])
 
   // Check which chapters are downloaded
   useEffect(() => {

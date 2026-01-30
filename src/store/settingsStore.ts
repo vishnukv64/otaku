@@ -127,8 +127,7 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'otaku-settings',
       // Don't persist the _dbInitialized flag
       partialize: (state) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { _dbInitialized, ...rest } = state
+        const { _dbInitialized: _, ...rest } = state
         return rest
       },
     }
