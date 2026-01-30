@@ -9,7 +9,7 @@
 import type { SearchResult } from '@/types/extension'
 import type { MediaStatus } from '@/contexts/MediaStatusContext'
 import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
-import { Heart, BookmarkCheck } from 'lucide-react'
+import { Heart, BookmarkCheck, Bell } from 'lucide-react'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -31,7 +31,7 @@ function formatEpisodeDate(epDate: { year: number; month: number; date: number }
 function isAiring(status?: string): boolean {
   if (!status) return false
   const s = status.toLowerCase()
-  return s === 'releasing' || s === 'ongoing' || s === 'airing' || s === 'currently airing'
+  return s === 'releasing' || s === 'ongoing' || s === 'airing' || s === 'currently airing' || s.includes('airing') || s.includes('ongoing') || s.includes('releasing')
 }
 
 interface MediaCardProps {
@@ -54,6 +54,8 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
   const showFavorite = status?.isFavorite
   const showLibraryStatus = status?.inLibrary && status.libraryStatus && !progress
   const showInProgress = !progress && (status?.isWatching || status?.isReading)
+  // Show tracking badge for any tracked media (tracking system already filters for ongoing/releasing)
+  const showTracking = status?.isTracked
 
   // Latest episode badge for airing anime
   const showLatestEpisode = !progress && isAiring(media.status) && media.latest_episode && media.latest_episode_date
@@ -88,12 +90,26 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
             )}
 
             {/* Status Badges - Top Right Corner (horizontal layout) */}
-            <div className="absolute top-1.5 right-1.5 flex flex-row items-center gap-1">
+            <div className="absolute top-1.5 right-1.5 flex flex-row items-center gap-1 pointer-events-auto">
+              {/* Release Tracking Badge */}
+              {showTracking && (
+                <div 
+                  className="p-1 bg-indigo-500/90 rounded" 
+                  title="Tracking for new episodes/chapters"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Bell size={12} className="text-white" />
+                </div>
+              )}
+
               {/* Currently Watching/Reading Badge */}
               {showInProgress && (
                 <div
                   className="px-1.5 py-0.5 bg-blue-500/90 text-white text-[10px] font-semibold rounded"
                   title={status?.isWatching ? 'Currently Watching' : 'Currently Reading'}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   {status?.isWatching ? 'Watching' : 'Reading'}
                 </div>
@@ -104,6 +120,8 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
                 <div
                   className={`px-1.5 py-0.5 ${getStatusColor(status.libraryStatus!)} text-white text-[10px] font-semibold rounded flex items-center gap-1`}
                   title={`In Library: ${getShortStatusLabel(status.libraryStatus!)}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   <BookmarkCheck size={10} />
                   <span className="hidden sm:inline">{getShortStatusLabel(status.libraryStatus!)}</span>
@@ -112,7 +130,12 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
 
               {/* Favorite Badge */}
               {showFavorite && (
-                <div className="p-1 bg-red-500/90 rounded" title="Favorite">
+                <div 
+                  className="p-1 bg-red-500/90 rounded" 
+                  title="Favorite"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Heart size={12} className="text-white fill-white" />
                 </div>
               )}

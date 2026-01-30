@@ -88,7 +88,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
       <h2 className="text-xl font-semibold mb-4">{title}</h2>
 
       {/* Carousel Container */}
-      <div className="relative overflow-visible">
+      <div className="relative" style={{ overflow: 'visible' }}>
         {/* Previous Button - Always visible on hover */}
         <button
           onClick={scrollPrev}
@@ -111,9 +111,17 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
           </div>
         </button>
 
-        {/* Embla Viewport - overflow-x-hidden for carousel, overflow-y-visible for hover scale */}
-        <div className="overflow-x-hidden overflow-y-visible py-4 -my-4" ref={emblaRef}>
-          <div className={`flex ${carouselGapClasses[gridDensity]} px-4 -mx-4`}>
+        {/* Embla Viewport - clip vertical, allow horizontal scroll */}
+        <div 
+          className="overflow-x-hidden"
+          style={{ 
+            overflowY: 'clip',
+            touchAction: 'pan-x',
+            contain: 'layout style'
+          }}
+          ref={emblaRef}
+        >
+          <div className={`flex ${carouselGapClasses[gridDensity]} px-4 -mx-4 py-4`}>
             {items.map((item) => (
               <div
                 key={item.id}

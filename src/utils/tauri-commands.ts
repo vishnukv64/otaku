@@ -1520,6 +1520,15 @@ export async function initializeReleaseTracking(
   })
 }
 
+/**
+ * Get release tracking status for multiple media items
+ * @param mediaIds - Array of media IDs to check
+ * @returns Array of media IDs that are being tracked
+ */
+export async function getReleaseTrackingStatus(mediaIds: string[]): Promise<string[]> {
+  return await invoke('get_release_tracking_status', { mediaIds })
+}
+
 // ============================================================================
 // App Settings
 // ============================================================================

@@ -336,6 +336,17 @@ async fn check_single_media(
 
     // Compare counts
     if current_count > media.last_known_count {
+        // If this is the first time tracking (last_known_count = 0), 
+        // silently initialize without creating a notification
+        if media.last_known_count == 0 {
+            log::info!(
+                "Initializing tracking for {} with {} episodes/chapters (no notification)",
+                media.media_id,
+                current_count
+            );
+            return Ok(None);
+        }
+        
         let new_releases = current_count - media.last_known_count;
         Ok(Some(ReleaseCheckResult {
             media_id: media.media_id.clone(),
@@ -469,7 +480,8 @@ async fn emit_release_notification(
         )
     };
 
-    // Build action route
+    // Build action route - navigate to the watch/read page without a specific episode/chapter
+    // The page will automatically find the next unwatched or resume from progress
     let action_route = if result.media_type == "anime" {
         format!(
             "/watch?extensionId={}&animeId={}",

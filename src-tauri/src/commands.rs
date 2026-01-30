@@ -2787,6 +2787,38 @@ pub async fn initialize_release_tracking(
     .map_err(|e| format!("Failed to initialize tracking: {}", e))
 }
 
+/// Get release tracking status for multiple media items
+#[tauri::command]
+pub async fn get_release_tracking_status(
+    state: State<'_, AppState>,
+    media_ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    if media_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let pool = state.database.pool();
+    
+    // Build placeholders for the IN clause
+    let placeholders = media_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let query = format!(
+        "SELECT media_id FROM release_tracking WHERE media_id IN ({})",
+        placeholders
+    );
+    
+    let mut query_builder = sqlx::query_scalar(&query);
+    for media_id in &media_ids {
+        query_builder = query_builder.bind(media_id);
+    }
+    
+    let tracked: Vec<String> = query_builder
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("Failed to get tracking status: {}", e))?;
+    
+    Ok(tracked)
+}
+
 // ============================================================================
 // App Settings Commands
 // ============================================================================

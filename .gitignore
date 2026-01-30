@@ -56,3 +56,5 @@ out/
 
 # TanStack Router generated files
 src/routeTree.gen.ts
+
+.serena/

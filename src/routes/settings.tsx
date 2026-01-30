@@ -395,21 +395,11 @@ function SettingsScreen() {
             label="Reset Settings"
             description="Restore all settings to default values"
           >
-            <button
+            <DangerButton
               onClick={handleResetSettings}
-              className="
-                bg-[var(--color-surface-subtle)]
-                hover:bg-[var(--color-surface-hover)]
-                text-[var(--color-text-primary)]
-                rounded-lg
-                px-4
-                py-2
-                font-medium
-                transition-colors
-              "
-            >
-              Reset to Defaults
-            </button>
+              label="Reset to Defaults"
+              confirmMessage="This will reset all your settings to their default values. Your data and library will not be affected. Continue?"
+            />
           </SettingRow>
         </SettingSection>
 

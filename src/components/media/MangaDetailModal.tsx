@@ -26,6 +26,7 @@ import {
   Download,
   CheckCircle,
   Trash2,
+  Bell,
 } from 'lucide-react'
 import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -46,12 +47,13 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const maxConcurrentDownloads = useSettingsStore((state) => state.maxConcurrentDownloads)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
-  const { refresh: refreshMediaStatus } = useMediaStatusContext()
+  const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
   const [details, setDetails] = useState<MangaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
+  const [isTracked, setIsTracked] = useState(false)
   const [showAllChapters, setShowAllChapters] = useState(false)
   const [readingProgress, setReadingProgress] = useState<{ chapterId: string; chapterNumber: number; page: number } | null>(null)
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
@@ -129,10 +131,15 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
           // Non-fatal error
         }
 
-        // Check library status
+        // Check library status and media status
         try {
           const inLib = await isInLibrary(result.id)
           setInLibrary(inLib)
+          
+          // Get favorite and tracking status from context
+          const mediaStatus = getStatus(result.id)
+          setIsFavorite(mediaStatus.isFavorite)
+          setIsTracked(mediaStatus.isTracked)
         } catch {
           // Ignore
         }
@@ -622,6 +629,16 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                 >
                   <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
                 </button>
+
+                {/* Release tracking indicator */}
+                {isTracked && (
+                  <div
+                    className="p-3 rounded-lg bg-indigo-500 text-white"
+                    title="Tracking new chapter releases"
+                  >
+                    <Bell className="w-5 h-5" />
+                  </div>
+                )}
               </div>
 
               {/* Genres */}

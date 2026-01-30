@@ -100,23 +100,56 @@ function WatchPage() {
           // Non-fatal error, continue anyway
         }
 
-        // Set initial episode if not provided - find first unwatched episode
+        // Set initial episode if not provided
         if (!initialEpisodeId && result.episodes.length > 0) {
-          // Find the first episode that isn't completed
           let nextEpisode = result.episodes[0]
-
-          for (const episode of result.episodes) {
+          
+          // Strategy: Find the last watched episode and play the next one
+          // If no watch history, default to the latest episode (for new release notifications)
+          let lastWatchedIndex = -1
+          let hasAnyProgress = false
+          
+          // Check all episodes to find the last one with progress
+          for (let i = 0; i < result.episodes.length; i++) {
+            const episode = result.episodes[i]
             try {
               const progress = await getWatchProgress(episode.id)
-              if (!progress || !progress.completed) {
-                // Found an unwatched or incomplete episode
+              if (progress) {
+                hasAnyProgress = true
+                if (progress.completed || progress.current_time > 0) {
+                  lastWatchedIndex = i
+                }
+              }
+            } catch {
+              // Ignore errors
+            }
+          }
+          
+          if (lastWatchedIndex >= 0) {
+            // Found watched episodes - play the next unwatched one
+            const nextIndex = lastWatchedIndex + 1
+            if (nextIndex < result.episodes.length) {
+              nextEpisode = result.episodes[nextIndex]
+            } else {
+              // All episodes watched, default to latest
+              nextEpisode = result.episodes[result.episodes.length - 1]
+            }
+          } else if (!hasAnyProgress) {
+            // No watch history at all - default to latest episode (useful for new release notifications)
+            nextEpisode = result.episodes[result.episodes.length - 1]
+          } else {
+            // Has some progress but none marked as watched/started - find first unwatched
+            for (const episode of result.episodes) {
+              try {
+                const progress = await getWatchProgress(episode.id)
+                if (!progress || !progress.completed) {
+                  nextEpisode = episode
+                  break
+                }
+              } catch {
                 nextEpisode = episode
                 break
               }
-            } catch {
-              // If we can't check progress, assume unwatched
-              nextEpisode = episode
-              break
             }
           }
 

@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
 import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, toggleFavorite, initializeReleaseTracking, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
@@ -66,6 +66,7 @@ export function MediaDetailModal({
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
+  const [isTracked, setIsTracked] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
@@ -475,6 +476,7 @@ export function MediaDetailModal({
         // Get favorite status from context
         const mediaStatus = getStatus(media.id)
         setIsFavorite(mediaStatus.isFavorite)
+        setIsTracked(mediaStatus.isTracked)
       } catch (error) {
         console.error('Failed to check library status:', error)
       }
@@ -841,6 +843,15 @@ export function MediaDetailModal({
                         >
                           <Heart className={`w-6 h-6 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
+                        {/* Release tracking indicator */}
+                        {isTracked && (
+                          <div
+                            className="flex items-center justify-center w-12 h-12 bg-indigo-500 text-white rounded-lg transition-all border border-indigo-400"
+                            title="Tracking new episode releases"
+                          >
+                            <Bell className="w-6 h-6" />
+                          </div>
+                        )}
                         <button
                           className="flex items-center justify-center w-12 h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
                           aria-label="More info"

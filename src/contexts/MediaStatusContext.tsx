@@ -11,6 +11,7 @@ import {
   getLibraryByStatus,
   getContinueWatching,
   getContinueReading,
+  getReleaseTrackingStatus,
   type LibraryEntry,
   type LibraryStatus,
 } from '@/utils/tauri-commands'
@@ -26,6 +27,8 @@ export interface MediaStatus {
   isWatching: boolean
   /** Whether currently reading (has recent read progress) */
   isReading: boolean
+  /** Whether being tracked for new episode/chapter releases */
+  isTracked: boolean
 }
 
 interface MediaStatusContextValue {
@@ -49,11 +52,12 @@ export function MediaStatusProvider({ children }: MediaStatusProviderProps) {
   const [libraryMap, setLibraryMap] = useState<Map<string, LibraryEntry>>(new Map())
   const [watchingSet, setWatchingSet] = useState<Set<string>>(new Set())
   const [readingSet, setReadingSet] = useState<Set<string>>(new Set())
+  const [trackingSet, setTrackingSet] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
     try {
-      // Fetch all data in parallel
+      // Fetch library, watching, and reading data in parallel
       const [libraryEntries, continueWatching, continueReading] = await Promise.all([
         getLibraryByStatus(), // Gets ALL library entries
         getContinueWatching(100), // Get recent watching
@@ -80,6 +84,20 @@ export function MediaStatusProvider({ children }: MediaStatusProviderProps) {
         readSet.add(entry.media_id)
       })
       setReadingSet(readSet)
+
+      // Fetch release tracking status for all library items
+      const mediaIds = Array.from(libMap.keys())
+      if (mediaIds.length > 0) {
+        try {
+          const trackedIds = await getReleaseTrackingStatus(mediaIds)
+          setTrackingSet(new Set(trackedIds))
+        } catch (err) {
+          console.error('Failed to fetch release tracking status:', err)
+          setTrackingSet(new Set())
+        }
+      } else {
+        setTrackingSet(new Set())
+      }
     } catch (error) {
       console.error('Failed to fetch media status:', error)
     } finally {
@@ -102,8 +120,9 @@ export function MediaStatusProvider({ children }: MediaStatusProviderProps) {
       isFavorite: libraryEntry?.favorite ?? false,
       isWatching: watchingSet.has(mediaId),
       isReading: readingSet.has(mediaId),
+      isTracked: trackingSet.has(mediaId),
     }
-  }, [libraryMap, watchingSet, readingSet])
+  }, [libraryMap, watchingSet, readingSet, trackingSet])
 
   const value = useMemo(() => ({
     getStatus,

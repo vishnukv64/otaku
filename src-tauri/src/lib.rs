@@ -393,6 +393,7 @@ pub fn run() {
       commands::check_for_new_releases,
       commands::get_release_check_status,
       commands::initialize_release_tracking,
+      commands::get_release_tracking_status,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
