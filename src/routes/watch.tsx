@@ -116,7 +116,7 @@ function WatchPage() {
               const progress = await getWatchProgress(episode.id)
               if (progress) {
                 hasAnyProgress = true
-                if (progress.completed || progress.current_time > 0) {
+                if (progress.completed || progress.progress_seconds > 0) {
                   lastWatchedIndex = i
                 }
               }

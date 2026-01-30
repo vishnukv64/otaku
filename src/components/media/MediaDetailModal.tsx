@@ -10,13 +10,13 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getLatestWatchProgressForMedia, getWatchProgress, toggleFavorite, initializeReleaseTracking, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
-import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { useMediaStatusContext, getStatusLabel } from '@/contexts/MediaStatusContext'
 import { useSettingsStore } from '@/store/settingsStore'
 import { MediaCard } from './MediaCard'
 
@@ -65,6 +65,7 @@ export function MediaDetailModal({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
+  const [libraryStatus, setLibraryStatus] = useState<LibraryStatus | null>(null)
   const [isFavorite, setIsFavorite] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(false)
@@ -73,8 +74,8 @@ export function MediaDetailModal({
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
   const [relatedAnime, setRelatedAnime] = useState<SearchResult[]>([])
   const [_relatedLoading, setRelatedLoading] = useState(false)
-  const [watchProgress, setWatchProgress] = useState<WatchHistory | null>(null)
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
+  const [showNewBadge, setShowNewBadge] = useState(false)
 
   // Use event-based download tracking instead of polling
   // Note: Toast notifications are handled globally by the notification system (useNotificationEvents)
@@ -334,6 +335,7 @@ export function MediaDetailModal({
     try {
       await addToLibrary(media.id, status)
       setInLibrary(true)
+      setLibraryStatus(status)
       notifySuccess(media.title, `Added to "${statusLabels[status]}" list`)
       // Initialize release tracking for ongoing anime
       if (details && details.episodes.length > 0) {
@@ -358,6 +360,7 @@ export function MediaDetailModal({
     try {
       await removeFromLibrary(media.id)
       setInLibrary(false)
+      setLibraryStatus(null)
       setIsFavorite(false)
       notifySuccess(media.title, 'Removed from your library')
       // Refresh media status context so badges update across the app
@@ -473,10 +476,11 @@ export function MediaDetailModal({
       try {
         const status = await isInLibrary(media.id)
         setInLibrary(status)
-        // Get favorite status from context
+        // Get status details from context
         const mediaStatus = getStatus(media.id)
         setIsFavorite(mediaStatus.isFavorite)
         setIsTracked(mediaStatus.isTracked)
+        setLibraryStatus(mediaStatus.libraryStatus || null)
       } catch (error) {
         console.error('Failed to check library status:', error)
       }
@@ -484,23 +488,6 @@ export function MediaDetailModal({
 
     checkLibrary()
   }, [isOpen, media.id, getStatus])
-
-  // Load watch progress for Resume Watching feature
-  useEffect(() => {
-    if (!isOpen) return
-
-    const loadWatchProgress = async () => {
-      try {
-        const progress = await getLatestWatchProgressForMedia(media.id)
-        setWatchProgress(progress)
-      } catch (error) {
-        console.error('Failed to load watch progress:', error)
-        setWatchProgress(null)
-      }
-    }
-
-    loadWatchProgress()
-  }, [isOpen, media.id])
 
   // Load watch history for all episodes
   useEffect(() => {
@@ -522,6 +509,17 @@ export function MediaDetailModal({
     }
 
     loadEpisodeWatchHistory()
+
+    // Refresh watch history when window regains visibility
+    // (e.g., when user returns from /watch route)
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isOpen && details) {
+        loadEpisodeWatchHistory()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [isOpen, details])
 
   // Load related anime
@@ -547,6 +545,45 @@ export function MediaDetailModal({
 
     loadRelated()
   }, [isOpen, extensionId, media.id, media.title])
+
+  // Check for new episodes using episode watch history
+  useEffect(() => {
+    if (!isOpen || !details) {
+      setShowNewBadge(false)
+      return
+    }
+
+    // Only show NEW badge for currently airing anime (not finished)
+    if (!isAiring(details.status)) {
+      setShowNewBadge(false)
+      return
+    }
+
+    // Only check if user is tracking/watching
+    if (!isTracked && !inLibrary) {
+      setShowNewBadge(false)
+      return
+    }
+
+    // Check if latest episode exists and has not been watched
+    if (media.latest_episode && details.episodes.length > 0) {
+      // Find the latest episode in our episode list
+      const latestEp = details.episodes.find(ep => ep.number === media.latest_episode)
+
+      if (latestEp) {
+        // Check if this episode has been watched
+        const progress = episodeWatchHistory.get(latestEp.id)
+        const hasWatched = progress && (progress.completed || progress.progress_seconds > 0)
+
+        // Show NEW badge only if the latest episode hasn't been watched
+        setShowNewBadge(!hasWatched)
+      } else {
+        setShowNewBadge(false)
+      }
+    } else {
+      setShowNewBadge(false)
+    }
+  }, [isOpen, media, media.latest_episode, details, details?.status, isTracked, inLibrary, episodeWatchHistory])
 
   // Keyboard shortcuts
   useKeyboardShortcut(
@@ -665,8 +702,18 @@ export function MediaDetailModal({
                             </span>
                           </>
                         )}
-                        {/* Latest Episode Badge for airing anime */}
-                        {isAiring(details.status) && media.latest_episode && media.latest_episode_date && (
+                        {/* NEW Episode Badge (takes priority) */}
+                        {showNewBadge && media.latest_episode && (
+                          <>
+                            <span className="text-[var(--color-text-muted)]">•</span>
+                            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-sm font-semibold flex items-center gap-1.5 border border-emerald-500/40">
+                              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+                              NEW EP {media.latest_episode}
+                            </span>
+                          </>
+                        )}
+                        {/* Latest Episode Badge for airing anime (hide if showing NEW) */}
+                        {!showNewBadge && isAiring(details.status) && media.latest_episode && media.latest_episode_date && (
                           <>
                             <span className="text-[var(--color-text-muted)]">•</span>
                             <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-full text-sm font-medium flex items-center gap-1.5">
@@ -734,50 +781,100 @@ export function MediaDetailModal({
                       {/* Action Buttons */}
                       <div className="flex items-center gap-3">
                         {details.episodes.length > 0 && (() => {
-                          // Find episode 1 (the first episode by number, not array position)
-                          const firstEpisode = details.episodes.reduce((min, ep) =>
-                            ep.number < min.number ? ep : min
-                          , details.episodes[0])
+                          // Determine which episode to play and button text
+                          let episodeToPlay = details.episodes[0]
+                          let buttonText = 'Watch Now'
+                          let isNewEpisode = false
 
-                          // Check if we should show Resume or Watch Now
-                          const shouldResume = watchProgress && !watchProgress.completed
+                          // Find the last watched episode
+                          let lastWatchedIndex = -1
+                          let hasPartialProgress = false
+
+                          for (let i = 0; i < details.episodes.length; i++) {
+                            const ep = details.episodes[i]
+                            const progress = episodeWatchHistory.get(ep.id)
+
+                            if (progress) {
+                              if (progress.completed) {
+                                lastWatchedIndex = i
+                              } else if (progress.progress_seconds > 0 && !hasPartialProgress) {
+                                // Found first partially watched episode - prioritize this
+                                episodeToPlay = ep
+                                buttonText = `Resume EP ${ep.number}`
+                                hasPartialProgress = true
+                                break
+                              }
+                            }
+                          }
+
+                          // If no partial progress, determine next episode
+                          if (!hasPartialProgress) {
+                            if (lastWatchedIndex === details.episodes.length - 1) {
+                              // All episodes watched - show latest
+                              episodeToPlay = details.episodes[lastWatchedIndex]
+                              buttonText = `Watch EP ${episodeToPlay.number}`
+                            } else if (lastWatchedIndex >= 0) {
+                              // Continue to next unwatched episode
+                              episodeToPlay = details.episodes[lastWatchedIndex + 1]
+                              buttonText = `Continue EP ${episodeToPlay.number}`
+                              isNewEpisode = showNewBadge // It's a "new" episode if the NEW badge is showing
+                            } else {
+                              // No watch history - start from beginning
+                              episodeToPlay = details.episodes.reduce((min, ep) =>
+                                ep.number < min.number ? ep : min
+                              , details.episodes[0])
+                              buttonText = 'Watch Now'
+                            }
+                          }
 
                           return (
                             <button
-                              onClick={() => {
-                                if (shouldResume) {
-                                  handleWatch(watchProgress.episode_id)
-                                } else {
-                                  handleWatch(firstEpisode.id)
-                                }
-                              }}
-                              className="flex items-center gap-2 px-8 py-3.5 bg-[var(--color-accent-primary)] text-white font-bold rounded-lg hover:bg-[var(--color-accent-primary)]/90 transition-all transform hover:scale-105 shadow-lg shadow-[var(--color-accent-primary)]/50"
+                              onClick={() => handleWatch(episodeToPlay.id)}
+                              className={`flex items-center gap-2 px-8 py-3.5 text-white font-bold rounded-lg transition-all transform hover:scale-105 shadow-lg ${
+                                isNewEpisode
+                                  ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-emerald-500/50'
+                                  : 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 shadow-[var(--color-accent-primary)]/50'
+                              }`}
                             >
+                              {isNewEpisode && <Sparkles size={20} />}
                               <Play size={22} fill="currentColor" />
-                              <span>
-                                {shouldResume
-                                  ? `Resume EP ${watchProgress.episode_number}`
-                                  : 'Watch Now'}
-                              </span>
+                              <span>{buttonText}</span>
                             </button>
                           )
                         })()}
                         {/* Library button with dropdown - key forces re-render to prevent visual artifacts */}
-                        {inLibrary ? (
-                          <button
-                            key="in-library-btn"
-                            onClick={handleRemoveFromLibrary}
-                            disabled={libraryLoading}
-                            className="flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border bg-green-600 text-white border-green-500 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {libraryLoading ? (
-                              <Loader2 size={22} className="animate-spin" />
-                            ) : (
-                              <Check size={22} />
-                            )}
-                            <span>In My List</span>
-                          </button>
-                        ) : (
+                        {inLibrary ? (() => {
+                          // Smart status display: Show "Watching" if user hasn't watched all episodes
+                          let displayStatus = libraryStatus
+
+                          if (details && libraryStatus) {
+                            // Count how many episodes have been watched
+                            const watchedCount = Array.from(episodeWatchHistory.values()).filter(
+                              progress => progress.completed
+                            ).length
+
+                            // If not all episodes are watched, override display to "Watching"
+                            if (watchedCount < details.episodes.length && libraryStatus !== 'dropped') {
+                              displayStatus = 'watching'
+                            }
+                          }
+
+                          return (
+                            <button
+                              key="in-library-btn"
+                              onClick={handleRemoveFromLibrary}
+                              disabled={libraryLoading}
+                              className="flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border bg-green-600 text-white border-green-500 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {libraryLoading ? (
+                                <Loader2 size={22} className="animate-spin" />
+                              ) : (
+                                <Check size={22} />
+                              )}
+                              <span>{displayStatus ? getStatusLabel(displayStatus) : 'In My List'}</span>
+                            </button>
+                          )
+                        })() : (
                           <div key="add-library-btn" className="relative group">
                             <button
                               onClick={() => handleAddToLibrary('plan_to_watch')}

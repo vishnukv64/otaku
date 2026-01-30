@@ -30,7 +30,7 @@ import {
 } from 'lucide-react'
 import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
-import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { useMediaStatusContext, getStatusLabel } from '@/contexts/MediaStatusContext'
 import { useChapterDownloadEvents } from '@/hooks/useChapterDownloadEvents'
 import { hasNsfwGenres } from '@/utils/nsfw-filter'
 import type { SearchResult, MangaDetails, Chapter } from '@/types/extension'
@@ -52,6 +52,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
+  const [libraryStatus, setLibraryStatus] = useState<LibraryStatus | null>(null)
   const [isFavorite, setIsFavorite] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
   const [showAllChapters, setShowAllChapters] = useState(false)
@@ -135,11 +136,12 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         try {
           const inLib = await isInLibrary(result.id)
           setInLibrary(inLib)
-          
+
           // Get favorite and tracking status from context
           const mediaStatus = getStatus(result.id)
           setIsFavorite(mediaStatus.isFavorite)
           setIsTracked(mediaStatus.isTracked)
+          setLibraryStatus(mediaStatus.libraryStatus || null)
         } catch {
           // Ignore
         }
@@ -267,6 +269,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       await ensureMediaSaved()
       await addToLibrary(details.id, status)
       setInLibrary(true)
+      setLibraryStatus(status)
       notifySuccess(details.title, `Added to "${statusLabels[status]}" list`)
       // Initialize release tracking for ongoing manga
       if (details.chapters.length > 0) {
@@ -290,6 +293,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     try {
       await removeFromLibrary(details.id)
       setInLibrary(false)
+      setLibraryStatus(null)
       setIsFavorite(false)
       notifySuccess(details.title, 'Removed from your library')
       // Refresh media status context so badges update across the app
@@ -573,16 +577,31 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                 )}
 
                 {/* Library button - key forces re-render to prevent visual artifacts */}
-                {inLibrary ? (
-                  <button
-                    key="in-library-btn"
-                    onClick={handleRemoveFromLibrary}
-                    className="flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    <Check className="w-5 h-5" />
-                    In Library
-                  </button>
-                ) : (
+                {inLibrary ? (() => {
+                  // Smart status display: Show "Reading" if user hasn't read all chapters
+                  let displayStatus = libraryStatus
+
+                  if (details && libraryStatus && readingProgress) {
+                    // Get the highest chapter number available
+                    const maxChapter = Math.max(...details.chapters.map(ch => ch.number))
+
+                    // If not all chapters are read, override display to "Reading"
+                    if (readingProgress.chapterNumber < maxChapter && libraryStatus !== 'dropped') {
+                      displayStatus = 'reading'
+                    }
+                  }
+
+                  return (
+                    <button
+                      key="in-library-btn"
+                      onClick={handleRemoveFromLibrary}
+                      className="flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      <Check className="w-5 h-5" />
+                      {displayStatus ? getStatusLabel(displayStatus) : 'In Library'}
+                    </button>
+                  )
+                })() : (
                   <div key="add-library-btn" className="relative group">
                     <button
                       onClick={() => handleAddToLibrary('plan_to_read')}

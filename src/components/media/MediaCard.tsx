@@ -6,10 +6,12 @@
  * Supports status badges for library, favorites, and watch/read progress.
  */
 
+import { useState, useEffect } from 'react'
 import type { SearchResult } from '@/types/extension'
 import type { MediaStatus } from '@/contexts/MediaStatusContext'
 import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
 import { Heart, BookmarkCheck, Bell } from 'lucide-react'
+import { hasNewEpisode } from '@/utils/mediaHelpers'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -50,15 +52,37 @@ interface MediaCardProps {
 }
 
 export function MediaCard({ media, onClick, progress, status }: MediaCardProps) {
-  // Determine which badges to show
-  const showFavorite = status?.isFavorite
-  const showLibraryStatus = status?.inLibrary && status.libraryStatus && !progress
-  const showInProgress = !progress && (status?.isWatching || status?.isReading)
-  // Show tracking badge for any tracked media (tracking system already filters for ongoing/releasing)
-  const showTracking = status?.isTracked
+  const [showNewBadge, setShowNewBadge] = useState(false)
 
-  // Latest episode badge for airing anime
-  const showLatestEpisode = !progress && isAiring(media.status) && media.latest_episode && media.latest_episode_date
+  // Check for new episodes
+  useEffect(() => {
+    // Only check if:
+    // 1. User is tracking/watching
+    // 2. Not in progress view
+    // 3. Anime is currently airing (not finished)
+    if (!progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)) {
+      hasNewEpisode(media).then(setShowNewBadge).catch(() => setShowNewBadge(false))
+    } else {
+      setShowNewBadge(false)
+    }
+  }, [media, media.id, media.latest_episode, media.status, progress, status?.isTracked, status?.isWatching])
+
+  // Badge priority system (show only the most relevant badge on the right)
+  // Priority: Favorite > Currently Watching/Reading > Library Status > Tracking
+  let rightBadge: 'favorite' | 'watching' | 'library' | 'tracking' | null = null
+
+  if (status?.isFavorite) {
+    rightBadge = 'favorite'
+  } else if (!progress && (status?.isWatching || status?.isReading)) {
+    rightBadge = 'watching'
+  } else if (!progress && status?.inLibrary && status.libraryStatus) {
+    rightBadge = 'library'
+  } else if (status?.isTracked) {
+    rightBadge = 'tracking'
+  }
+
+  // Latest episode badge for airing anime (hide if showing NEW badge)
+  const showLatestEpisode = !progress && !showNewBadge && isAiring(media.status) && media.latest_episode && media.latest_episode_date
 
   return (
     <div className="relative w-full group/card">
@@ -89,24 +113,22 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
               </div>
             )}
 
-            {/* Status Badges - Top Right Corner (horizontal layout) */}
-            <div className="absolute top-1.5 right-1.5 flex flex-row items-center gap-1 pointer-events-auto">
-              {/* Release Tracking Badge */}
-              {showTracking && (
-                <div 
-                  className="p-1 bg-indigo-500/90 rounded" 
-                  title="Tracking for new episodes/chapters"
+            {/* Status Badge - Top Right Corner (single badge with priority) */}
+            <div className="absolute top-1.5 right-1.5 pointer-events-auto">
+              {rightBadge === 'favorite' && (
+                <div
+                  className="p-1.5 bg-red-500/90 rounded-md shadow-lg"
+                  title="Favorite"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Bell size={12} className="text-white" />
+                  <Heart size={14} className="text-white fill-white" />
                 </div>
               )}
 
-              {/* Currently Watching/Reading Badge */}
-              {showInProgress && (
+              {rightBadge === 'watching' && (
                 <div
-                  className="px-1.5 py-0.5 bg-blue-500/90 text-white text-[10px] font-semibold rounded"
+                  className="px-2 py-1 bg-blue-500/90 text-white text-[10px] font-semibold rounded-md shadow-lg"
                   title={status?.isWatching ? 'Currently Watching' : 'Currently Reading'}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
@@ -115,28 +137,26 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
                 </div>
               )}
 
-              {/* In Library Badge (only show if not showing progress) */}
-              {showLibraryStatus && !showInProgress && (
+              {rightBadge === 'library' && status?.libraryStatus && (
                 <div
-                  className={`px-1.5 py-0.5 ${getStatusColor(status.libraryStatus!)} text-white text-[10px] font-semibold rounded flex items-center gap-1`}
-                  title={`In Library: ${getShortStatusLabel(status.libraryStatus!)}`}
+                  className={`px-2 py-1 ${getStatusColor(status.libraryStatus)} text-white text-[10px] font-semibold rounded-md flex items-center gap-1 shadow-lg`}
+                  title={`In Library: ${getShortStatusLabel(status.libraryStatus)}`}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <BookmarkCheck size={10} />
-                  <span className="hidden sm:inline">{getShortStatusLabel(status.libraryStatus!)}</span>
+                  <span className="hidden sm:inline">{getShortStatusLabel(status.libraryStatus)}</span>
                 </div>
               )}
 
-              {/* Favorite Badge */}
-              {showFavorite && (
-                <div 
-                  className="p-1 bg-red-500/90 rounded" 
-                  title="Favorite"
+              {rightBadge === 'tracking' && (
+                <div
+                  className="p-1.5 bg-indigo-500/90 rounded-md shadow-lg"
+                  title="Tracking for new episodes"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Heart size={12} className="text-white fill-white" />
+                  <Bell size={14} className="text-white" />
                 </div>
               )}
             </div>
@@ -151,10 +171,21 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
               </div>
             )}
 
+            {/* NEW Episode Badge (takes priority over latest episode) */}
+            {showNewBadge && (
+              <div
+                className="absolute top-1.5 left-1.5 px-2 py-1 bg-emerald-500/20 border border-emerald-500/60 text-emerald-300 text-[10px] font-semibold rounded-md backdrop-blur-sm flex items-center gap-1"
+                title={`New Episode ${media.latest_episode} Available!`}
+              >
+                <span className="w-1 h-1 bg-emerald-400 rounded-full" />
+                <span>NEW</span>
+              </div>
+            )}
+
             {/* Latest Episode Badge (for airing anime) */}
             {showLatestEpisode && (
               <div
-                className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-emerald-500/90 text-white text-[10px] font-semibold rounded"
+                className="absolute top-1.5 left-1.5 px-2 py-1 bg-emerald-500/90 text-white text-[10px] font-semibold rounded-md shadow-lg"
                 title={`Latest: Episode ${media.latest_episode}`}
               >
                 EP {media.latest_episode} • {formatEpisodeDate(media.latest_episode_date!)}
