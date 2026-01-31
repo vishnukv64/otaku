@@ -78,6 +78,8 @@ export interface MediaDetails {
     month?: number
     date?: number
   }
+  last_update_end?: string // ISO 8601 timestamp of last episode release
+  broadcast_interval?: number // Interval between episodes in milliseconds
 }
 
 export interface VideoSource {

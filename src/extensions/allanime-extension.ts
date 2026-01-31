@@ -379,10 +379,16 @@ const extensionObject = {
   },
 
   getDetails: (id) => {
-    const episodesQuery = \`query ($showId: String!) { show(_id: $showId) { _id name englishName nativeName thumbnail description status score season type airedStart episodeDuration episodeCount availableEpisodes availableEpisodesDetail genres tags } }\`;
+    // Use persisted query for more complete data
+    const variables = { _id: id };
+    const extensions = {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: "9d7439c90f203e534ca778c4901f9aa2d3ad42c06243ab2c5e6b79612af32028"
+      }
+    };
 
-    const variables = { showId: id };
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(episodesQuery)}\`;
+    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
     try {
       const responseStr = __fetch(url, {
@@ -397,10 +403,21 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const show = data?.data?.show;
 
+      // LOG THE FULL API RESPONSE FOR DEBUGGING
+      console.log('====== FULL API RESPONSE FOR ANIME DETAILS (PERSISTED QUERY) ======');
+      console.log(JSON.stringify(data, null, 2));
+      console.log('====== END API RESPONSE ======');
+
       if (!show) throw new Error('Anime not found');
 
-      const episodeDetail = show.availableEpisodesDetail || {};
-      const subEpisodes = episodeDetail.sub || [];
+      // Parse available episodes - persisted query returns different structure
+      let subEpisodes = [];
+      if (show.availableEpisodesDetail && show.availableEpisodesDetail.sub) {
+        subEpisodes = show.availableEpisodesDetail.sub;
+      } else if (show.availableEpisodes && show.availableEpisodes.sub) {
+        const count = show.availableEpisodes.sub;
+        subEpisodes = Array.from({ length: count }, (_, i) => String(i + 1));
+      }
 
       // Handle thumbnail URL (can be full URL or path)
       let coverUrl = null;
@@ -419,6 +436,15 @@ const extensionObject = {
         thumbnail: coverUrl
       }));
 
+      // Log the specific fields we're interested in
+      console.log('lastUpdateEnd:', show.lastUpdateEnd);
+      console.log('broadcastInterval:', show.broadcastInterval);
+
+      // Parse numeric fields with validation to prevent NaN values
+      const episodeDuration = show.episodeDuration ? parseInt(show.episodeDuration, 10) : null;
+      const episodeCount = show.episodeCount ? parseInt(show.episodeCount, 10) : null;
+      const broadcastInterval = show.broadcastInterval ? parseInt(show.broadcastInterval, 10) : null;
+
       return {
         id: show._id,
         title: show.name,
@@ -436,9 +462,11 @@ const extensionObject = {
           quarter: show.season.quarter || null,
           year: show.season.year || null
         } : null,
-        episode_duration: show.episodeDuration ? parseInt(show.episodeDuration) : null,
-        episode_count: show.episodeCount ? parseInt(show.episodeCount) : null,
-        aired_start: show.airedStart || null
+        episode_duration: (episodeDuration !== null && !isNaN(episodeDuration)) ? episodeDuration : null,
+        episode_count: (episodeCount !== null && !isNaN(episodeCount)) ? episodeCount : null,
+        aired_start: show.airedStart || null,
+        last_update_end: show.lastUpdateEnd || null,
+        broadcast_interval: (broadcastInterval !== null && !isNaN(broadcastInterval)) ? broadcastInterval : null
       };
     } catch (error) {
       console.error('Failed to get details:', error);

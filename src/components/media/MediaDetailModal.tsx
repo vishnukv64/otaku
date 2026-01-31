@@ -19,6 +19,7 @@ import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext, getStatusLabel } from '@/contexts/MediaStatusContext'
 import { useSettingsStore } from '@/store/settingsStore'
 import { MediaCard } from './MediaCard'
+import { NextEpisodeCountdown } from './NextEpisodeCountdown'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -34,6 +35,26 @@ function formatEpisodeDate(epDate: { year: number; month: number; date: number }
   // Format as "Jan 22, 2026"
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${months[epDate.month]} ${epDate.date}, ${epDate.year}`
+}
+
+/** Format ISO timestamp for relative display (e.g., "2 days ago") */
+function formatRelativeTime(isoTimestamp: string): string {
+  const now = new Date()
+  const date = new Date(isoTimestamp)
+  const diffTime = now.getTime() - date.getTime()
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+  const diffHours = Math.floor(diffTime / (1000 * 60 * 60))
+  const diffMinutes = Math.floor(diffTime / (1000 * 60))
+
+  if (diffMinutes < 60) return `${diffMinutes} minutes ago`
+  if (diffHours < 24) return `${diffHours} hours ago`
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7) return `${diffDays} days ago`
+
+  // Format as "Jan 22, 2026"
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
 }
 
 /** Check if anime is currently airing */
@@ -993,7 +1014,7 @@ export function MediaDetailModal({
                     <div className="text-2xl font-bold">{details.year || 'N/A'}</div>
                   </div>
                   {/* Last Aired - show for currently airing anime with episode date */}
-                  {isAiring(details.status) && media.latest_episode_date && (
+                  {isAiring(details.status) && (media.latest_episode_date || details.last_update_end) && (
                     <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
                       <div className="text-[var(--color-text-muted)] text-sm mb-1 flex items-center gap-1">
                         <Radio className="w-3 h-3 text-emerald-400" />
@@ -1003,8 +1024,22 @@ export function MediaDetailModal({
                         EP {media.latest_episode}
                       </div>
                       <div className="text-sm text-[var(--color-text-secondary)]">
-                        {formatEpisodeDate(media.latest_episode_date)}
+                        {details.last_update_end
+                          ? formatRelativeTime(details.last_update_end)
+                          : media.latest_episode_date
+                            ? formatEpisodeDate(media.latest_episode_date)
+                            : 'Recently'}
                       </div>
+                      {/* Next Episode Countdown */}
+                      {details.last_update_end && details.broadcast_interval && (
+                        <div className="mt-4">
+                          <NextEpisodeCountdown
+                            lastUpdateEnd={details.last_update_end}
+                            broadcastInterval={details.broadcast_interval}
+                            status={details.status}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

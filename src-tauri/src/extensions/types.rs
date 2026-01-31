@@ -131,6 +131,12 @@ pub struct MediaDetails {
     pub episode_duration: Option<u64>,
     pub episode_count: Option<u32>,
     pub aired_start: Option<AiredStart>,
+    /// ISO 8601 timestamp of last episode release
+    #[serde(alias = "lastUpdateEnd")]
+    pub last_update_end: Option<String>,
+    /// Interval between episodes in milliseconds
+    #[serde(alias = "broadcastInterval")]
+    pub broadcast_interval: Option<u64>,
 }
 
 /// Video quality
