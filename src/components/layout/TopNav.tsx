@@ -1,6 +1,6 @@
-import { Link, useRouterState } from '@tanstack/react-router'
+import { Link, useRouterState, useRouter } from '@tanstack/react-router'
 import { Search, Settings, Menu, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
 import { DownloadManager } from '@/components/player/DownloadManager'
 import { NotificationCenter } from '@/components/notifications'
@@ -21,69 +21,55 @@ export function TopNav({ onSearchClick }: TopNavProps) {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [downloadManagerOpen, setDownloadManagerOpen] = useState(false)
+  const [canGoBack, setCanGoBack] = useState(false)
+  const [canGoForward, setCanGoForward] = useState(false)
   const routerState = useRouterState()
+  const router = useRouter()
   const currentPath = routerState.location.pathname
   const { activeCount } = useDownloadStatus()
 
-  // Navigation state - track history position for back/forward buttons
-  const [navState, setNavState] = useState(() => {
-    // Initialize from history.state on mount
-    const currentIndex = window.history.state?.historyIndex ?? 0
-    const maxIndex = window.history.state?.maxHistoryIndex ?? 0
-    if (window.history.state?.historyIndex === undefined) {
-      window.history.replaceState({ ...window.history.state, historyIndex: 0, maxHistoryIndex: 0 }, '')
-    }
-    return { historyIndex: currentIndex, maxHistoryIndex: maxIndex }
-  })
+  // Track navigation position using refs
+  const navigationPosition = useRef(0)
+  const maxNavigationPosition = useRef(0)
+  const isBackForwardNavigation = useRef(false)
 
-  // Derive canGoBack/canGoForward from state
-  const canGoBack = navState.historyIndex > 0
-  const canGoForward = navState.historyIndex < navState.maxHistoryIndex
-
-  // Handle back navigation
-  const handleBack = useCallback(() => {
-    window.history.back()
-  }, [])
-
-  // Handle forward navigation
-  const handleForward = useCallback(() => {
-    window.history.forward()
-  }, [])
-
-  // Listen for history changes (popstate + custom event for new navigations)
+  // Track when currentPath changes (captures all navigation)
+  const previousPath = useRef(currentPath)
   useEffect(() => {
-    const updateNavState = () => {
-      const index = window.history.state?.historyIndex ?? 0
-      const max = window.history.state?.maxHistoryIndex ?? index
-      setNavState({ historyIndex: index, maxHistoryIndex: max })
-    }
+    if (previousPath.current !== currentPath) {
+      if (!isBackForwardNavigation.current) {
+        // New forward navigation (Link click, etc.)
+        navigationPosition.current++
+        maxNavigationPosition.current = navigationPosition.current
+      }
+      // Reset the flag
+      isBackForwardNavigation.current = false
 
-    window.addEventListener('popstate', updateNavState)
-    window.addEventListener('historyupdate', updateNavState)
+      // Update button states
+      setCanGoBack(navigationPosition.current > 0)
+      setCanGoForward(navigationPosition.current < maxNavigationPosition.current)
 
-    return () => {
-      window.removeEventListener('popstate', updateNavState)
-      window.removeEventListener('historyupdate', updateNavState)
-    }
-  }, [])
-
-  // Update history.state on route changes and dispatch event to trigger state update
-  useEffect(() => {
-    const currentStateIndex = window.history.state?.historyIndex
-
-    if (currentStateIndex === undefined) {
-      // New navigation (not back/forward) - increment index
-      const currentMax = window.history.state?.maxHistoryIndex ?? 0
-      const newIndex = currentMax + 1
-      window.history.replaceState({
-        ...window.history.state,
-        historyIndex: newIndex,
-        maxHistoryIndex: newIndex
-      }, '')
-      // Dispatch custom event to trigger state update (setState happens in event handler)
-      window.dispatchEvent(new Event('historyupdate'))
+      previousPath.current = currentPath
     }
   }, [currentPath])
+
+  // Handle back navigation using router's built-in method
+  const handleBack = () => {
+    if (navigationPosition.current > 0) {
+      navigationPosition.current--
+      isBackForwardNavigation.current = true
+      router.history.back()
+    }
+  }
+
+  // Handle forward navigation using router's built-in method
+  const handleForward = () => {
+    if (navigationPosition.current < maxNavigationPosition.current) {
+      navigationPosition.current++
+      isBackForwardNavigation.current = true
+      router.history.forward()
+    }
+  }
 
   useEffect(() => {
     const handleScroll = () => {
