@@ -5,6 +5,42 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.13] - 2026-01-31
+
+### Added
+- **NEW Episode Badge** - Notifies when new episodes are available for anime you're tracking
+  - Only shows for currently airing anime (not finished series)
+  - Appears when latest episode hasn't been watched yet
+  - Subtle glass-morphism design with emerald color scheme
+  - Automatically disappears after watching the new episode
+- **Smart Watch Button** - Intelligently determines which episode to play
+  - "Resume EP X" for partially watched episodes
+  - "Continue EP X" for next unwatched episode
+  - "Watch Latest EP X" when all episodes are watched
+  - Special emerald gradient for new episode releases
+- **Smart Library Status Display** - Shows actual progress instead of manual status
+  - Displays "Watching" if you haven't watched all available episodes
+  - Displays "Reading" if you haven't read all available chapters
+  - Shows actual library status only when fully caught up
+  - Works for both anime and manga modals
+
+### Changed
+- **Redesigned Badge System** - Cleaner, priority-based badge layout
+  - Maximum of 2 badges per card (NEW on left, status on right)
+  - Priority order: Favorite > Watching/Reading > Library Status > Tracking
+  - Reduced visual clutter while maintaining all information
+  - Larger badge icons (14px) with better shadows for visibility
+
+### Fixed
+- **TypeScript Error** - Fixed `current_time` property name mismatch in watch.tsx
+- **NEW Badge Persistence** - Badge now disappears after watching new episodes
+  - Added visibility-based refresh to update watch progress
+  - Uses episode watch history for accurate detection
+- **NEW Badge on Finished Anime** - No longer shows on completed series
+  - Only appears for "Releasing", "Ongoing", or "Airing" anime
+  - Properly filters based on anime status
+
+
 ## [0.1.12] - 2026-01-30
 
 ### Added
