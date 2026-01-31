@@ -387,6 +387,7 @@ pub fn run() {
       commands::get_app_setting,
       commands::set_app_setting,
       commands::delete_app_setting,
+      commands::get_youtube_video_url,
       // Release Checker
       commands::get_release_check_settings,
       commands::update_release_check_settings,

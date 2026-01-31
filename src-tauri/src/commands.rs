@@ -2887,3 +2887,68 @@ pub async fn delete_app_setting(
     log::debug!("Deleted app setting: {}", key);
     Ok(())
 }
+
+/// Get YouTube video URL using Invidious API (simple, no authentication needed)
+#[tauri::command]
+pub async fn get_youtube_video_url(
+    video_id: String,
+    video_server: State<'_, VideoServerInfo>
+) -> Result<String, String> {
+    log::info!("[YouTube] Fetching video URL for ID: {}", video_id);
+
+    // Try popular Invidious instances
+    let instances = [
+        "https://invidious.privacyredirect.com",
+        "https://yewtu.be",
+        "https://invidious.fdn.fr",
+    ];
+
+    for instance in instances.iter() {
+        let api_url = format!("{}/api/v1/videos/{}?local=true", instance, video_id);
+        log::debug!("[YouTube] Trying Invidious instance: {}", instance);
+
+        // Make request to Invidious API
+        let response = match ureq::get(&api_url)
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                log::debug!("[YouTube] Instance {} failed: {}", instance, e);
+                continue;
+            }
+        };
+
+        // Parse JSON response
+        let json: serde_json::Value = match response.into_json() {
+            Ok(j) => j,
+            Err(e) => {
+                log::debug!("[YouTube] Failed to parse JSON from {}: {}", instance, e);
+                continue;
+            }
+        };
+
+        // Get the best quality video URL from adaptiveFormats
+        // adaptiveFormats contains separate video/audio streams
+        if let Some(formats) = json["adaptiveFormats"].as_array() {
+            // Find format with both video and audio, prefer highest quality
+            for format in formats.iter() {
+                if let Some(url) = format["url"].as_str() {
+                    // Check if this format has video
+                    let has_video = format["qualityLabel"].as_str().is_some();
+
+                    if has_video {
+                        log::info!("[YouTube] ✓ Got video URL from {}", instance);
+                        // Proxy through our server to add proper headers
+                        let proxied_url = video_server.proxy_url(url);
+                        return Ok(proxied_url);
+                    }
+                }
+            }
+        }
+
+        log::debug!("[YouTube] No suitable format found from {}", instance);
+    }
+
+    Err("All Invidious instances failed".to_string())
+}

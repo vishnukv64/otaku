@@ -403,11 +403,6 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const show = data?.data?.show;
 
-      // LOG THE FULL API RESPONSE FOR DEBUGGING
-      console.log('====== FULL API RESPONSE FOR ANIME DETAILS (PERSISTED QUERY) ======');
-      console.log(JSON.stringify(data, null, 2));
-      console.log('====== END API RESPONSE ======');
-
       if (!show) throw new Error('Anime not found');
 
       // Parse available episodes - persisted query returns different structure
@@ -445,12 +440,27 @@ const extensionObject = {
       const episodeCount = show.episodeCount ? parseInt(show.episodeCount, 10) : null;
       const broadcastInterval = show.broadcastInterval ? parseInt(show.broadcastInterval, 10) : null;
 
+      // Extract all valid YouTube video IDs from prevideos
+      // Store them as comma-separated string so HeroSection can try each one
+      let trailerVideoIds = null;
+      if (show.prevideos && show.prevideos.length > 0) {
+        const validIds = show.prevideos.filter(videoId =>
+          typeof videoId === 'string' &&
+          videoId.length === 11 &&
+          /^[a-zA-Z0-9_-]+$/.test(videoId)
+        );
+        if (validIds.length > 0) {
+          trailerVideoIds = validIds.join(',');
+        }
+      }
+
       return {
         id: show._id,
         title: show.name,
         english_name: show.englishName || null,
         native_name: show.nativeName || null,
         coverUrl: coverUrl,
+        trailer_url: trailerVideoIds,
         description: show.description || 'No description available',
         genres: show.genres || [],
         status: show.status || 'Unknown',

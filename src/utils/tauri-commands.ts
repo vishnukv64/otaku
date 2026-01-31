@@ -1559,3 +1559,12 @@ export async function deleteAppSetting(key: string): Promise<void> {
   return await invoke('delete_app_setting', { key })
 }
 
+/**
+ * Get direct YouTube video URL using yt-dlp
+ * @param videoId - YouTube video ID
+ * @returns Direct video URL that can be played in HTML5 video element
+ */
+export async function getYoutubeVideoUrl(videoId: string): Promise<string> {
+  return await invoke('get_youtube_video_url', { videoId })
+}
+

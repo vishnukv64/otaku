@@ -37,6 +37,7 @@ interface SettingsState {
   defaultVolume: number
   defaultPlaybackSpeed: number
   markWatchedThreshold: number
+  autoplayTrailers: boolean
 
   // Internal state
   _dbInitialized: boolean
@@ -66,6 +67,7 @@ const defaultSettings = {
   defaultVolume: 1.0,
   defaultPlaybackSpeed: 1.0,
   markWatchedThreshold: 90,
+  autoplayTrailers: true,
 
   // Internal
   _dbInitialized: false,

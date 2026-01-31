@@ -193,6 +193,16 @@ function SettingsScreen() {
           </SettingRow>
 
           <SettingRow
+            label="Auto-play Trailers"
+            description="Automatically play trailer videos in homepage hero section"
+          >
+            <SettingToggle
+              value={settings.autoplayTrailers}
+              onChange={(value) => settings.updateSettings({ autoplayTrailers: value })}
+            />
+          </SettingRow>
+
+          <SettingRow
             label="Default Volume"
             description="Starting volume for new videos"
           >
