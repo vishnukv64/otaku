@@ -5,6 +5,33 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] - 2026-01-31
+
+### Added
+- **YouTube Trailer Autoplay** - Homepage hero section now autoplays anime trailers
+  - Direct YouTube iframe embed for maximum compatibility
+  - Plays with sound by default (browser permitting)
+  - Auto-mutes when scrolling down past hero section
+  - Auto-unmutes when scrolling back up to hero
+- **Multi-Trailer Navigation** - Cycle through multiple trailers when available
+  - Left/right arrow buttons to switch between trailer options
+  - Shows current trailer number (e.g., "Trailer 1 of 3")
+  - Gracefully handles unavailable/private/geo-blocked videos
+  - User can manually find working trailer if first one fails
+- **Enhanced Extension Data** - AllAnime extension now returns all available trailer video IDs
+  - Tries multiple trailer sources for better reliability
+  - Returns comma-separated list of video IDs from prevideos array
+
+### Changed
+- Homepage hero section now prioritizes showing trailers over static cover images when available
+- Simplified trailer implementation using native YouTube embeds (removed complex yt-dlp dependencies)
+
+### Technical
+- Removed yt-dlp crate dependency for simpler architecture
+- Removed Invidious API integration attempts
+- Uses standard YouTube iframe embed with URL parameters for control
+- Intersection Observer API for scroll-based mute/unmute
+
 ## [0.1.13] - 2026-01-31
 
 ### Added
