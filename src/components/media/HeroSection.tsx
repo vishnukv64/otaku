@@ -58,12 +58,6 @@ export function HeroSection({
     }
   }
 
-  // Reset when media changes
-  useEffect(() => {
-    setCurrentVideoIndex(0)
-    setHasError(false)
-    setIsMuted(false)
-  }, [media.id])
 
   // Manual trailer navigation
   const handleNextTrailer = () => {
@@ -107,11 +101,6 @@ export function HeroSection({
       observer.disconnect()
     }
   }, [hasTrailer, isMuted])
-
-  // Reset muted state when media changes
-  useEffect(() => {
-    setIsMuted(false)
-  }, [media.id])
 
   return (
     <div ref={heroRef} className="relative w-full aspect-[16/9] mb-8 rounded-lg overflow-hidden group">

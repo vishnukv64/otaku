@@ -92,10 +92,6 @@ export function NextEpisodeCountdown({
   // Only show for releasing/airing anime
   const isAiring = status && ['releasing', 'ongoing', 'airing', 'currently airing'].includes(status.toLowerCase())
 
-  if (!isAiring) {
-    return null
-  }
-
   const lastUpdate = new Date(lastUpdateEnd).getTime()
   const nextReleaseTime = lastUpdate + broadcastInterval
 
@@ -111,6 +107,10 @@ export function NextEpisodeCountdown({
 
     return () => clearInterval(interval)
   }, [nextReleaseTime])
+
+  if (!isAiring) {
+    return null
+  }
 
   // If overdue, show a "Check for updates" message
   if (timeRemaining.isOverdue) {

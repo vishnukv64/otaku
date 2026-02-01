@@ -237,6 +237,7 @@ function HomeScreen() {
         {/* Hero Section */}
         {featuredAnimeWithTrailer ? (
           <HeroSection
+            key={featuredAnimeWithTrailer.id}
             media={featuredAnimeWithTrailer}
             onWatch={handleWatch}
             onMoreInfo={handleMoreInfo}
