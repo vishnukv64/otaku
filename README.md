@@ -161,7 +161,7 @@ A cross-platform desktop application for streaming anime and reading manga, buil
 
 ### Manga Browser
 
-![Manga Browser](screenshots/manga-browser.png)
+![Manga Browser](screenshots/manga-reader.png)
 
 *Browse manga with search, genres, and filtering options.*
 
