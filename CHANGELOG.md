@@ -5,6 +5,25 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.15] - 2026-02-02
+
+### Removed
+- **YouTube Trailer Functionality** - Removed YouTube iframe embeds from hero section
+  - YouTube blocks embeds from `tauri://` protocol origins in production builds (Error 153)
+  - Hero section now always displays cover image instead of trailers
+  - Simplified component from 244 to 126 lines of code
+  - Removed trailer-related state management and effects
+  - Removed auto-mute on scroll functionality
+  - Removed multi-trailer navigation controls
+
+### Fixed
+- **404 Page Navigation** - Fixed "Home" button link from `/home` to `/` to match actual route structure
+
+### Changed
+- Homepage hero section now consistently shows high-quality cover images
+- Removed `autoplayTrailers` setting usage (no longer needed)
+- Simplified auto-rotation logic on home page (10-second intervals)
+
 ## [0.1.14] - 2026-01-31
 
 ### Added
