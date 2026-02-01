@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Loader2, AlertCircle } from 'lucide-react'
-import { loadExtension, discoverAnime, getMediaDetails } from '@/utils/tauri-commands'
+import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { HeroSectionSkeleton } from '@/components/media/HeroSectionSkeleton'
@@ -40,7 +40,6 @@ function HomeScreen() {
   const [error, setError] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
-  const [featuredAnimeWithTrailer, setFeaturedAnimeWithTrailer] = useState<SearchResult | null>(null)
   const [featuredIndex, setFeaturedIndex] = useState(0)
   const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
 
@@ -126,46 +125,10 @@ function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensionId])
 
-  // Fetch trailer for featured anime
-  useEffect(() => {
-    if (!featuredAnime || !extensionId) {
-      return
-    }
-
-    const fetchFeaturedDetails = async () => {
-      try {
-        console.log('[Home] Fetching details for:', featuredAnime.title, 'ID:', featuredAnime.id)
-        const details = await getMediaDetails(extensionId, featuredAnime.id)
-        console.log('[Home] Details received, trailer_url:', details.trailer_url)
-
-        // Merge the trailer_url from details into the featured anime
-        const enriched = {
-          ...featuredAnime,
-          trailer_url: details.trailer_url
-        }
-        console.log('[Home] Enriched anime:', enriched.title, 'trailer_url:', enriched.trailer_url)
-        setFeaturedAnimeWithTrailer(enriched)
-      } catch (err) {
-        console.error('Failed to fetch featured anime details:', err)
-        // Fallback to original featured anime without trailer
-        setFeaturedAnimeWithTrailer(featuredAnime)
-      }
-    }
-
-    fetchFeaturedDetails()
-  }, [featuredAnime, extensionId])
-
-  // Auto-rotate hero section every 10 seconds (only when no trailer is playing)
+  // Auto-rotate hero section every 10 seconds
   useEffect(() => {
     const trendingContent = categories['trending']
     if (!trendingContent || trendingContent.items.length === 0) return
-
-    // Don't auto-rotate if we have a trailer (trailer will control advancement)
-    const hasTrailer = featuredAnimeWithTrailer?.trailer_url
-    if (hasTrailer) {
-      console.log('[Home] Trailer available, disabling timer-based rotation')
-      return
-    }
 
     const interval = setInterval(() => {
       setFeaturedIndex(prevIndex => {
@@ -176,7 +139,7 @@ function HomeScreen() {
     }, 10000) // 10 seconds
 
     return () => clearInterval(interval)
-  }, [categories, featuredAnimeWithTrailer])
+  }, [categories])
 
   // Update featured anime when index changes
   const handleFeaturedIndexChange = (index: number) => {
@@ -235,10 +198,10 @@ function HomeScreen() {
     <div className="min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
       <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto overflow-visible">
         {/* Hero Section */}
-        {featuredAnimeWithTrailer ? (
+        {featuredAnime ? (
           <HeroSection
-            key={featuredAnimeWithTrailer.id}
-            media={featuredAnimeWithTrailer}
+            key={featuredAnime.id}
+            media={featuredAnime}
             onWatch={handleWatch}
             onMoreInfo={handleMoreInfo}
             totalItems={categories['trending']?.items.length || 1}
