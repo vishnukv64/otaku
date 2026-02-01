@@ -173,7 +173,7 @@ A cross-platform desktop application for streaming anime and reading manga, buil
 
 ### Manga Details Modal
 
-![Manga Details Modal](screenshots/manga-details-modal.png)
+![Manga Details Modal](screenshots/manga-details.png)
 
 *Manga detail view with chapter list, download options, and reading progress indicators.*
 
