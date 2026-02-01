@@ -156,13 +156,6 @@ export function HeroSection({
           ) : (
             <div className="absolute inset-0 bg-[var(--color-bg-secondary)]" />
           )}
-
-          {/* Show loading indicator while fetching video */}
-          {isLoadingVideo && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-              <div className="text-white text-sm">Loading trailer...</div>
-            </div>
-          )}
         </>
       )}
 

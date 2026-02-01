@@ -42,7 +42,7 @@ function NotFoundPage() {
             Go Back
           </button>
           <Link
-            to="/home"
+            to="/"
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-primary)]/90 transition-colors"
           >
             <Home className="w-4 h-4" />
