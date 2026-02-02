@@ -149,67 +149,67 @@ A cross-platform desktop application for streaming anime and reading manga, buil
 
 ### Home Screen
 
-![Home Screen](screenshots/home-screen.png)
+![Home Screen](docs/screenshots/home-screen.png)
 
 *The main home screen displaying continue watching, continue reading, trending anime, and personalized recommendations.*
 
 ### Anime Browser
 
-![Anime Browser](screenshots/anime-browser.png)
+![Anime Browser](docs/screenshots/anime-browser.png)
 
 *The anime browser page with search functionality and genre-based filtering.*
 
 ### Manga Browser
 
-![Manga Browser](screenshots/manga-reader.png)
+![Manga Browser](docs/screenshots/manga-reader.png)
 
 *Browse manga with search, genres, and filtering options.*
 
 ### Anime Details Modal
 
-![Anime Details Modal](screenshots/anime-details-modal.png)
+![Anime Details Modal](docs/screenshots/anime-details-modal.png)
 
 *Detailed anime information showing synopsis, metadata, episode list, and related anime.*
 
 ### Manga Details Modal
 
-![Manga Details Modal](screenshots/manga-details.png)
+![Manga Details Modal](docs/screenshots/manga-details.png)
 
 *Manga detail view with chapter list, download options, and reading progress indicators.*
 
 ### Video Player
 
-![Video Player](screenshots/video-player.png)
+![Video Player](docs/screenshots/video-player.png)
 
 *Full-featured video player with custom controls, quality selection, and server switching.*
 
 ### Manga Reader
 
-![Manga Reader](screenshots/manga-reader.png)
+![Manga Reader](docs/screenshots/manga-reader.png)
 
 *Clean manga reader with multiple reading modes and chapter navigation.*
 
 ### Library View
 
-![Library View](screenshots/library-view.png)
+![Library View](docs/screenshots/library-view.png)
 
 *Personal library with anime and manga organized by status categories.*
 
 ### Notification Center
 
-![Notification Center](screenshots/notification-center.png)
+![Notification Center](docs/screenshots/notification-center.png)
 
 *Notification center with release alerts and download notifications.*
 
 ### Download Manager
 
-![Download Manager](screenshots/download-manager.png)
+![Download Manager](docs/screenshots/download-manager.png)
 
 *Download manager showing anime episodes and manga chapters with progress tracking.*
 
 ### Settings Page
 
-![Settings Page](screenshots/settings-page.png)
+![Settings Page](docs/screenshots/settings-page.png)
 
 *Application settings including appearance, playback, reader preferences, and storage management.*
 
@@ -639,7 +639,11 @@ otaku/
 │   │   └── video_server.rs     # Local video server
 │   ├── migrations/             # Database migrations
 │   └── extensions/             # Bundled extensions
-└── screenshots/                # README screenshots
+└── docs/                       # GitHub Pages landing page
+    ├── index.html              # Landing page
+    ├── styles.css              # Styling
+    ├── script.js               # OS detection and downloads
+    └── screenshots/            # Application screenshots
 ```
 
 ---
