@@ -1,5 +1,4 @@
 // Module declarations
-mod cache;
 mod commands;
 mod database;
 mod downloads;
@@ -370,9 +369,6 @@ pub fn run() {
       commands::get_log_file_path,
       commands::start_logs_stream,
       commands::stop_logs_stream,
-      // Cache Management
-      commands::get_cache_stats,
-      commands::clear_api_cache,
       // Notifications
       commands::create_notification,
       commands::list_notifications,

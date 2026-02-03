@@ -1244,37 +1244,6 @@ export async function listAllChapterDownloads(): Promise<ChapterDownloadWithTitl
   return await invoke('list_all_chapter_downloads')
 }
 
-// ==================== Cache Management Commands ====================
-
-/**
- * Cache statistics
- */
-export interface CacheStats {
-  search_entries: number
-  discover_entries: number
-  anime_details_entries: number
-  manga_details_entries: number
-  video_sources_entries: number
-  chapter_images_entries: number
-  tags_entries: number
-  home_content_entries: number
-  recommendations_entries: number
-}
-
-/**
- * Get cache statistics for debugging
- */
-export async function getCacheStats(): Promise<CacheStats> {
-  return await invoke('get_cache_stats')
-}
-
-/**
- * Clear all API caches
- */
-export async function clearApiCache(): Promise<void> {
-  return await invoke('clear_api_cache')
-}
-
 // ==================== Notification Commands ====================
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info'

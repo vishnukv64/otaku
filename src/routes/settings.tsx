@@ -13,9 +13,8 @@ import { SettingDropdown } from '../components/settings/SettingDropdown'
 import { SettingFileInput } from '../components/settings/SettingFileInput'
 import { DangerButton } from '../components/settings/DangerButton'
 import { UpdateSection } from '../components/settings/UpdateSection'
-import { HardDrive, Activity, ChevronRight, FileText, Info, Trash2 } from 'lucide-react'
+import { HardDrive, Activity, ChevronRight, FileText, Info } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
-import { clearApiCache } from '@/utils/tauri-commands'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsScreen,
@@ -109,15 +108,6 @@ function SettingsScreen() {
   const handleResetSettings = () => {
     settings.resetToDefaults()
     notifySuccess('Settings Reset', 'Settings have been reset to defaults')
-  }
-
-  const handleClearApiCache = async () => {
-    try {
-      await clearApiCache()
-      notifySuccess('Cache Cleared', 'API cache has been cleared. Refresh to see latest data.')
-    } catch (error) {
-      notifyError('Clear Failed', `Failed to clear API cache: ${error}`)
-    }
   }
 
   return (
@@ -372,28 +362,6 @@ function SettingsScreen() {
             </Link>
           </SettingRow>
 
-          <SettingRow
-            label="Clear API Cache"
-            description="Force refresh all cached anime/manga data from extensions"
-          >
-            <button
-              onClick={handleClearApiCache}
-              className="
-                flex items-center gap-2
-                bg-[var(--color-surface-subtle)]
-                hover:bg-[var(--color-surface-hover)]
-                text-[var(--color-text-primary)]
-                rounded-lg
-                px-4
-                py-2
-                font-medium
-                transition-colors
-              "
-            >
-              <Trash2 size={16} />
-              Clear Cache
-            </button>
-          </SettingRow>
         </SettingSection>
 
         {/* Data & Privacy Section */}
@@ -425,7 +393,7 @@ function SettingsScreen() {
 
           <SettingRow
             label="Clear All Data"
-            description="Delete everything including history, library, and media cache"
+            description="Delete everything including history and library"
           >
             <DangerButton
               onClick={handleClearAllData}

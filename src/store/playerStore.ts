@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 
 interface WatchProgress {
   episodeId: string
@@ -39,84 +38,72 @@ interface PlayerState {
   setCurrentPlayback: (animeId: string | null, episodeId: string | null) => void
 }
 
-export const usePlayerStore = create<PlayerState>()(
-  persist(
-    (set, get) => ({
-      // Initial state
-      watchProgress: {},
-      settings: {
-        volume: 1,
-        muted: false,
-        autoPlayNext: true,
-        preferredQuality: 'Auto',
-        preferredServer: 0,
-        playbackSpeed: 1.0,
-      },
-      currentAnimeId: null,
-      currentEpisodeId: null,
+export const usePlayerStore = create<PlayerState>()((set, get) => ({
+  // Initial state
+  watchProgress: {},
+  settings: {
+    volume: 1,
+    muted: false,
+    autoPlayNext: true,
+    preferredQuality: 'Auto',
+    preferredServer: 0,
+    playbackSpeed: 1.0,
+  },
+  currentAnimeId: null,
+  currentEpisodeId: null,
 
-      // Set or update watch progress for an episode
-      setWatchProgress: (animeId, episodeId, progress) => {
+  // Set or update watch progress for an episode
+  setWatchProgress: (animeId, episodeId, progress) => {
+    const key = `${animeId}-${episodeId}`
+    const existing = get().watchProgress[key]
+
+    set((state) => ({
+      watchProgress: {
+        ...state.watchProgress,
+        [key]: {
+          episodeId,
+          currentTime: progress.currentTime ?? existing?.currentTime ?? 0,
+          duration: progress.duration ?? existing?.duration ?? 0,
+          lastWatched: progress.lastWatched ?? Date.now(),
+          completed: progress.completed ?? existing?.completed ?? false,
+        },
+      },
+    }))
+  },
+
+  // Get watch progress for an episode
+  getWatchProgress: (animeId, episodeId) => {
+    const key = `${animeId}-${episodeId}`
+    return get().watchProgress[key] || null
+  },
+
+  // Clear watch progress (all episodes or specific episode)
+  clearWatchProgress: (animeId, episodeId) => {
+    set((state) => {
+      if (episodeId) {
+        // Clear specific episode
         const key = `${animeId}-${episodeId}`
-        const existing = get().watchProgress[key]
+        const { [key]: _, ...rest } = state.watchProgress
+        return { watchProgress: rest }
+      } else {
+        // Clear all episodes for this anime
+        const filtered = Object.entries(state.watchProgress)
+          .filter(([key]) => !key.startsWith(`${animeId}-`))
+          .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {})
+        return { watchProgress: filtered }
+      }
+    })
+  },
 
-        set((state) => ({
-          watchProgress: {
-            ...state.watchProgress,
-            [key]: {
-              episodeId,
-              currentTime: progress.currentTime ?? existing?.currentTime ?? 0,
-              duration: progress.duration ?? existing?.duration ?? 0,
-              lastWatched: progress.lastWatched ?? Date.now(),
-              completed: progress.completed ?? existing?.completed ?? false,
-            },
-          },
-        }))
-      },
+  // Update player settings
+  updateSettings: (newSettings) => {
+    set((state) => ({
+      settings: { ...state.settings, ...newSettings },
+    }))
+  },
 
-      // Get watch progress for an episode
-      getWatchProgress: (animeId, episodeId) => {
-        const key = `${animeId}-${episodeId}`
-        return get().watchProgress[key] || null
-      },
-
-      // Clear watch progress (all episodes or specific episode)
-      clearWatchProgress: (animeId, episodeId) => {
-        set((state) => {
-          if (episodeId) {
-            // Clear specific episode
-            const key = `${animeId}-${episodeId}`
-            const { [key]: _, ...rest } = state.watchProgress
-            return { watchProgress: rest }
-          } else {
-            // Clear all episodes for this anime
-            const filtered = Object.entries(state.watchProgress)
-              .filter(([key]) => !key.startsWith(`${animeId}-`))
-              .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {})
-            return { watchProgress: filtered }
-          }
-        })
-      },
-
-      // Update player settings
-      updateSettings: (newSettings) => {
-        set((state) => ({
-          settings: { ...state.settings, ...newSettings },
-        }))
-      },
-
-      // Set current playback
-      setCurrentPlayback: (animeId, episodeId) => {
-        set({ currentAnimeId: animeId, currentEpisodeId: episodeId })
-      },
-    }),
-    {
-      name: 'otaku-player-storage',
-      // Only persist watch progress and settings, not current playback
-      partialize: (state) => ({
-        watchProgress: state.watchProgress,
-        settings: state.settings,
-      }),
-    }
-  )
-)
+  // Set current playback
+  setCurrentPlayback: (animeId, episodeId) => {
+    set({ currentAnimeId: animeId, currentEpisodeId: episodeId })
+  },
+}))

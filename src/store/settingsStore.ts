@@ -12,7 +12,6 @@
  */
 
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import { getAppSetting, setAppSetting, deleteAppSetting } from '@/utils/tauri-commands'
 
 // Database key for download location
@@ -73,65 +72,53 @@ const defaultSettings = {
   _dbInitialized: false,
 }
 
-export const useSettingsStore = create<SettingsState>()(
-  persist(
-    (set, get): SettingsState => ({
-      ...defaultSettings,
+export const useSettingsStore = create<SettingsState>()((set, get): SettingsState => ({
+  ...defaultSettings,
 
-      // Update multiple settings at once
-      updateSettings: (newSettings) => {
-        set((state) => ({ ...state, ...newSettings }))
+  // Update multiple settings at once
+  updateSettings: (newSettings) => {
+    set((state) => ({ ...state, ...newSettings }))
 
-        // If download location is being updated, save to database
-        if (newSettings.downloadLocation !== undefined) {
-          const location = newSettings.downloadLocation
-          if (location && location.trim() !== '') {
-            setAppSetting(DB_KEY_DOWNLOAD_LOCATION, location).catch((err) => {
-              console.error('Failed to save download location to database:', err)
-            })
-          } else {
-            // If empty, delete from database
-            deleteAppSetting(DB_KEY_DOWNLOAD_LOCATION).catch((err) => {
-              console.error('Failed to delete download location from database:', err)
-            })
-          }
-        }
-      },
-
-      // Reset all settings to default values
-      resetToDefaults: () => {
-        set(defaultSettings)
-        // Also clear from database
+    // If download location is being updated, save to database
+    if (newSettings.downloadLocation !== undefined) {
+      const location = newSettings.downloadLocation
+      if (location && location.trim() !== '') {
+        setAppSetting(DB_KEY_DOWNLOAD_LOCATION, location).catch((err) => {
+          console.error('Failed to save download location to database:', err)
+        })
+      } else {
+        // If empty, delete from database
         deleteAppSetting(DB_KEY_DOWNLOAD_LOCATION).catch((err) => {
           console.error('Failed to delete download location from database:', err)
         })
-      },
-
-      // Initialize settings from database (call on app startup)
-      initFromDatabase: async () => {
-        // Only init once
-        if (get()._dbInitialized) return
-
-        try {
-          const dbLocation = await getAppSetting(DB_KEY_DOWNLOAD_LOCATION)
-          if (dbLocation) {
-            set({ downloadLocation: dbLocation, _dbInitialized: true })
-          } else {
-            set({ _dbInitialized: true })
-          }
-        } catch (err) {
-          console.error('Failed to load settings from database:', err)
-          set({ _dbInitialized: true })
-        }
-      },
-    }),
-    {
-      name: 'otaku-settings',
-      // Don't persist the _dbInitialized flag
-      partialize: (state) => {
-        const { _dbInitialized: _, ...rest } = state
-        return rest
-      },
+      }
     }
-  )
-)
+  },
+
+  // Reset all settings to default values
+  resetToDefaults: () => {
+    set(defaultSettings)
+    // Also clear from database
+    deleteAppSetting(DB_KEY_DOWNLOAD_LOCATION).catch((err) => {
+      console.error('Failed to delete download location from database:', err)
+    })
+  },
+
+  // Initialize settings from database (call on app startup)
+  initFromDatabase: async () => {
+    // Only init once
+    if (get()._dbInitialized) return
+
+    try {
+      const dbLocation = await getAppSetting(DB_KEY_DOWNLOAD_LOCATION)
+      if (dbLocation) {
+        set({ downloadLocation: dbLocation, _dbInitialized: true })
+      } else {
+        set({ _dbInitialized: true })
+      }
+    } catch (err) {
+      console.error('Failed to load settings from database:', err)
+      set({ _dbInitialized: true })
+    }
+  },
+}))

@@ -8,7 +8,6 @@
  */
 
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 
 export type ReadingMode = 'single' | 'double' | 'vertical' | 'webtoon'
 export type ReadingDirection = 'ltr' | 'rtl'
@@ -112,113 +111,104 @@ const initialState: ReaderState = {
   settings: defaultSettings,
 }
 
-export const useReaderStore = create<ReaderState & ReaderActions>()(
-  persist(
-    (set, get) => ({
-      ...initialState,
+export const useReaderStore = create<ReaderState & ReaderActions>()((set, get) => ({
+  ...initialState,
 
-      // Page navigation
-      setCurrentPage: (page) => {
-        const { totalPages } = get()
-        const clampedPage = Math.max(1, Math.min(page, totalPages || 1))
-        set({ currentPage: clampedPage })
-      },
+  // Page navigation
+  setCurrentPage: (page) => {
+    const { totalPages } = get()
+    const clampedPage = Math.max(1, Math.min(page, totalPages || 1))
+    set({ currentPage: clampedPage })
+  },
 
-      nextPage: () => {
-        const { currentPage, totalPages, settings } = get()
-        const increment = settings.readingMode === 'double' ? 2 : 1
-        const newPage = Math.min(currentPage + increment, totalPages || currentPage)
-        set({ currentPage: newPage })
-      },
+  nextPage: () => {
+    const { currentPage, totalPages, settings } = get()
+    const increment = settings.readingMode === 'double' ? 2 : 1
+    const newPage = Math.min(currentPage + increment, totalPages || currentPage)
+    set({ currentPage: newPage })
+  },
 
-      previousPage: () => {
-        const { currentPage, settings } = get()
-        const decrement = settings.readingMode === 'double' ? 2 : 1
-        const newPage = Math.max(1, currentPage - decrement)
-        set({ currentPage: newPage })
-      },
+  previousPage: () => {
+    const { currentPage, settings } = get()
+    const decrement = settings.readingMode === 'double' ? 2 : 1
+    const newPage = Math.max(1, currentPage - decrement)
+    set({ currentPage: newPage })
+  },
 
-      goToPage: (page) => {
-        const { totalPages } = get()
-        const clampedPage = Math.max(1, Math.min(page, totalPages || 1))
-        set({ currentPage: clampedPage })
-      },
+  goToPage: (page) => {
+    const { totalPages } = get()
+    const clampedPage = Math.max(1, Math.min(page, totalPages || 1))
+    set({ currentPage: clampedPage })
+  },
 
-      // Chapter management
-      setCurrentChapter: (mangaId, chapterId) => {
-        set({
-          currentMangaId: mangaId,
-          currentChapterId: chapterId,
-          currentPage: 1,
-          totalPages: 0,
-          isLoading: true,
-        })
-      },
+  // Chapter management
+  setCurrentChapter: (mangaId, chapterId) => {
+    set({
+      currentMangaId: mangaId,
+      currentChapterId: chapterId,
+      currentPage: 1,
+      totalPages: 0,
+      isLoading: true,
+    })
+  },
 
-      clearCurrentChapter: () => {
-        set({
-          currentMangaId: null,
-          currentChapterId: null,
-          currentPage: 1,
-          totalPages: 0,
-        })
-      },
+  clearCurrentChapter: () => {
+    set({
+      currentMangaId: null,
+      currentChapterId: null,
+      currentPage: 1,
+      totalPages: 0,
+    })
+  },
 
-      setTotalPages: (total) => {
-        set({ totalPages: total, isLoading: false })
-      },
+  setTotalPages: (total) => {
+    set({ totalPages: total, isLoading: false })
+  },
 
-      // UI state
-      setFullscreen: (fullscreen) => set({ isFullscreen: fullscreen }),
-      toggleFullscreen: () => set((state) => ({ isFullscreen: !state.isFullscreen })),
-      setShowControls: (show) => set({ showControls: show }),
-      toggleControls: () => set((state) => ({ showControls: !state.showControls })),
-      setLoading: (loading) => set({ isLoading: loading }),
+  // UI state
+  setFullscreen: (fullscreen) => set({ isFullscreen: fullscreen }),
+  toggleFullscreen: () => set((state) => ({ isFullscreen: !state.isFullscreen })),
+  setShowControls: (show) => set({ showControls: show }),
+  toggleControls: () => set((state) => ({ showControls: !state.showControls })),
+  setLoading: (loading) => set({ isLoading: loading }),
 
-      // Settings
-      updateSettings: (newSettings) => {
-        set((state) => ({
-          settings: { ...state.settings, ...newSettings },
-        }))
-      },
+  // Settings
+  updateSettings: (newSettings) => {
+    set((state) => ({
+      settings: { ...state.settings, ...newSettings },
+    }))
+  },
 
-      setReadingMode: (mode) => {
-        set((state) => ({
-          settings: { ...state.settings, readingMode: mode },
-        }))
-      },
+  setReadingMode: (mode) => {
+    set((state) => ({
+      settings: { ...state.settings, readingMode: mode },
+    }))
+  },
 
-      setReadingDirection: (direction) => {
-        set((state) => ({
-          settings: { ...state.settings, readingDirection: direction },
-        }))
-      },
+  setReadingDirection: (direction) => {
+    set((state) => ({
+      settings: { ...state.settings, readingDirection: direction },
+    }))
+  },
 
-      setFitMode: (mode) => {
-        set((state) => ({
-          settings: { ...state.settings, fitMode: mode },
-        }))
-      },
+  setFitMode: (mode) => {
+    set((state) => ({
+      settings: { ...state.settings, fitMode: mode },
+    }))
+  },
 
-      setZoom: (zoom) => {
-        const { settings } = get()
-        const clampedZoom = Math.max(settings.minZoom, Math.min(zoom, settings.maxZoom))
-        set((state) => ({
-          settings: { ...state.settings, zoom: clampedZoom },
-        }))
-      },
+  setZoom: (zoom) => {
+    const { settings } = get()
+    const clampedZoom = Math.max(settings.minZoom, Math.min(zoom, settings.maxZoom))
+    set((state) => ({
+      settings: { ...state.settings, zoom: clampedZoom },
+    }))
+  },
 
-      resetSettings: () => {
-        set({ settings: defaultSettings })
-      },
-    }),
-    {
-      name: 'otaku-reader-settings',
-      // Only persist settings, not current reading state
-      partialize: (state) => ({ settings: state.settings }),
-    }
-  )
-)
+  resetSettings: () => {
+    set({ settings: defaultSettings })
+  },
+}))
 
 // Selector hooks for specific settings
 export const useReadingMode = () => useReaderStore((state) => state.settings.readingMode)
