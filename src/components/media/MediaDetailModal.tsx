@@ -1014,7 +1014,7 @@ export function MediaDetailModal({
                     <div className="text-2xl font-bold">{details.year || 'N/A'}</div>
                   </div>
                   {/* Last Aired - show for currently airing anime with episode date */}
-                  {isAiring(details.status) && (media.latest_episode_date || details.last_update_end) && (
+                  {isAiring(details.status) && media.latest_episode_date && (
                     <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
                       <div className="text-[var(--color-text-muted)] text-sm mb-1 flex items-center gap-1">
                         <Radio className="w-3 h-3 text-emerald-400" />
@@ -1024,16 +1024,17 @@ export function MediaDetailModal({
                         EP {media.latest_episode}
                       </div>
                       <div className="text-sm text-[var(--color-text-secondary)]">
-                        {details.last_update_end
-                          ? formatRelativeTime(details.last_update_end)
-                          : media.latest_episode_date
-                            ? formatEpisodeDate(media.latest_episode_date)
+                        {media.latest_episode_date
+                          ? formatEpisodeDate(media.latest_episode_date)
+                          : details.last_update_end
+                            ? formatRelativeTime(details.last_update_end)
                             : 'Recently'}
                       </div>
                       {/* Next Episode Countdown */}
-                      {details.last_update_end && details.broadcast_interval && (
+                      {(media.latest_episode_date || details.last_update_end) && details.broadcast_interval && (
                         <div className="mt-4">
                           <NextEpisodeCountdown
+                            latestEpisodeDate={media.latest_episode_date}
                             lastUpdateEnd={details.last_update_end}
                             broadcastInterval={details.broadcast_interval}
                             status={details.status}

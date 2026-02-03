@@ -9,7 +9,8 @@ import { useState, useEffect } from 'react'
 import { Clock, Calendar } from 'lucide-react'
 
 interface NextEpisodeCountdownProps {
-  lastUpdateEnd: string // ISO 8601 timestamp
+  lastUpdateEnd?: string // ISO 8601 timestamp (fallback)
+  latestEpisodeDate?: { year: number; month: number; date: number } // Preferred source
   broadcastInterval: number // milliseconds
   status?: string
 }
@@ -86,13 +87,33 @@ function formatNextReleaseDate(timestamp: number): string {
 
 export function NextEpisodeCountdown({
   lastUpdateEnd,
+  latestEpisodeDate,
   broadcastInterval,
   status,
 }: NextEpisodeCountdownProps) {
   // Only show for releasing/airing anime
   const isAiring = status && ['releasing', 'ongoing', 'airing', 'currently airing'].includes(status.toLowerCase())
 
-  const lastUpdate = new Date(lastUpdateEnd).getTime()
+  // Calculate last episode air time - prioritize latestEpisodeDate
+  let lastUpdate: number
+  if (latestEpisodeDate) {
+    // Convert latestEpisodeDate to timestamp (using noon as default time)
+    lastUpdate = new Date(
+      latestEpisodeDate.year,
+      latestEpisodeDate.month,
+      latestEpisodeDate.date,
+      12, // noon
+      0,
+      0
+    ).getTime()
+  } else if (lastUpdateEnd) {
+    // Fallback to ISO timestamp
+    lastUpdate = new Date(lastUpdateEnd).getTime()
+  } else {
+    // No data available
+    return null
+  }
+
   const nextReleaseTime = lastUpdate + broadcastInterval
 
   const [timeRemaining, setTimeRemaining] = useState<TimeRemaining>(
