@@ -1,6 +1,9 @@
 /**
  * VerticalScrollView - Smooth vertical scroll mode for manga reading
  * Optimized to prevent layout shifts and provide buttery-smooth scrolling
+ *
+ * Webtoon mode (gap=0): Images are stacked seamlessly with consistent width
+ * Vertical mode (gap>0): Images are displayed with gaps between them
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -19,6 +22,9 @@ interface VerticalScrollViewProps {
   gap?: number
   className?: string
 }
+
+// Max width for webtoon mode to ensure consistent image widths
+const WEBTOON_MAX_WIDTH = 800
 
 interface ImageState {
   loaded: boolean
@@ -144,11 +150,24 @@ export function VerticalScrollView({
     return Math.abs(page - preloadCenter) <= preloadCount
   }, [preloadCenter, preloadCount])
 
+  // Check if we're in seamless webtoon mode (no gap between images)
+  const isWebtoonMode = gap === 0
+
   // Memoize image style
   const imageStyle = useMemo((): React.CSSProperties => {
     const baseStyle: React.CSSProperties = {
       transform: zoom !== 1 ? `scale(${zoom})` : undefined,
       transformOrigin: 'top center',
+    }
+
+    // In webtoon mode, force consistent width for seamless stacking
+    if (isWebtoonMode) {
+      return {
+        ...baseStyle,
+        width: '100%',
+        height: 'auto',
+        display: 'block', // Remove any inline spacing
+      }
     }
 
     switch (fitMode) {
@@ -162,7 +181,7 @@ export function VerticalScrollView({
       default:
         return { ...baseStyle, maxWidth: '100%', height: 'auto' }
     }
-  }, [fitMode, zoom])
+  }, [fitMode, zoom, isWebtoonMode])
 
   return (
     <div
@@ -174,11 +193,22 @@ export function VerticalScrollView({
       style={{
         WebkitOverflowScrolling: 'touch', // Smooth momentum scrolling on iOS/macOS
         overscrollBehavior: 'contain', // Prevent scroll chaining
+        scrollBehavior: 'smooth', // Smooth scroll for better UX
       }}
     >
+      {/*
+        Webtoon mode: Use a fixed-width centered container so all images align perfectly
+        Vertical mode: Use full width with centered images
+      */}
       <div
-        className="flex flex-col items-center w-full"
-        style={{ gap: `${gap}px` }}
+        className={cn(
+          'flex flex-col w-full',
+          isWebtoonMode ? 'mx-auto' : 'items-center'
+        )}
+        style={{
+          gap: `${gap}px`,
+          maxWidth: isWebtoonMode ? `${WEBTOON_MAX_WIDTH}px` : undefined,
+        }}
       >
         {images.map((image) => {
           const state = imageStates.get(image.page)
@@ -195,7 +225,10 @@ export function VerticalScrollView({
                   el.setAttribute('data-page', String(image.page))
                 }
               }}
-              className="relative w-full flex justify-center"
+              className={cn(
+                'relative',
+                isWebtoonMode ? 'w-full' : 'w-full flex justify-center'
+              )}
             >
               {/* Error state */}
               {hasError && (
@@ -207,12 +240,12 @@ export function VerticalScrollView({
 
               {/* Image with loading indicator overlay */}
               {shouldLoad && !hasError && (
-                <div className="relative">
+                <div className={cn('relative', isWebtoonMode && 'w-full')}>
                   {/* Loading spinner - shown while image loads */}
                   {!isLoaded && (
                     <div
                       className="flex items-center justify-center bg-[var(--color-bg-secondary)]/30"
-                      style={{ minHeight: '50vh', width: '100%' }}
+                      style={{ minHeight: isWebtoonMode ? '300px' : '50vh', width: '100%' }}
                     >
                       <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
                     </div>
@@ -226,7 +259,7 @@ export function VerticalScrollView({
                       ...imageStyle,
                       display: isLoaded ? 'block' : 'none', // Hide until loaded to prevent layout shift
                     }}
-                    className="select-none"
+                    className={cn('select-none', isWebtoonMode && 'w-full')}
                     loading="eager"
                     decoding="async"
                     draggable={false}
@@ -239,8 +272,8 @@ export function VerticalScrollView({
                 <div
                   className="w-full flex items-center justify-center bg-[var(--color-bg-secondary)]/20"
                   style={{
-                    aspectRatio: '2/3',
-                    maxHeight: '100vh',
+                    aspectRatio: isWebtoonMode ? '3/4' : '2/3',
+                    maxHeight: isWebtoonMode ? '400px' : '100vh',
                   }}
                 >
                   <span className="text-sm text-[var(--color-text-muted)]">Page {image.page}</span>
@@ -253,7 +286,7 @@ export function VerticalScrollView({
                   src={image.url}
                   alt={`Page ${image.page}`}
                   style={imageStyle}
-                  className="block select-none"
+                  className={cn('block select-none', isWebtoonMode && 'w-full')}
                   draggable={false}
                 />
               )}

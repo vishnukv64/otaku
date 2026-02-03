@@ -6,6 +6,8 @@ import { MediaStatusProvider } from '@/contexts/MediaStatusContext'
 import { useNotificationEvents } from '@/hooks/useNotificationEvents'
 import { useAutoUpdateCheck } from '@/hooks/useAutoUpdateCheck'
 import { useSettingsStore } from '@/store/settingsStore'
+import { useReaderStore } from '@/store/readerStore'
+import { usePlayerStore } from '@/store/playerStore'
 import { Home, Search, ArrowLeft } from 'lucide-react'
 
 function NotFoundPage() {
@@ -60,11 +62,21 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
-  // Initialize settings from database on app startup
-  const initFromDatabase = useSettingsStore((state) => state.initFromDatabase)
+  // Initialize all stores from database on app startup
+  const initSettingsFromDatabase = useSettingsStore((state) => state.initFromDatabase)
+  const initReaderFromDatabase = useReaderStore((state) => state.initFromDatabase)
+  const initPlayerFromDatabase = usePlayerStore((state) => state.initFromDatabase)
+
   useEffect(() => {
-    initFromDatabase()
-  }, [initFromDatabase])
+    // Initialize all stores in parallel
+    Promise.all([
+      initSettingsFromDatabase(),
+      initReaderFromDatabase(),
+      initPlayerFromDatabase(),
+    ]).catch((err) => {
+      console.error('Failed to initialize stores from database:', err)
+    })
+  }, [initSettingsFromDatabase, initReaderFromDatabase, initPlayerFromDatabase])
 
   // Initialize notification event listener at root level
   // This ensures notifications are received app-wide

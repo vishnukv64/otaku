@@ -8,17 +8,19 @@
  * - Action buttons (Watch, Add to List)
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, type MediaEntry, type WatchHistory, type LibraryStatus } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
 import { useMediaStatusContext, getStatusLabel } from '@/contexts/MediaStatusContext'
 import { useSettingsStore } from '@/store/settingsStore'
 import { MediaCard } from './MediaCard'
+import { Description } from '@/components/ui/Description'
 import { NextEpisodeCountdown } from './NextEpisodeCountdown'
 
 /** Format episode date for display */
@@ -97,6 +99,11 @@ export function MediaDetailModal({
   const [_relatedLoading, setRelatedLoading] = useState(false)
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
   const [showNewBadge, setShowNewBadge] = useState(false)
+
+  // Tag state
+  const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
+  const [showTagSelector, setShowTagSelector] = useState(false)
+  const tagButtonRef = useRef<HTMLButtonElement>(null)
 
   // Use event-based download tracking instead of polling
   // Note: Toast notifications are handled globally by the notification system (useNotificationEvents)
@@ -509,6 +516,36 @@ export function MediaDetailModal({
 
     checkLibrary()
   }, [isOpen, media.id, getStatus])
+
+  // Load tags for this media
+  const loadMediaTags = async () => {
+    try {
+      const tags = await getMediaTags(media.id)
+      setMediaTags(tags)
+    } catch (error) {
+      console.error('Failed to load media tags:', error)
+    }
+  }
+
+  useEffect(() => {
+    if (!isOpen || !inLibrary) {
+      setMediaTags([])
+      return
+    }
+
+    loadMediaTags()
+  }, [isOpen, media.id, inLibrary])
+
+  // Handle tag removal
+  const handleRemoveTag = async (tagId: number) => {
+    try {
+      await unassignLibraryTag(media.id, tagId)
+      setMediaTags(prev => prev.filter(t => t.id !== tagId))
+    } catch (error) {
+      console.error('Failed to remove tag:', error)
+      notifyError('Error', 'Failed to remove tag')
+    }
+  }
 
   // Load watch history for all episodes
   useEffect(() => {
@@ -979,6 +1016,33 @@ export function MediaDetailModal({
                           </svg>
                         </button>
                       </div>
+
+                      {/* Tags Section */}
+                      {inLibrary && (
+                        <div className="mt-4 flex items-center gap-3 flex-wrap">
+                          <TagChips
+                            tags={mediaTags}
+                            onRemove={handleRemoveTag}
+                          />
+                          <div className="relative">
+                            <button
+                              ref={tagButtonRef}
+                              onClick={() => setShowTagSelector(!showTagSelector)}
+                              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20"
+                            >
+                              <Tags className="w-4 h-4" />
+                              <span>{mediaTags.length > 0 ? 'Edit Tags' : 'Add Tags'}</span>
+                            </button>
+                            <TagSelector
+                              mediaId={media.id}
+                              isOpen={showTagSelector}
+                              onClose={() => setShowTagSelector(false)}
+                              onTagsChange={loadMediaTags}
+                              anchorRef={tagButtonRef}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1054,9 +1118,7 @@ export function MediaDetailModal({
                       </svg>
                       Synopsis
                     </h2>
-                    <p className="text-[var(--color-text-secondary)] leading-relaxed text-lg">
-                      {details.description.replace(/<[^>]*>/g, '')}
-                    </p>
+                    <Description content={details.description} className="text-lg" />
                   </div>
                 )}
 

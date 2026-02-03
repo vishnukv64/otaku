@@ -8,16 +8,16 @@
  * - Download configuration
  * - Player defaults
  *
- * Settings are persisted to localStorage and database (for download location)
+ * All settings are persisted to the SQLite database for backup/export support
  */
 
 import { create } from 'zustand'
-import { getAppSetting, setAppSetting, deleteAppSetting } from '@/utils/tauri-commands'
+import { getAppSetting, setAppSetting } from '@/utils/tauri-commands'
 
-// Database key for download location
-const DB_KEY_DOWNLOAD_LOCATION = 'download_location'
+// Database key for all settings
+const DB_KEY_SETTINGS = 'app_settings'
 
-interface SettingsState {
+interface SettingsData {
   // Appearance
   theme: 'dark' | 'light'
   gridDensity: 'compact' | 'comfortable' | 'spacious'
@@ -37,20 +37,23 @@ interface SettingsState {
   defaultPlaybackSpeed: number
   markWatchedThreshold: number
   autoplayTrailers: boolean
+}
 
+interface SettingsState extends SettingsData {
   // Internal state
-  _dbInitialized: boolean
+  _initialized: boolean
+  _saving: boolean
 
   // Actions
-  updateSettings: (settings: Partial<Omit<SettingsState, 'updateSettings' | 'resetToDefaults' | 'initFromDatabase' | '_dbInitialized'>>) => void
+  updateSettings: (settings: Partial<SettingsData>) => void
   resetToDefaults: () => void
   initFromDatabase: () => Promise<void>
 }
 
-const defaultSettings = {
+const defaultSettings: SettingsData = {
   // Appearance
-  theme: 'dark' as const,
-  gridDensity: 'comfortable' as const,
+  theme: 'dark',
+  gridDensity: 'comfortable',
   showContinueWatching: true,
 
   // Content
@@ -58,7 +61,7 @@ const defaultSettings = {
 
   // Downloads
   downloadLocation: '',
-  defaultDownloadQuality: 'auto' as const,
+  defaultDownloadQuality: 'auto',
   maxConcurrentDownloads: 3,
   autoDeleteWatched: false,
 
@@ -67,58 +70,71 @@ const defaultSettings = {
   defaultPlaybackSpeed: 1.0,
   markWatchedThreshold: 90,
   autoplayTrailers: true,
-
-  // Internal
-  _dbInitialized: false,
 }
 
-export const useSettingsStore = create<SettingsState>()((set, get): SettingsState => ({
+// Helper to save settings to database
+const saveToDatabase = async (settings: SettingsData) => {
+  try {
+    await setAppSetting(DB_KEY_SETTINGS, JSON.stringify(settings))
+  } catch (err) {
+    console.error('Failed to save settings to database:', err)
+  }
+}
+
+// Extract only the data fields (not internal state or actions)
+const extractSettingsData = (state: SettingsState): SettingsData => ({
+  theme: state.theme,
+  gridDensity: state.gridDensity,
+  showContinueWatching: state.showContinueWatching,
+  nsfwFilter: state.nsfwFilter,
+  downloadLocation: state.downloadLocation,
+  defaultDownloadQuality: state.defaultDownloadQuality,
+  maxConcurrentDownloads: state.maxConcurrentDownloads,
+  autoDeleteWatched: state.autoDeleteWatched,
+  defaultVolume: state.defaultVolume,
+  defaultPlaybackSpeed: state.defaultPlaybackSpeed,
+  markWatchedThreshold: state.markWatchedThreshold,
+  autoplayTrailers: state.autoplayTrailers,
+})
+
+export const useSettingsStore = create<SettingsState>()((set, get) => ({
   ...defaultSettings,
+  _initialized: false,
+  _saving: false,
 
   // Update multiple settings at once
   updateSettings: (newSettings) => {
     set((state) => ({ ...state, ...newSettings }))
 
-    // If download location is being updated, save to database
-    if (newSettings.downloadLocation !== undefined) {
-      const location = newSettings.downloadLocation
-      if (location && location.trim() !== '') {
-        setAppSetting(DB_KEY_DOWNLOAD_LOCATION, location).catch((err) => {
-          console.error('Failed to save download location to database:', err)
-        })
-      } else {
-        // If empty, delete from database
-        deleteAppSetting(DB_KEY_DOWNLOAD_LOCATION).catch((err) => {
-          console.error('Failed to delete download location from database:', err)
-        })
-      }
-    }
+    // Save to database (debounced via the state update)
+    const currentState = get()
+    const settingsData = extractSettingsData({ ...currentState, ...newSettings } as SettingsState)
+    saveToDatabase(settingsData)
   },
 
   // Reset all settings to default values
   resetToDefaults: () => {
-    set(defaultSettings)
-    // Also clear from database
-    deleteAppSetting(DB_KEY_DOWNLOAD_LOCATION).catch((err) => {
-      console.error('Failed to delete download location from database:', err)
-    })
+    set({ ...defaultSettings, _initialized: true })
+    saveToDatabase(defaultSettings)
   },
 
   // Initialize settings from database (call on app startup)
   initFromDatabase: async () => {
     // Only init once
-    if (get()._dbInitialized) return
+    if (get()._initialized) return
 
     try {
-      const dbLocation = await getAppSetting(DB_KEY_DOWNLOAD_LOCATION)
-      if (dbLocation) {
-        set({ downloadLocation: dbLocation, _dbInitialized: true })
+      const stored = await getAppSetting(DB_KEY_SETTINGS)
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<SettingsData>
+        // Merge with defaults to handle new settings added in updates
+        set({ ...defaultSettings, ...parsed, _initialized: true })
       } else {
-        set({ _dbInitialized: true })
+        set({ _initialized: true })
       }
     } catch (err) {
       console.error('Failed to load settings from database:', err)
-      set({ _dbInitialized: true })
+      set({ _initialized: true })
     }
   },
 }))

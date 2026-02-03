@@ -5,9 +5,15 @@
  * - Reading mode preferences (single, double, vertical, webtoon)
  * - Reader settings (direction, fit mode, colors)
  * - Current reading state
+ *
+ * Settings are persisted to SQLite database for backup/export support
  */
 
 import { create } from 'zustand'
+import { getAppSetting, setAppSetting } from '@/utils/tauri-commands'
+
+// Database key for reader settings
+const DB_KEY_READER_SETTINGS = 'reader_settings'
 
 export type ReadingMode = 'single' | 'double' | 'vertical' | 'webtoon'
 export type ReadingDirection = 'ltr' | 'rtl'
@@ -52,6 +58,9 @@ export interface ReaderState {
 
   // Settings (persisted)
   settings: ReaderSettings
+
+  // Internal
+  _initialized: boolean
 }
 
 interface ReaderActions {
@@ -80,6 +89,7 @@ interface ReaderActions {
   setFitMode: (mode: FitMode) => void
   setZoom: (zoom: number) => void
   resetSettings: () => void
+  initFromDatabase: () => Promise<void>
 }
 
 const defaultSettings: ReaderSettings = {
@@ -109,6 +119,16 @@ const initialState: ReaderState = {
   showControls: true,
   isLoading: false,
   settings: defaultSettings,
+  _initialized: false,
+}
+
+// Helper to save settings to database
+const saveSettingsToDatabase = async (settings: ReaderSettings) => {
+  try {
+    await setAppSetting(DB_KEY_READER_SETTINGS, JSON.stringify(settings))
+  } catch (err) {
+    console.error('Failed to save reader settings to database:', err)
+  }
 }
 
 export const useReaderStore = create<ReaderState & ReaderActions>()((set, get) => ({
@@ -174,39 +194,59 @@ export const useReaderStore = create<ReaderState & ReaderActions>()((set, get) =
 
   // Settings
   updateSettings: (newSettings) => {
-    set((state) => ({
-      settings: { ...state.settings, ...newSettings },
-    }))
+    const updatedSettings = { ...get().settings, ...newSettings }
+    set({ settings: updatedSettings })
+    saveSettingsToDatabase(updatedSettings)
   },
 
   setReadingMode: (mode) => {
-    set((state) => ({
-      settings: { ...state.settings, readingMode: mode },
-    }))
+    const updatedSettings = { ...get().settings, readingMode: mode }
+    set({ settings: updatedSettings })
+    saveSettingsToDatabase(updatedSettings)
   },
 
   setReadingDirection: (direction) => {
-    set((state) => ({
-      settings: { ...state.settings, readingDirection: direction },
-    }))
+    const updatedSettings = { ...get().settings, readingDirection: direction }
+    set({ settings: updatedSettings })
+    saveSettingsToDatabase(updatedSettings)
   },
 
   setFitMode: (mode) => {
-    set((state) => ({
-      settings: { ...state.settings, fitMode: mode },
-    }))
+    const updatedSettings = { ...get().settings, fitMode: mode }
+    set({ settings: updatedSettings })
+    saveSettingsToDatabase(updatedSettings)
   },
 
   setZoom: (zoom) => {
     const { settings } = get()
     const clampedZoom = Math.max(settings.minZoom, Math.min(zoom, settings.maxZoom))
-    set((state) => ({
-      settings: { ...state.settings, zoom: clampedZoom },
-    }))
+    const updatedSettings = { ...settings, zoom: clampedZoom }
+    set({ settings: updatedSettings })
+    saveSettingsToDatabase(updatedSettings)
   },
 
   resetSettings: () => {
     set({ settings: defaultSettings })
+    saveSettingsToDatabase(defaultSettings)
+  },
+
+  // Initialize from database
+  initFromDatabase: async () => {
+    if (get()._initialized) return
+
+    try {
+      const stored = await getAppSetting(DB_KEY_READER_SETTINGS)
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<ReaderSettings>
+        // Merge with defaults to handle new settings added in updates
+        set({ settings: { ...defaultSettings, ...parsed }, _initialized: true })
+      } else {
+        set({ _initialized: true })
+      }
+    } catch (err) {
+      console.error('Failed to load reader settings from database:', err)
+      set({ _initialized: true })
+    }
   },
 }))
 

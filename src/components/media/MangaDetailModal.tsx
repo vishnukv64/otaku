@@ -7,7 +7,7 @@
  * - Reading progress indicators
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   X,
@@ -27,8 +27,11 @@ import {
   CheckCircle,
   Trash2,
   Bell,
+  Tags,
 } from 'lucide-react'
-import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, type MediaEntry, type LibraryStatus } from '@/utils/tauri-commands'
+import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { TagSelector, TagChips } from '@/components/library'
+import { Description } from '@/components/ui/Description'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useMediaStatusContext, getStatusLabel } from '@/contexts/MediaStatusContext'
 import { useChapterDownloadEvents } from '@/hooks/useChapterDownloadEvents'
@@ -60,6 +63,11 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
+
+  // Tag state
+  const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
+  const [showTagSelector, setShowTagSelector] = useState(false)
+  const tagButtonRef = useRef<HTMLButtonElement>(null)
 
   // Use event-based download tracking instead of polling
   // Note: Toast notifications are handled globally by the notification system
@@ -142,6 +150,16 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
           setIsFavorite(mediaStatus.isFavorite)
           setIsTracked(mediaStatus.isTracked)
           setLibraryStatus(mediaStatus.libraryStatus || null)
+
+          // Load tags if in library
+          if (inLib) {
+            try {
+              const tags = await getMediaTags(result.id)
+              setMediaTags(tags)
+            } catch {
+              // Ignore tag loading errors
+            }
+          }
         } catch {
           // Ignore
         }
@@ -192,6 +210,28 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   }, [details])
 
   if (!manga) return null
+
+  // Tag functions
+  const loadMediaTags = async () => {
+    if (!details) return
+    try {
+      const tags = await getMediaTags(details.id)
+      setMediaTags(tags)
+    } catch (error) {
+      console.error('Failed to load media tags:', error)
+    }
+  }
+
+  const handleRemoveTag = async (tagId: number) => {
+    if (!details) return
+    try {
+      await unassignLibraryTag(details.id, tagId)
+      setMediaTags(prev => prev.filter(t => t.id !== tagId))
+    } catch (error) {
+      console.error('Failed to remove tag:', error)
+      notifyError('Error', 'Failed to remove tag')
+    }
+  }
 
   const handleReadNow = (chapterId?: string) => {
     if (!details) return
@@ -660,6 +700,33 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                 )}
               </div>
 
+              {/* Tags Section */}
+              {inLibrary && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <TagChips
+                    tags={mediaTags}
+                    onRemove={handleRemoveTag}
+                  />
+                  <div className="relative">
+                    <button
+                      ref={tagButtonRef}
+                      onClick={() => setShowTagSelector(!showTagSelector)}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] rounded-full transition-colors"
+                    >
+                      <Tags className="w-4 h-4" />
+                      <span>{mediaTags.length > 0 ? 'Edit Tags' : 'Add Tags'}</span>
+                    </button>
+                    <TagSelector
+                      mediaId={details.id}
+                      isOpen={showTagSelector}
+                      onClose={() => setShowTagSelector(false)}
+                      onTagsChange={loadMediaTags}
+                      anchorRef={tagButtonRef}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Genres */}
               {details.genres && details.genres.length > 0 && (
                 <div className="flex flex-wrap gap-2">
@@ -678,9 +745,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
               {details.description && (
                 <div>
                   <h3 className="text-lg font-semibold mb-2">Synopsis</h3>
-                  <p className="text-[var(--color-text-secondary)] leading-relaxed">
-                    {details.description}
-                  </p>
+                  <Description content={details.description} />
                 </div>
               )}
 

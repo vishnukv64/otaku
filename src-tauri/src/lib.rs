@@ -345,6 +345,21 @@ pub fn run() {
       commands::get_library_with_media,
       commands::toggle_favorite,
       commands::is_in_library,
+      // Library Tags
+      commands::create_library_tag,
+      commands::get_library_tags,
+      commands::get_library_tags_with_counts,
+      commands::update_library_tag,
+      commands::delete_library_tag,
+      commands::assign_library_tag,
+      commands::unassign_library_tag,
+      commands::get_media_tags,
+      commands::get_library_by_tag,
+      // Bulk Operations
+      commands::bulk_assign_library_tag,
+      commands::bulk_unassign_library_tag,
+      commands::bulk_update_library_status,
+      commands::bulk_remove_from_library,
       // Media
       commands::save_media_details,
       commands::get_continue_watching_with_details,

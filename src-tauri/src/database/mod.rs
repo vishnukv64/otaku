@@ -14,6 +14,7 @@ pub mod watch_history;
 pub mod reading_history;
 pub mod library;
 pub mod media;
+pub mod tags;
 
 /// Database manager with connection pooling
 pub struct Database {
@@ -91,6 +92,7 @@ impl Database {
             ("009_notifications.sql", include_str!("../../migrations/009_notifications.sql")),
             ("010_app_settings.sql", include_str!("../../migrations/010_app_settings.sql")),
             ("011_release_tracking.sql", include_str!("../../migrations/011_release_tracking.sql")),
+            ("012_library_tags.sql", include_str!("../../migrations/012_library_tags.sql")),
         ];
 
         for (name, migration_sql) in migrations {

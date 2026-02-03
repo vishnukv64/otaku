@@ -229,10 +229,13 @@ const extensionObject = {
 
   getDetails: (id) => {
     // Use the correct persisted query for manga details
+    // Note: allowAdult must match NSFW settings - if manga is adult and allowAdult is false, API returns null
+    const allowAdult = typeof __allowAdult !== 'undefined' ? __allowAdult : false;
+
     const variables = {
       _id: id,
       search: {
-        allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false,
+        allowAdult: allowAdult,
         allowUnknown: false
       }
     };
@@ -245,6 +248,8 @@ const extensionObject = {
     };
 
     const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
+
+    console.log('[MangaExtension] getDetails for ID:', id, 'allowAdult:', allowAdult);
 
     try {
       const responseStr = __fetch(url, {
@@ -259,7 +264,12 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const manga = data?.data?.manga;
 
-      if (!manga) throw new Error('Manga not found');
+      if (!manga) {
+        console.error('[MangaExtension] Manga not found in response. This can happen if:',
+          '1) The manga ID is invalid',
+          '2) The manga is adult content and NSFW filter is enabled (allowAdult:', allowAdult, ')');
+        throw new Error(allowAdult ? 'Manga not found' : 'Manga not found (may be adult content - try disabling NSFW filter)');
+      }
 
       // Handle thumbnail URL
       let coverUrl = null;

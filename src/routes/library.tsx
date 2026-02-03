@@ -8,13 +8,14 @@
  */
 
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import { Loader2, AlertCircle, BookMarked, Download, Tv, BookOpen } from 'lucide-react'
-import { getLibraryWithMedia, loadExtension, getDownloadsWithMedia, getDownloadedMangaWithMedia, type LibraryEntryWithMedia, type LibraryStatus, type DownloadWithMedia, type DownloadedMangaWithMedia } from '@/utils/tauri-commands'
+import { useEffect, useState, useCallback } from 'react'
+import { Loader2, AlertCircle, BookMarked, Download, Tv, BookOpen, CheckSquare, Square } from 'lucide-react'
+import { getLibraryWithMedia, loadExtension, getDownloadsWithMedia, getDownloadedMangaWithMedia, getLibraryTagsWithCounts, getLibraryByTag, type LibraryEntryWithMedia, type LibraryStatus, type DownloadWithMedia, type DownloadedMangaWithMedia, type LibraryTagWithCount } from '@/utils/tauri-commands'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
+import { TagDropdown, TagManager, BulkActionBar } from '@/components/library'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import type { SearchResult } from '@/types/extension'
@@ -62,6 +63,15 @@ function LibraryScreen() {
   const [selectedMediaType, setSelectedMediaType] = useState<'anime' | 'manga'>('anime')
   const [isModalOpen, setIsModalOpen] = useState(false)
 
+  // Tag state
+  const [tags, setTags] = useState<LibraryTagWithCount[]>([])
+  const [selectedTagId, setSelectedTagId] = useState<number | null>(null)
+  const [showTagManager, setShowTagManager] = useState(false)
+
+  // Multi-select state
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
+
   // Grid density class mapping (extended for 4K displays)
   const gridClasses = {
     compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-2',
@@ -97,9 +107,25 @@ function LibraryScreen() {
     } else if (mediaFilter === 'manga') {
       setActiveTab('reading')
     }
+    // Clear tag filter when switching media type
+    setSelectedTagId(null)
   }, [mediaFilter])
 
-  // Load library for active tab and media filter
+  // Load tags on mount and when they change
+  const loadTags = useCallback(async () => {
+    try {
+      const result = await getLibraryTagsWithCounts()
+      setTags(result)
+    } catch (err) {
+      console.error('Failed to load tags:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadTags()
+  }, [])
+
+  // Load library for active tab, media filter, and tag filter
   useEffect(() => {
     const loadLibrary = async () => {
       setLoading(true)
@@ -115,8 +141,27 @@ function LibraryScreen() {
             const downloads = await getDownloadsWithMedia()
             setDownloadedAnime(downloads)
           }
+        } else if (selectedTagId !== null) {
+          // Load library filtered by tag
+          const results = await getLibraryByTag(selectedTagId)
+
+          // Filter by media type
+          let filtered = results.filter(entry => {
+            if (mediaFilter === 'all') return true
+            return entry.media.media_type === mediaFilter
+          })
+
+          // Filter out NSFW content using genres and title keywords
+          filtered = filterNsfwContent(
+            filtered,
+            entry => entry.media.genres,
+            nsfwFilter,
+            entry => entry.media.title
+          )
+
+          setLibrary(filtered)
         } else {
-          // Load from library
+          // Load from library by status
           const results = await getLibraryWithMedia(activeTab === 'all' ? undefined : activeTab)
 
           // Filter by media type
@@ -143,7 +188,7 @@ function LibraryScreen() {
     }
 
     loadLibrary()
-  }, [activeTab, mediaFilter, nsfwFilter])
+  }, [activeTab, mediaFilter, nsfwFilter, selectedTagId])
 
   const handleMediaClick = (entry: LibraryEntryWithMedia) => {
     // Convert to SearchResult for modal
@@ -184,9 +229,12 @@ function LibraryScreen() {
   const handleCloseModal = () => {
     setIsModalOpen(false)
     setSelectedMedia(null)
-    // Reload library to reflect any changes
+    // Reload library and tags to reflect any changes
     const loadLibrary = async () => {
       try {
+        // Reload tags in case they were modified
+        await loadTags()
+
         if (activeTab === 'downloaded') {
           if (mediaFilter === 'manga') {
             const downloads = await getDownloadedMangaWithMedia()
@@ -195,6 +243,20 @@ function LibraryScreen() {
             const downloads = await getDownloadsWithMedia()
             setDownloadedAnime(downloads)
           }
+        } else if (selectedTagId !== null) {
+          // Reload by tag filter
+          const results = await getLibraryByTag(selectedTagId)
+          let filtered = results.filter(entry => {
+            if (mediaFilter === 'all') return true
+            return entry.media.media_type === mediaFilter
+          })
+          filtered = filterNsfwContent(
+            filtered,
+            entry => entry.media.genres,
+            nsfwFilter,
+            entry => entry.media.title
+          )
+          setLibrary(filtered)
         } else {
           const results = await getLibraryWithMedia(activeTab === 'all' ? undefined : activeTab)
           let filtered = results.filter(entry => {
@@ -217,6 +279,69 @@ function LibraryScreen() {
     loadLibrary()
   }
 
+  // Selection handlers
+  const toggleItemSelection = (mediaId: string) => {
+    setSelectedItems(prev => {
+      const next = new Set(prev)
+      if (next.has(mediaId)) {
+        next.delete(mediaId)
+      } else {
+        next.add(mediaId)
+      }
+      return next
+    })
+  }
+
+  const selectAllItems = () => {
+    setSelectedItems(new Set(library.map(entry => entry.media.id)))
+  }
+
+  const clearSelection = () => {
+    setSelectedItems(new Set())
+    setSelectionMode(false)
+  }
+
+  const handleBulkActionComplete = async () => {
+    // Reload library and tags
+    await loadTags()
+    // Trigger a re-fetch by toggling a dependency
+    const loadLibraryData = async () => {
+      try {
+        if (selectedTagId !== null) {
+          const results = await getLibraryByTag(selectedTagId)
+          let filtered = results.filter(entry => {
+            if (mediaFilter === 'all') return true
+            return entry.media.media_type === mediaFilter
+          })
+          filtered = filterNsfwContent(
+            filtered,
+            entry => entry.media.genres,
+            nsfwFilter,
+            entry => entry.media.title
+          )
+          setLibrary(filtered)
+        } else {
+          const status = activeTab === 'all' || activeTab === 'downloaded' ? undefined : activeTab
+          const results = await getLibraryWithMedia(status)
+          let filtered = results.filter(entry => {
+            if (mediaFilter === 'all') return true
+            return entry.media.media_type === mediaFilter
+          })
+          filtered = filterNsfwContent(
+            filtered,
+            entry => entry.media.genres,
+            nsfwFilter,
+            entry => entry.media.title
+          )
+          setLibrary(filtered)
+        }
+      } catch (err) {
+        console.error('Failed to reload library:', err)
+      }
+    }
+    await loadLibraryData()
+  }
+
   // Get appropriate tabs based on media filter
   const currentTabs = mediaFilter === 'manga' ? MANGA_TABS : ANIME_TABS
 
@@ -233,8 +358,8 @@ function LibraryScreen() {
         </p>
       </div>
 
-      {/* Media Type Filter */}
-      <div className="mb-6 flex gap-2">
+      {/* Media Type Filter and Tag Filter */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setMediaFilter('anime')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
@@ -257,6 +382,22 @@ function LibraryScreen() {
           <BookOpen className="w-4 h-4" />
           Manga
         </button>
+
+        {/* Tag Filter Dropdown */}
+        <div className="ml-auto">
+          <TagDropdown
+            tags={tags}
+            selectedTagId={selectedTagId}
+            onSelectTag={(tagId) => {
+              setSelectedTagId(tagId)
+              // When filtering by tag, show all statuses
+              if (tagId !== null) {
+                setActiveTab('all')
+              }
+            }}
+            onManageTags={() => setShowTagManager(true)}
+          />
+        </div>
       </div>
 
       {/* Status Tabs */}
@@ -277,6 +418,45 @@ function LibraryScreen() {
           ))}
         </div>
       </div>
+
+      {/* Selection Mode Toggle & Select All (only show when there are items) */}
+      {!loading && !error && library.length > 0 && activeTab !== 'downloaded' && (
+        <div className="mb-4 flex items-center gap-3">
+          <button
+            onClick={() => {
+              if (selectionMode) {
+                clearSelection()
+              } else {
+                setSelectionMode(true)
+              }
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              selectionMode
+                ? 'bg-[var(--color-accent-primary)] text-white'
+                : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
+            }`}
+          >
+            <CheckSquare className="w-4 h-4" />
+            {selectionMode ? 'Cancel' : 'Select'}
+          </button>
+
+          {selectionMode && (
+            <>
+              <button
+                onClick={selectAllItems}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              >
+                Select All ({library.length})
+              </button>
+              {selectedItems.size > 0 && (
+                <span className="text-sm text-[var(--color-text-muted)]">
+                  {selectedItems.size} selected
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -447,14 +627,36 @@ function LibraryScreen() {
                 title: entry.media.title,
                 cover_url: entry.media.cover_url,
               }
+              const isSelected = selectedItems.has(entry.media.id)
 
               return (
-                <div key={entry.library_entry.media_id} className="relative">
+                <div
+                  key={entry.library_entry.media_id}
+                  className={`relative ${selectionMode ? 'cursor-pointer' : ''} ${isSelected ? 'ring-2 ring-[var(--color-accent-primary)] rounded-lg' : ''}`}
+                  onClick={selectionMode ? () => toggleItemSelection(entry.media.id) : undefined}
+                >
                   <MediaCard
                     media={media}
-                    onClick={() => handleMediaClick(entry)}
+                    onClick={selectionMode ? undefined : () => handleMediaClick(entry)}
                   />
-                  {entry.library_entry.favorite && (
+                  {/* Selection checkbox */}
+                  {selectionMode && (
+                    <div className="absolute top-2 left-2 z-10">
+                      <div className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                        isSelected
+                          ? 'bg-[var(--color-accent-primary)] text-white'
+                          : 'bg-black/60 text-white/60 hover:bg-black/80'
+                      }`}>
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4" />
+                        ) : (
+                          <Square className="w-4 h-4" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* Favorite indicator */}
+                  {entry.library_entry.favorite && !selectionMode && (
                     <div className="absolute top-2 right-2 text-yellow-400">
                       ★
                     </div>
@@ -483,6 +685,23 @@ function LibraryScreen() {
           manga={selectedMedia}
           extensionId={mangaExtensionId}
           onClose={handleCloseModal}
+        />
+      )}
+
+      {/* Tag Manager Modal */}
+      <TagManager
+        isOpen={showTagManager}
+        onClose={() => setShowTagManager(false)}
+        onTagsChange={loadTags}
+      />
+
+      {/* Bulk Action Bar */}
+      {selectionMode && (
+        <BulkActionBar
+          selectedIds={selectedItems}
+          mediaType={mediaFilter === 'manga' ? 'manga' : 'anime'}
+          onClearSelection={clearSelection}
+          onActionComplete={handleBulkActionComplete}
         />
       )}
     </div>

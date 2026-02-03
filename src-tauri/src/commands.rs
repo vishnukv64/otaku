@@ -1584,6 +1584,191 @@ pub async fn is_in_library(
         .map_err(|e| format!("Failed to check library: {}", e))
 }
 
+// ==================== Library Tag Commands ====================
+
+/// Create a new library tag
+#[tauri::command]
+pub async fn create_library_tag(
+    state: State<'_, AppState>,
+    name: String,
+    color: String,
+) -> Result<crate::database::tags::LibraryTag, String> {
+    use crate::database::tags::create_tag;
+
+    create_tag(state.database.pool(), &name, &color)
+        .await
+        .map_err(|e| format!("Failed to create tag: {}", e))
+}
+
+/// Get all library tags
+#[tauri::command]
+pub async fn get_library_tags(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::tags::LibraryTag>, String> {
+    use crate::database::tags::get_all_tags;
+
+    get_all_tags(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get tags: {}", e))
+}
+
+/// Get all library tags with item counts
+#[tauri::command]
+pub async fn get_library_tags_with_counts(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::tags::LibraryTagWithCount>, String> {
+    use crate::database::tags::get_tags_with_counts;
+
+    get_tags_with_counts(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get tags with counts: {}", e))
+}
+
+/// Update a library tag
+#[tauri::command]
+pub async fn update_library_tag(
+    state: State<'_, AppState>,
+    tag_id: i64,
+    name: Option<String>,
+    color: Option<String>,
+) -> Result<(), String> {
+    use crate::database::tags::update_tag;
+
+    update_tag(
+        state.database.pool(),
+        tag_id,
+        name.as_deref(),
+        color.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("Failed to update tag: {}", e))
+}
+
+/// Delete a library tag
+#[tauri::command]
+pub async fn delete_library_tag(
+    state: State<'_, AppState>,
+    tag_id: i64,
+) -> Result<(), String> {
+    use crate::database::tags::delete_tag;
+
+    delete_tag(state.database.pool(), tag_id)
+        .await
+        .map_err(|e| format!("Failed to delete tag: {}", e))
+}
+
+/// Assign a tag to a media item
+#[tauri::command]
+pub async fn assign_library_tag(
+    state: State<'_, AppState>,
+    media_id: String,
+    tag_id: i64,
+) -> Result<(), String> {
+    use crate::database::tags::assign_tag;
+
+    assign_tag(state.database.pool(), &media_id, tag_id)
+        .await
+        .map_err(|e| format!("Failed to assign tag: {}", e))
+}
+
+/// Unassign a tag from a media item
+#[tauri::command]
+pub async fn unassign_library_tag(
+    state: State<'_, AppState>,
+    media_id: String,
+    tag_id: i64,
+) -> Result<(), String> {
+    use crate::database::tags::unassign_tag;
+
+    unassign_tag(state.database.pool(), &media_id, tag_id)
+        .await
+        .map_err(|e| format!("Failed to unassign tag: {}", e))
+}
+
+/// Get all tags for a specific media item
+#[tauri::command]
+pub async fn get_media_tags(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Vec<crate::database::tags::LibraryTag>, String> {
+    use crate::database::tags::get_tags_for_media;
+
+    get_tags_for_media(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get media tags: {}", e))
+}
+
+/// Get all library entries with a specific tag
+#[tauri::command]
+pub async fn get_library_by_tag(
+    state: State<'_, AppState>,
+    tag_id: i64,
+) -> Result<Vec<crate::database::library::LibraryEntryWithMedia>, String> {
+    use crate::database::tags::get_library_by_tag as get_by_tag;
+
+    get_by_tag(state.database.pool(), tag_id)
+        .await
+        .map_err(|e| format!("Failed to get library by tag: {}", e))
+}
+
+/// Bulk assign a tag to multiple media items
+#[tauri::command]
+pub async fn bulk_assign_library_tag(
+    state: State<'_, AppState>,
+    media_ids: Vec<String>,
+    tag_id: i64,
+) -> Result<(), String> {
+    use crate::database::tags::bulk_assign_tag;
+
+    bulk_assign_tag(state.database.pool(), &media_ids, tag_id)
+        .await
+        .map_err(|e| format!("Failed to bulk assign tag: {}", e))
+}
+
+/// Bulk unassign a tag from multiple media items
+#[tauri::command]
+pub async fn bulk_unassign_library_tag(
+    state: State<'_, AppState>,
+    media_ids: Vec<String>,
+    tag_id: i64,
+) -> Result<(), String> {
+    use crate::database::tags::bulk_unassign_tag;
+
+    bulk_unassign_tag(state.database.pool(), &media_ids, tag_id)
+        .await
+        .map_err(|e| format!("Failed to bulk unassign tag: {}", e))
+}
+
+/// Bulk update library status for multiple items
+#[tauri::command]
+pub async fn bulk_update_library_status(
+    state: State<'_, AppState>,
+    media_ids: Vec<String>,
+    status: String,
+) -> Result<(), String> {
+    use crate::database::library::{bulk_update_library_status as bulk_update, LibraryStatus};
+
+    let status = LibraryStatus::from_str(&status)
+        .ok_or_else(|| format!("Invalid library status: {}", status))?;
+
+    bulk_update(state.database.pool(), &media_ids, status)
+        .await
+        .map_err(|e| format!("Failed to bulk update status: {}", e))
+}
+
+/// Bulk remove items from library
+#[tauri::command]
+pub async fn bulk_remove_from_library(
+    state: State<'_, AppState>,
+    media_ids: Vec<String>,
+) -> Result<(), String> {
+    use crate::database::library::bulk_remove_from_library as bulk_remove;
+
+    bulk_remove(state.database.pool(), &media_ids)
+        .await
+        .map_err(|e| format!("Failed to bulk remove from library: {}", e))
+}
+
 // ==================== Media Commands ====================
 
 /// Save media details to database

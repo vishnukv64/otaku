@@ -856,6 +856,143 @@ export async function isInLibrary(mediaId: string): Promise<boolean> {
   return await invoke('is_in_library', { mediaId })
 }
 
+// ==================== Library Tag Commands ====================
+
+export interface LibraryTag {
+  id: number
+  name: string
+  color: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface LibraryTagWithCount {
+  tag: LibraryTag
+  item_count: number
+}
+
+/**
+ * Create a new library tag
+ * @param name - Tag name
+ * @param color - Tag color (hex format, e.g., "#6366f1")
+ * @returns The created tag
+ */
+export async function createLibraryTag(name: string, color: string): Promise<LibraryTag> {
+  return await invoke('create_library_tag', { name, color })
+}
+
+/**
+ * Get all library tags
+ * @returns Array of all tags
+ */
+export async function getLibraryTags(): Promise<LibraryTag[]> {
+  return await invoke('get_library_tags')
+}
+
+/**
+ * Get all library tags with item counts
+ * @returns Array of tags with their associated item counts
+ */
+export async function getLibraryTagsWithCounts(): Promise<LibraryTagWithCount[]> {
+  return await invoke('get_library_tags_with_counts')
+}
+
+/**
+ * Update a library tag
+ * @param tagId - Tag ID to update
+ * @param name - New name (optional)
+ * @param color - New color (optional)
+ */
+export async function updateLibraryTag(
+  tagId: number,
+  name?: string,
+  color?: string
+): Promise<void> {
+  return await invoke('update_library_tag', { tagId, name, color })
+}
+
+/**
+ * Delete a library tag
+ * @param tagId - Tag ID to delete
+ */
+export async function deleteLibraryTag(tagId: number): Promise<void> {
+  return await invoke('delete_library_tag', { tagId })
+}
+
+/**
+ * Assign a tag to a media item
+ * @param mediaId - Media ID
+ * @param tagId - Tag ID to assign
+ */
+export async function assignLibraryTag(mediaId: string, tagId: number): Promise<void> {
+  return await invoke('assign_library_tag', { mediaId, tagId })
+}
+
+/**
+ * Unassign a tag from a media item
+ * @param mediaId - Media ID
+ * @param tagId - Tag ID to unassign
+ */
+export async function unassignLibraryTag(mediaId: string, tagId: number): Promise<void> {
+  return await invoke('unassign_library_tag', { mediaId, tagId })
+}
+
+/**
+ * Get all tags for a specific media item
+ * @param mediaId - Media ID
+ * @returns Array of tags assigned to the media
+ */
+export async function getMediaTags(mediaId: string): Promise<LibraryTag[]> {
+  return await invoke('get_media_tags', { mediaId })
+}
+
+/**
+ * Get all library entries with a specific tag
+ * @param tagId - Tag ID
+ * @returns Array of library entries with full media details
+ */
+export async function getLibraryByTag(tagId: number): Promise<LibraryEntryWithMedia[]> {
+  return await invoke('get_library_by_tag', { tagId })
+}
+
+// ==================== Bulk Operations ====================
+
+/**
+ * Bulk assign a tag to multiple media items
+ * @param mediaIds - Array of media IDs
+ * @param tagId - Tag ID to assign
+ */
+export async function bulkAssignLibraryTag(mediaIds: string[], tagId: number): Promise<void> {
+  return await invoke('bulk_assign_library_tag', { mediaIds, tagId })
+}
+
+/**
+ * Bulk unassign a tag from multiple media items
+ * @param mediaIds - Array of media IDs
+ * @param tagId - Tag ID to unassign
+ */
+export async function bulkUnassignLibraryTag(mediaIds: string[], tagId: number): Promise<void> {
+  return await invoke('bulk_unassign_library_tag', { mediaIds, tagId })
+}
+
+/**
+ * Bulk update library status for multiple items
+ * @param mediaIds - Array of media IDs
+ * @param status - New status
+ */
+export async function bulkUpdateLibraryStatus(mediaIds: string[], status: LibraryStatus): Promise<void> {
+  return await invoke('bulk_update_library_status', { mediaIds, status })
+}
+
+/**
+ * Bulk remove items from library
+ * @param mediaIds - Array of media IDs
+ */
+export async function bulkRemoveFromLibrary(mediaIds: string[]): Promise<void> {
+  return await invoke('bulk_remove_from_library', { mediaIds })
+}
+
 // ==================== Media Commands ====================
 
 export interface MediaEntry {
@@ -1528,12 +1665,4 @@ export async function deleteAppSetting(key: string): Promise<void> {
   return await invoke('delete_app_setting', { key })
 }
 
-/**
- * Get direct YouTube video URL using yt-dlp
- * @param videoId - YouTube video ID
- * @returns Direct video URL that can be played in HTML5 video element
- */
-export async function getYoutubeVideoUrl(videoId: string): Promise<string> {
-  return await invoke('get_youtube_video_url', { videoId })
-}
 

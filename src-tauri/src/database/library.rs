@@ -383,6 +383,46 @@ pub async fn is_in_library(
     Ok(count > 0)
 }
 
+/// Bulk update library status for multiple items
+pub async fn bulk_update_library_status(
+    pool: &SqlitePool,
+    media_ids: &[String],
+    status: LibraryStatus,
+) -> Result<()> {
+    for media_id in media_ids {
+        sqlx::query(
+            r#"
+            UPDATE library
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE media_id = ?
+            "#
+        )
+        .bind(status.as_str())
+        .bind(media_id)
+        .execute(pool)
+        .await?;
+    }
+
+    log::debug!("Bulk updated {} items to status {}", media_ids.len(), status.as_str());
+    Ok(())
+}
+
+/// Bulk remove from library
+pub async fn bulk_remove_from_library(
+    pool: &SqlitePool,
+    media_ids: &[String],
+) -> Result<()> {
+    for media_id in media_ids {
+        sqlx::query("DELETE FROM library WHERE media_id = ?")
+            .bind(media_id)
+            .execute(pool)
+            .await?;
+    }
+
+    log::debug!("Bulk removed {} items from library", media_ids.len());
+    Ok(())
+}
+
 impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for LibraryEntry {
     fn from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
