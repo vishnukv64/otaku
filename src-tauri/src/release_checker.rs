@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Global flag to control the background checker
 static CHECKER_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -60,6 +60,18 @@ pub struct ReleaseCheckResult {
     pub current_count: i32,
     pub new_releases: i32,
     pub extension_id: String,
+}
+
+/// Progress update during release checking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseCheckProgress {
+    pub current_index: u32,
+    pub total_count: u32,
+    pub media_title: String,
+    pub media_type: String, // "anime" or "manga"
+    pub is_complete: bool,
+    pub status: String, // "checking", "success", "failed", "complete"
+    pub error_message: Option<String>,
 }
 
 /// Media item eligible for release checking
@@ -380,16 +392,38 @@ pub async fn run_full_release_check(
 
     // Get eligible media
     let eligible = get_eligible_media(pool).await?;
-    log::info!("Checking {} media items for new releases", eligible.len());
+    let total_count = eligible.len() as u32;
+    log::info!("Checking {} media items for new releases", total_count);
 
     let mut results = Vec::new();
 
-    for media in eligible.iter() {
+    for (index, media) in eligible.iter().enumerate() {
         // Check if we should stop
         if CHECKER_STOP_FLAG.load(Ordering::SeqCst) {
             log::info!("Release check stopped by user");
+            // Emit completion on stop
+            let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
+                current_index: index as u32 + 1,
+                total_count,
+                media_title: String::new(),
+                media_type: String::new(),
+                is_complete: true,
+                status: "complete".to_string(),
+                error_message: None,
+            });
             break;
         }
+
+        // Emit progress before checking each item
+        let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
+            current_index: index as u32 + 1,
+            total_count,
+            media_title: media.title.clone(),
+            media_type: media.media_type.clone(),
+            is_complete: false,
+            status: "checking".to_string(),
+            error_message: None,
+        });
 
         match check_single_media(&app_state, media).await {
             Ok(Some(result)) => {
@@ -399,6 +433,17 @@ pub async fn run_full_release_check(
                     result.media_title,
                     result.new_releases
                 );
+
+                // Emit success status
+                let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
+                    current_index: index as u32 + 1,
+                    total_count,
+                    media_title: media.title.clone(),
+                    media_type: media.media_type.clone(),
+                    is_complete: false,
+                    status: "success".to_string(),
+                    error_message: None,
+                });
 
                 // Update tracking
                 if let Err(e) = update_tracking(pool, &result.media_id, &result.extension_id, &result.media_type, result.current_count, true).await {
@@ -420,12 +465,33 @@ pub async fn run_full_release_check(
             }
             Err(e) => {
                 log::error!("Failed to check {}: {}", media.media_id, e);
+                // Emit failure status
+                let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
+                    current_index: index as u32 + 1,
+                    total_count,
+                    media_title: media.title.clone(),
+                    media_type: media.media_type.clone(),
+                    is_complete: false,
+                    status: "failed".to_string(),
+                    error_message: Some(e.to_string()),
+                });
             }
         }
 
         // Rate limiting delay
         tokio::time::sleep(Duration::from_millis(API_DELAY_MS)).await;
     }
+
+    // Emit completion progress
+    let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
+        current_index: total_count,
+        total_count,
+        media_title: String::new(),
+        media_type: String::new(),
+        is_complete: true,
+        status: "complete".to_string(),
+        error_message: None,
+    });
 
     // Update last full check timestamp
     let mut settings = get_release_settings(pool).await?;

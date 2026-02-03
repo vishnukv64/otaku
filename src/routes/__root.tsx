@@ -8,6 +8,7 @@ import { useAutoUpdateCheck } from '@/hooks/useAutoUpdateCheck'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useReaderStore } from '@/store/readerStore'
 import { usePlayerStore } from '@/store/playerStore'
+import { ReleaseCheckOverlay } from '@/components/notifications/ReleaseCheckOverlay'
 import { Home, Search, ArrowLeft } from 'lucide-react'
 
 function NotFoundPage() {
@@ -123,6 +124,7 @@ function RootComponent() {
           },
         }}
       />
+      <ReleaseCheckOverlay />
     </MediaStatusProvider>
   )
 }
