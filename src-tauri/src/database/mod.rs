@@ -15,6 +15,7 @@ pub mod reading_history;
 pub mod library;
 pub mod media;
 pub mod tags;
+pub mod export_import;
 
 /// Database manager with connection pooling
 pub struct Database {

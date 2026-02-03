@@ -13,6 +13,8 @@ import { SettingDropdown } from '../components/settings/SettingDropdown'
 import { SettingFileInput } from '../components/settings/SettingFileInput'
 import { DangerButton } from '../components/settings/DangerButton'
 import { UpdateSection } from '../components/settings/UpdateSection'
+import { ExportImportSection } from '../components/settings/ExportImportSection'
+import { AutoBackupSection } from '../components/settings/AutoBackupSection'
 import { HardDrive, Activity, ChevronRight, FileText, Info } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 
@@ -363,6 +365,12 @@ function SettingsScreen() {
           </SettingRow>
 
         </SettingSection>
+
+        {/* Export & Import Section */}
+        <ExportImportSection />
+
+        {/* Auto-Backup Section */}
+        <AutoBackupSection />
 
         {/* Data & Privacy Section */}
         <SettingSection

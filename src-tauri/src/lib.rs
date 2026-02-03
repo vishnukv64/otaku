@@ -1,4 +1,5 @@
 // Module declarations
+mod auto_backup;
 mod commands;
 mod database;
 mod downloads;
@@ -54,6 +55,7 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_fs::init())
     .register_asynchronous_uri_scheme_protocol("stream", |_app, request, responder| {
       // Custom protocol to stream videos through Rust backend with Range support
       use std::io::Read;
@@ -268,6 +270,10 @@ pub fn run() {
             }
         });
 
+        // Start auto-backup task
+        let backup_app_handle = app_handle.clone();
+        auto_backup::start_auto_backup_task(backup_app_handle).await;
+
         log::info!("Backend initialized successfully");
       });
 
@@ -406,6 +412,16 @@ pub fn run() {
       commands::get_release_check_status,
       commands::initialize_release_tracking,
       commands::get_release_tracking_status,
+      // Export/Import
+      commands::export_user_data,
+      commands::import_user_data,
+      // Auto-Backup
+      commands::get_auto_backup_config,
+      commands::update_auto_backup_config,
+      commands::trigger_backup_now,
+      commands::list_available_backups,
+      commands::get_default_backup_directory,
+      commands::delete_backup,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

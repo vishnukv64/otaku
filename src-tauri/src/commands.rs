@@ -2915,3 +2915,157 @@ pub async fn get_youtube_video_url(
 
     Err("All Invidious instances failed".to_string())
 }
+
+// ============================================================================
+// Export/Import Commands
+// ============================================================================
+
+use crate::database::export_import::{
+    ExportData, ImportOptions, ImportResult, export_all_data, import_data,
+};
+
+/// Export all user data to JSON
+#[tauri::command]
+pub async fn export_user_data(
+    state: State<'_, AppState>,
+) -> Result<ExportData, String> {
+    // Get app version from Cargo.toml
+    let app_version = env!("CARGO_PKG_VERSION");
+
+    export_all_data(state.database.pool(), app_version)
+        .await
+        .map_err(|e| format!("Failed to export data: {}", e))
+}
+
+/// Import user data from JSON
+#[tauri::command]
+pub async fn import_user_data(
+    state: State<'_, AppState>,
+    data: ExportData,
+    options: ImportOptions,
+) -> Result<ImportResult, String> {
+    import_data(state.database.pool(), data, options)
+        .await
+        .map_err(|e| format!("Failed to import data: {}", e))
+}
+
+// ============================================================================
+// Auto-Backup Commands
+// ============================================================================
+
+use crate::auto_backup::{
+    self, AutoBackupSettings, BackupResult,
+    get_auto_backup_settings, save_auto_backup_settings,
+    perform_backup, list_backups, get_backup_dir, get_default_backup_dir,
+};
+
+/// Get auto-backup settings
+#[tauri::command]
+pub async fn get_auto_backup_config(
+    state: State<'_, AppState>,
+) -> Result<AutoBackupSettings, String> {
+    get_auto_backup_settings(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get auto-backup settings: {}", e))
+}
+
+/// Update auto-backup settings
+#[tauri::command]
+pub async fn update_auto_backup_config(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    settings: AutoBackupSettings,
+) -> Result<(), String> {
+    save_auto_backup_settings(state.database.pool(), &settings)
+        .await
+        .map_err(|e| format!("Failed to save auto-backup settings: {}", e))?;
+
+    // Start or restart the backup task if enabled
+    if settings.enabled {
+        auto_backup::start_auto_backup_task(app).await;
+    }
+
+    Ok(())
+}
+
+/// Trigger a manual backup now
+#[tauri::command]
+pub async fn trigger_backup_now(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<BackupResult, String> {
+    let settings = get_auto_backup_settings(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get settings: {}", e))?;
+
+    perform_backup(state.database.pool(), &app, &settings)
+        .await
+        .map_err(|e| format!("Backup failed: {}", e))
+}
+
+/// List available backups
+#[tauri::command]
+pub async fn list_available_backups(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Vec<BackupInfo>, String> {
+    let settings = get_auto_backup_settings(state.database.pool())
+        .await
+        .map_err(|e| format!("Failed to get settings: {}", e))?;
+
+    let backup_dir = get_backup_dir(&settings, &app);
+    let backups = list_backups(&backup_dir)
+        .await
+        .map_err(|e| format!("Failed to list backups: {}", e))?;
+
+    Ok(backups
+        .into_iter()
+        .map(|(path, date)| BackupInfo {
+            file_path: path.to_string_lossy().to_string(),
+            file_name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            created_at: date.to_rfc3339(),
+            size_bytes: std::fs::metadata(&path)
+                .map(|m| m.len())
+                .unwrap_or(0),
+        })
+        .collect())
+}
+
+#[derive(serde::Serialize)]
+pub struct BackupInfo {
+    pub file_path: String,
+    pub file_name: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+}
+
+/// Get default backup directory path
+#[tauri::command]
+pub async fn get_default_backup_directory(
+    app: AppHandle,
+) -> Result<String, String> {
+    Ok(get_default_backup_dir(&app).to_string_lossy().to_string())
+}
+
+/// Delete a specific backup file
+#[tauri::command]
+pub async fn delete_backup(
+    file_path: String,
+) -> Result<(), String> {
+    // Security: only allow deleting files that match our backup pattern
+    let path = std::path::Path::new(&file_path);
+    if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+        if !filename.starts_with("otaku-auto-backup-") || !filename.ends_with(".json") {
+            return Err("Invalid backup file".to_string());
+        }
+    } else {
+        return Err("Invalid file path".to_string());
+    }
+
+    tokio::fs::remove_file(&file_path)
+        .await
+        .map_err(|e| format!("Failed to delete backup: {}", e))
+}
