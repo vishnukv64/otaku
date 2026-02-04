@@ -5,6 +5,43 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.16] - 2026-02-04
+
+### Added
+- **Export/Import & Auto-Backup** - Complete data portability and protection
+  - Export library, watch progress, and settings to JSON backup file
+  - Import backups to restore data on new installations
+  - Auto-backup feature with configurable intervals (daily, weekly, monthly)
+  - Backup files stored in system-appropriate location
+- **Tag System for Library Management** - Organize your collection with custom tags
+  - Create, edit, and delete custom tags with color coding
+  - Assign multiple tags to anime and manga entries
+  - Filter library by tags for quick access
+  - Bulk tag operations from library view
+- **Release Check Progress Overlay** - Visual feedback during release checks
+  - Shows progress when checking for new episodes/chapters
+  - Displays current item being checked
+  - Non-blocking overlay that doesn't interrupt browsing
+
+### Changed
+- **Landing Page Interface Section Redesign** - Enhanced visual messaging
+  - Strikethrough pain points: "Domain juggling", "Ads & pop-ups", "Broken links"
+  - Elegant cursive "pure and clean" highlight using Playfair Display font
+  - New tagline: "Uninterrupted watching & reading — the way it should be"
+- **Improved Episode Date Handling** - Better next episode countdown display
+  - Enhanced MediaDetailModal and NextEpisodeCountdown components
+  - More accurate date parsing and display
+- **GitHub Pages Deployment** - Landing page now auto-deploys via GitHub Actions
+
+### Fixed
+- **ESLint Warnings** - Addressed multiple linting issues across codebase
+- **React Hook Dependencies** - Fixed missing and incorrect hook dependencies
+
+### Removed
+- **Cache Management** - Removed cache management functionality and related components
+  - Simplified settings page
+  - Removed unused cache-related code
+
 ## [0.1.15] - 2026-02-02
 
 ### Removed
