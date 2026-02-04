@@ -123,7 +123,7 @@ function LibraryScreen() {
 
   useEffect(() => {
     loadTags()
-  }, [])
+  }, [loadTags])
 
   // Load library for active tab, media filter, and tag filter
   useEffect(() => {

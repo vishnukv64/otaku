@@ -95,7 +95,8 @@ export function NextEpisodeCountdown({
   const isAiring = status && ['releasing', 'ongoing', 'airing', 'currently airing'].includes(status.toLowerCase())
 
   // Calculate last episode air time - prioritize latestEpisodeDate
-  let lastUpdate: number
+  // Note: We compute this before hooks to keep hook order consistent
+  let lastUpdate: number | null = null
   if (latestEpisodeDate) {
     // Convert latestEpisodeDate to timestamp (using noon as default time)
     lastUpdate = new Date(
@@ -109,25 +110,30 @@ export function NextEpisodeCountdown({
   } else if (lastUpdateEnd) {
     // Fallback to ISO timestamp
     lastUpdate = new Date(lastUpdateEnd).getTime()
-  } else {
-    // No data available
-    return null
   }
 
-  const nextReleaseTime = lastUpdate + broadcastInterval
+  const nextReleaseTime = lastUpdate !== null ? lastUpdate + broadcastInterval : 0
 
   const [timeRemaining, setTimeRemaining] = useState<TimeRemaining>(
     calculateTimeRemaining(nextReleaseTime)
   )
 
   useEffect(() => {
+    // Don't run interval if no valid release time
+    if (lastUpdate === null) return
+
     // Update every second
     const interval = setInterval(() => {
       setTimeRemaining(calculateTimeRemaining(nextReleaseTime))
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [nextReleaseTime])
+  }, [nextReleaseTime, lastUpdate])
+
+  // Early returns after hooks to comply with Rules of Hooks
+  if (lastUpdate === null) {
+    return null
+  }
 
   if (!isAiring) {
     return null

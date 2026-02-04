@@ -49,6 +49,7 @@ export function TagSelector({
     if (isOpen) {
       loadTags()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mediaId])
 
   // Close popover when clicking outside

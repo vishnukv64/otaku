@@ -534,6 +534,7 @@ export function MediaDetailModal({
     }
 
     loadMediaTags()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, media.id, inLibrary])
 
   // Handle tag removal
