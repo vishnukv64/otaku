@@ -580,6 +580,77 @@ body {
     z-index: 1;
 }
 
+/* Interface Section - Enhanced Header */
+.interface-header {
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.pain-points {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.strikethrough {
+    position: relative;
+    color: var(--text-dim);
+    font-size: 1.125rem;
+    font-weight: 500;
+    text-decoration: line-through;
+    text-decoration-color: var(--neon-red);
+    text-decoration-thickness: 2px;
+    opacity: 0.7;
+    transition: opacity 0.3s;
+}
+
+.strikethrough:hover {
+    opacity: 1;
+}
+
+.pain-separator {
+    color: var(--text-dim);
+    opacity: 0.3;
+}
+
+/* Cursive highlight styling */
+.cursive-highlight {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--neon-red);
+    text-shadow: 0 0 30px var(--neon-glow);
+    position: relative;
+}
+
+.cursive-highlight::after {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--neon-red), transparent);
+    opacity: 0.5;
+}
+
+.cursive-tagline {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.375rem !important;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+}
+
+.cursive-tagline em {
+    color: var(--text-primary);
+    font-style: italic;
+}
+
 .carousel {
     position: relative;
     max-width: 1200px;
@@ -870,5 +941,22 @@ body {
     .carousel-btn svg {
         width: 20px;
         height: 20px;
+    }
+
+    /* Interface section responsive */
+    .pain-points {
+        gap: 0.5rem;
+    }
+
+    .strikethrough {
+        font-size: 0.9375rem;
+    }
+
+    .pain-separator {
+        display: none;
+    }
+
+    .cursive-tagline {
+        font-size: 1.125rem !important;
     }
 }
