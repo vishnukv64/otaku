@@ -94,6 +94,7 @@ impl Database {
             ("010_app_settings.sql", include_str!("../../migrations/010_app_settings.sql")),
             ("011_release_tracking.sql", include_str!("../../migrations/011_release_tracking.sql")),
             ("012_library_tags.sql", include_str!("../../migrations/012_library_tags.sql")),
+            ("013_release_tracking_v2.sql", include_str!("../../migrations/013_release_tracking_v2.sql")),
         ];
 
         for (name, migration_sql) in migrations {

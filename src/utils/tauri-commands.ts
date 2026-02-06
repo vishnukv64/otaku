@@ -1538,11 +1538,16 @@ export async function setUpdateCheckInfo(
 // Release Checker Commands
 // ============================================================================
 
-/** Release check settings */
+/** Release check settings (V2 with granular intervals) */
 export interface ReleaseCheckSettings {
   enabled: boolean
-  interval_hours: number
+  interval_minutes: number
+  fast_interval_minutes: number
+  retry_delay_minutes: number
+  max_retries: number
   last_full_check: number | null
+  /** @deprecated Use interval_minutes instead */
+  interval_hours?: number
 }
 
 /** Release check status */
@@ -1554,15 +1559,62 @@ export interface ReleaseCheckStatus {
   new_releases_found: number
 }
 
-/** Result from checking a single media item */
+/** Result from checking a single media item (V2 with detection signal) */
 export interface ReleaseCheckResult {
   media_id: string
   media_title: string
   media_type: 'anime' | 'manga'
   previous_count: number
   current_count: number
+  previous_number: number | null
+  current_number: number | null
   new_releases: number
   extension_id: string
+  detection_signal: 'number' | 'id' | 'count'
+}
+
+/** Media release state for NEW badges */
+export interface MediaReleaseState {
+  media_id: string
+  has_new_release: boolean
+  latest_number: number | null
+  notified_up_to: number | null
+  last_checked: number | null
+  normalized_status: 'ongoing' | 'completed' | 'hiatus' | 'unknown'
+}
+
+/** Check log entry for debugging */
+export interface CheckLogEntry {
+  id: number
+  media_id: string
+  check_timestamp: number
+  result_type: 'new_release' | 'no_change' | 'api_error' | 'count_decreased' | 'first_check'
+  previous_count: number | null
+  new_count: number | null
+  previous_latest_number: number | null
+  new_latest_number: number | null
+  detection_signal: string | null
+  error_message: string | null
+  notification_sent: boolean
+}
+
+/** Full tracking debug info */
+export interface TrackingDebugInfo {
+  media_id: string
+  extension_id: string
+  media_type: 'anime' | 'manga'
+  last_known_count: number | null
+  last_known_latest_number: number | null
+  last_known_latest_id: string | null
+  raw_status: string | null
+  normalized_status: string
+  user_notified_up_to: number | null
+  notification_enabled: boolean
+  last_checked_at: number | null
+  next_scheduled_check: number | null
+  consecutive_failures: number
+  last_error: string | null
+  recent_logs: CheckLogEntry[]
 }
 
 /**
@@ -1576,14 +1628,17 @@ export async function getReleaseCheckSettings(): Promise<ReleaseCheckSettings> {
 /**
  * Update release check settings
  * @param enabled - Whether release checking is enabled
- * @param intervalHours - Hours between checks (6, 12, 24, or 48)
+ * @param intervalMinutes - Minutes between checks (or use intervalHours for backwards compatibility)
+ * @param intervalHours - Hours between checks (legacy, converted to minutes)
  */
 export async function updateReleaseCheckSettings(
   enabled: boolean,
-  intervalHours: number
+  intervalMinutes?: number,
+  intervalHours?: number
 ): Promise<void> {
   return await invoke('update_release_check_settings', {
     enabled,
+    intervalMinutes,
     intervalHours,
   })
 }
@@ -1633,6 +1688,89 @@ export async function initializeReleaseTracking(
  */
 export async function getReleaseTrackingStatus(mediaIds: string[]): Promise<string[]> {
   return await invoke('get_release_tracking_status', { mediaIds })
+}
+
+// ============================================================================
+// Release Checker V2 Commands
+// ============================================================================
+
+/**
+ * Get release states for multiple media items (V2)
+ * Used for determining NEW badges on media cards
+ * @param mediaIds - Array of media IDs to check
+ * @returns Array of release states
+ */
+export async function getMediaReleaseStates(
+  mediaIds: string[]
+): Promise<MediaReleaseState[]> {
+  return await invoke('get_media_release_states', { mediaIds })
+}
+
+/**
+ * Acknowledge new releases (dismiss NEW badge)
+ * @param mediaId - Media ID to acknowledge
+ * @param upToNumber - Optional episode/chapter number to acknowledge up to
+ */
+export async function acknowledgeNewReleases(
+  mediaId: string,
+  upToNumber?: number
+): Promise<void> {
+  return await invoke('acknowledge_new_releases', { mediaId, upToNumber })
+}
+
+/**
+ * Get release check history for debugging
+ * @param mediaId - Media ID to get history for
+ * @param limit - Maximum number of entries to return
+ * @returns Array of check log entries
+ */
+export async function getReleaseCheckHistory(
+  mediaId: string,
+  limit?: number
+): Promise<CheckLogEntry[]> {
+  return await invoke('get_release_check_history', { mediaId, limit })
+}
+
+/**
+ * Get full tracking debug info for a media item
+ * @param mediaId - Media ID to get debug info for
+ * @returns Tracking debug info or null if not tracked
+ */
+export async function getReleaseTrackingDebug(
+  mediaId: string
+): Promise<TrackingDebugInfo | null> {
+  return await invoke('get_release_tracking_debug', { mediaId })
+}
+
+/**
+ * Initialize release tracking with V2 fields
+ * Includes episode number, ID, and raw status for better tracking
+ * @param mediaId - Media ID
+ * @param extensionId - Extension ID
+ * @param mediaType - Type of media
+ * @param currentCount - Current episode/chapter count
+ * @param latestNumber - Latest episode/chapter number
+ * @param latestId - Latest episode/chapter ID
+ * @param rawStatus - Raw status string from API
+ */
+export async function initializeReleaseTrackingV2(
+  mediaId: string,
+  extensionId: string,
+  mediaType: 'anime' | 'manga',
+  currentCount: number,
+  latestNumber?: number,
+  latestId?: string,
+  rawStatus?: string
+): Promise<void> {
+  return await invoke('initialize_release_tracking_v2', {
+    mediaId,
+    extensionId,
+    mediaType,
+    currentCount,
+    latestNumber,
+    latestId,
+    rawStatus,
+  })
 }
 
 // ============================================================================

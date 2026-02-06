@@ -33,12 +33,15 @@ function formatRelativeTime(timestamp: number | null): string {
   return `${days}d ago`
 }
 
-/** Interval options for release checking */
+/** Interval options for release checking (V2: in minutes for more granular control) */
 const INTERVAL_OPTIONS = [
-  { value: 6, label: '6 hours' },
-  { value: 12, label: '12 hours' },
-  { value: 24, label: '24 hours' },
-  { value: 48, label: '48 hours' },
+  { value: 30, label: '30 min' },
+  { value: 60, label: '1 hour' },
+  { value: 120, label: '2 hours' },
+  { value: 240, label: '4 hours' },
+  { value: 360, label: '6 hours' },
+  { value: 720, label: '12 hours' },
+  { value: 1440, label: '24 hours' },
 ]
 
 type TabType = 'all' | 'releases'
@@ -152,25 +155,25 @@ export function NotificationCenter() {
     [navigate, markAsRead]
   )
 
-  // Release check handlers
+  // Release check handlers (V2: uses interval_minutes)
   const handleToggleReleaseCheck = async () => {
     if (!releaseSettings) return
 
     const newEnabled = !releaseSettings.enabled
     try {
-      await updateReleaseCheckSettings(newEnabled, releaseSettings.interval_hours)
+      await updateReleaseCheckSettings(newEnabled, releaseSettings.interval_minutes)
       setReleaseSettings({ ...releaseSettings, enabled: newEnabled })
     } catch (error) {
       console.error('Failed to toggle release check:', error)
     }
   }
 
-  const handleIntervalChange = async (hours: number) => {
+  const handleIntervalChange = async (minutes: number) => {
     if (!releaseSettings) return
 
     try {
-      await updateReleaseCheckSettings(releaseSettings.enabled, hours)
-      setReleaseSettings({ ...releaseSettings, interval_hours: hours })
+      await updateReleaseCheckSettings(releaseSettings.enabled, minutes)
+      setReleaseSettings({ ...releaseSettings, interval_minutes: minutes })
       setShowSettings(false)
     } catch (error) {
       console.error('Failed to update check interval:', error)
@@ -391,7 +394,7 @@ export function NotificationCenter() {
                               key={option.value}
                               onClick={() => handleIntervalChange(option.value)}
                               className={`w-full px-3 py-1.5 text-sm text-left transition-colors ${
-                                releaseSettings.interval_hours === option.value
+                                releaseSettings.interval_minutes === option.value
                                   ? 'bg-[var(--color-accent-primary)] text-white'
                                   : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
                               }`}

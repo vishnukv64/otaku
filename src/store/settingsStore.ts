@@ -76,6 +76,9 @@ const defaultSettings: SettingsData = {
 const saveToDatabase = async (settings: SettingsData) => {
   try {
     await setAppSetting(DB_KEY_SETTINGS, JSON.stringify(settings))
+    // Also save NSFW filter as a separate key for the release checker
+    // The release checker needs this to properly fetch episode info for adult content
+    await setAppSetting('nsfw_filter', settings.nsfwFilter ? '1' : '0')
   } catch (err) {
     console.error('Failed to save settings to database:', err)
   }
@@ -128,9 +131,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<SettingsData>
         // Merge with defaults to handle new settings added in updates
-        set({ ...defaultSettings, ...parsed, _initialized: true })
+        const mergedSettings = { ...defaultSettings, ...parsed }
+        set({ ...mergedSettings, _initialized: true })
+        // Sync NSFW filter key for the release checker
+        await setAppSetting('nsfw_filter', mergedSettings.nsfwFilter ? '1' : '0')
       } else {
         set({ _initialized: true })
+        // Sync default NSFW filter setting
+        await setAppSetting('nsfw_filter', defaultSettings.nsfwFilter ? '1' : '0')
       }
     } catch (err) {
       console.error('Failed to load settings from database:', err)

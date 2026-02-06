@@ -21,6 +21,11 @@ function isAiring(status?: string): boolean {
  *
  * IMPORTANT: Only returns true for currently airing anime, not finished ones
  *
+ * @deprecated Use the `useReleaseState` hook from `@/hooks/useReleaseStates` instead.
+ * The V2 release tracking system provides more reliable detection using multiple signals
+ * (episode number, episode ID, and count) rather than just comparing latest_episode
+ * from search results against watch progress.
+ *
  * @param media - The anime/manga search result
  * @returns Promise<boolean> - true if there are new unwatched episodes
  */

@@ -4,14 +4,15 @@
  * Displays anime/manga with cover image, title, and metadata.
  * Features Netflix-style hover scale effect with popover.
  * Supports status badges for library, favorites, and watch/read progress.
+ *
+ * Uses unified release state hook for NEW badge (V2 release tracking).
  */
 
-import { useState, useEffect } from 'react'
 import type { SearchResult } from '@/types/extension'
 import type { MediaStatus } from '@/contexts/MediaStatusContext'
 import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
 import { Heart, BookmarkCheck, Bell } from 'lucide-react'
-import { hasNewEpisode } from '@/utils/mediaHelpers'
+import { useReleaseState } from '@/hooks/useReleaseStates'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -52,27 +53,17 @@ interface MediaCardProps {
 }
 
 export function MediaCard({ media, onClick, progress, status }: MediaCardProps) {
-  const [showNewBadge, setShowNewBadge] = useState(false)
+  // Use unified release state hook (V2) for NEW badge
+  // Only fetch release state if user is tracking/watching this media
+  const shouldCheckRelease = !progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)
+  const { hasNewRelease } = useReleaseState(shouldCheckRelease ? media.id : undefined)
 
-  // Check for new episodes
-  useEffect(() => {
-    // Only check if:
-    // 1. User is tracking/watching
-    // 2. Not in progress view
-    // 3. Anime is currently airing (not finished)
-    const shouldCheck = !progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)
-
-    if (shouldCheck) {
-      hasNewEpisode(media).then(setShowNewBadge).catch(() => setShowNewBadge(false))
-    }
-
-    // Cleanup: Reset badge when conditions change
-    return () => {
-      if (!shouldCheck) {
-        setShowNewBadge(false)
-      }
-    }
-  }, [media, media.id, media.latest_episode, media.status, progress, status?.isTracked, status?.isWatching])
+  // Show NEW badge when:
+  // 1. User is tracking/watching
+  // 2. Not in progress view (continue watching section)
+  // 3. Anime is currently airing
+  // 4. V2 release tracking detected a new release
+  const showNewBadge = shouldCheckRelease && hasNewRelease
 
   // Badge priority system (show only the most relevant badge on the right)
   // Priority: Favorite > Currently Watching/Reading > Library Status > Tracking

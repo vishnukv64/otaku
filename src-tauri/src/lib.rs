@@ -7,6 +7,7 @@ mod extensions;
 mod media;
 mod notifications;
 mod release_checker;
+mod status_normalizer;
 mod trackers;
 mod video_server;
 
@@ -412,6 +413,12 @@ pub fn run() {
       commands::get_release_check_status,
       commands::initialize_release_tracking,
       commands::get_release_tracking_status,
+      // Release Checker V2
+      commands::get_media_release_states,
+      commands::acknowledge_new_releases,
+      commands::get_release_check_history,
+      commands::get_release_tracking_debug,
+      commands::initialize_release_tracking_v2,
       // Export/Import
       commands::export_user_data,
       commands::import_user_data,

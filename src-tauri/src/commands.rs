@@ -2667,7 +2667,8 @@ pub async fn set_update_check_info(
 // ============================================================================
 
 use crate::release_checker::{
-    self, ReleaseCheckResult, ReleaseCheckSettings, ReleaseCheckStatus,
+    self, CheckLogEntry, MediaReleaseState, ReleaseCheckResult, ReleaseCheckSettings,
+    ReleaseCheckStatus, TrackingDebugInfo,
 };
 
 /// Get release check settings
@@ -2680,18 +2681,28 @@ pub async fn get_release_check_settings(
         .map_err(|e| format!("Failed to get release settings: {}", e))
 }
 
-/// Update release check settings
+/// Update release check settings (V2 with granular intervals)
 #[tauri::command]
 pub async fn update_release_check_settings(
     state: State<'_, AppState>,
     app: AppHandle,
     enabled: bool,
-    interval_hours: u32,
+    interval_hours: Option<u32>,
+    interval_minutes: Option<u32>,
 ) -> Result<(), String> {
+    // Support both legacy interval_hours and new interval_minutes
+    let interval = interval_minutes
+        .or_else(|| interval_hours.map(|h| h * 60))
+        .unwrap_or(120);
+
     let settings = ReleaseCheckSettings {
         enabled,
-        interval_hours,
-        last_full_check: None, // Don't update last check time when changing settings
+        interval_minutes: interval,
+        fast_interval_minutes: 30,
+        retry_delay_minutes: 5,
+        max_retries: 3,
+        last_full_check: None,
+        interval_hours: None,
     };
 
     release_checker::update_release_settings(state.database.pool(), &settings)
@@ -2761,25 +2772,105 @@ pub async fn get_release_tracking_status(
     }
 
     let pool = state.database.pool();
-    
+
     // Build placeholders for the IN clause
     let placeholders = media_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let query = format!(
         "SELECT media_id FROM release_tracking WHERE media_id IN ({})",
         placeholders
     );
-    
+
     let mut query_builder = sqlx::query_scalar(&query);
     for media_id in &media_ids {
         query_builder = query_builder.bind(media_id);
     }
-    
+
     let tracked: Vec<String> = query_builder
         .fetch_all(pool)
         .await
         .map_err(|e| format!("Failed to get tracking status: {}", e))?;
-    
+
     Ok(tracked)
+}
+
+// ============================================================================
+// Release Checker V2 Commands (New)
+// ============================================================================
+
+/// Get release states for multiple media (used by frontend for NEW badges)
+#[tauri::command]
+pub async fn get_media_release_states(
+    state: State<'_, AppState>,
+    media_ids: Vec<String>,
+) -> Result<Vec<MediaReleaseState>, String> {
+    release_checker::get_media_release_states(state.database.pool(), media_ids)
+        .await
+        .map_err(|e| format!("Failed to get release states: {}", e))
+}
+
+/// Acknowledge new releases (dismiss NEW badge)
+#[tauri::command]
+pub async fn acknowledge_new_releases(
+    state: State<'_, AppState>,
+    media_id: String,
+    up_to_number: Option<f32>,
+) -> Result<(), String> {
+    release_checker::acknowledge_new_releases(state.database.pool(), &media_id, up_to_number)
+        .await
+        .map_err(|e| format!("Failed to acknowledge releases: {}", e))
+}
+
+/// Get release check history for debugging
+#[tauri::command]
+pub async fn get_release_check_history(
+    state: State<'_, AppState>,
+    media_id: String,
+    limit: Option<i32>,
+) -> Result<Vec<CheckLogEntry>, String> {
+    release_checker::get_release_check_history(
+        state.database.pool(),
+        &media_id,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(|e| format!("Failed to get check history: {}", e))
+}
+
+/// Get full tracking debug info for a media item
+#[tauri::command]
+pub async fn get_release_tracking_debug(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<TrackingDebugInfo>, String> {
+    release_checker::get_release_tracking_debug(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get tracking debug: {}", e))
+}
+
+/// Initialize release tracking with V2 fields (includes episode number and status)
+#[tauri::command]
+pub async fn initialize_release_tracking_v2(
+    state: State<'_, AppState>,
+    media_id: String,
+    extension_id: String,
+    media_type: String,
+    current_count: i32,
+    latest_number: Option<f32>,
+    latest_id: Option<String>,
+    raw_status: Option<String>,
+) -> Result<(), String> {
+    release_checker::initialize_tracking_v2(
+        state.database.pool(),
+        &media_id,
+        &extension_id,
+        &media_type,
+        current_count,
+        latest_number,
+        latest_id.as_deref(),
+        raw_status.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("Failed to initialize V2 tracking: {}", e))
 }
 
 // ============================================================================
