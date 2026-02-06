@@ -47,55 +47,7 @@ export function ApiStatusIndicator() {
   const popoverRef = useRef<HTMLDivElement>(null)
   const lastCheckRef = useRef<number>(0)
 
-  // Listen for network online/offline events
-  useEffect(() => {
-    const handleOnline = () => {
-      setStatus(prev => ({ ...prev, networkOnline: true }))
-      // Check APIs when coming back online
-      checkAllApis()
-    }
-    const handleOffline = () => {
-      setStatus(prev => ({
-        ...prev,
-        networkOnline: false,
-        anime: { ...prev.anime, status: 'offline' },
-        manga: { ...prev.manga, status: 'offline' },
-      }))
-    }
-
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
-
-    return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-    }
-  }, [])
-
-  // Listen for API status reports from other parts of the app
-  useEffect(() => {
-    const unsubscribe = subscribeToApiStatus((type, success, resultCount) => {
-      setStatus(prev => ({
-        ...prev,
-        [type]: {
-          ...prev[type],
-          status: success ? 'online' : 'error',
-          lastChecked: new Date(),
-          resultCount: resultCount ?? prev[type].resultCount,
-          error: success ? null : 'Request failed',
-        },
-      }))
-    })
-
-    return unsubscribe
-  }, [])
-
-  // Initial check on mount
-  useEffect(() => {
-    checkAllApis()
-  }, [])
-
-  const checkEndpoint = async (
+  const checkEndpoint = useCallback(async (
     fetchFn: () => Promise<{ results: unknown[] }>
   ): Promise<EndpointStatus> => {
     const startTime = Date.now()
@@ -130,7 +82,7 @@ export function ApiStatusIndicator() {
         error: err instanceof Error ? err.message : 'Connection failed',
       }
     }
-  }
+  }, [])
 
   const checkAllApis = useCallback(async () => {
     // Debounce - don't check more than once every 10 seconds
@@ -154,7 +106,56 @@ export function ApiStatusIndicator() {
       anime: animeStatus,
       manga: mangaStatus,
     }))
+  }, [checkEndpoint])
+
+  // Listen for network online/offline events
+  useEffect(() => {
+    const handleOnline = () => {
+      setStatus(prev => ({ ...prev, networkOnline: true }))
+      // Check APIs when coming back online
+      checkAllApis()
+    }
+    const handleOffline = () => {
+      setStatus(prev => ({
+        ...prev,
+        networkOnline: false,
+        anime: { ...prev.anime, status: 'offline' },
+        manga: { ...prev.manga, status: 'offline' },
+      }))
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [checkAllApis])
+
+  // Listen for API status reports from other parts of the app
+  useEffect(() => {
+    const unsubscribe = subscribeToApiStatus((type, success, resultCount) => {
+      setStatus(prev => ({
+        ...prev,
+        [type]: {
+          ...prev[type],
+          status: success ? 'online' : 'error',
+          lastChecked: new Date(),
+          resultCount: resultCount ?? prev[type].resultCount,
+          error: success ? null : 'Request failed',
+        },
+      }))
+    })
+
+    return unsubscribe
   }, [])
+
+  // Initial check on mount
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional initial API check on mount
+    checkAllApis()
+  }, [checkAllApis])
 
   // Update popover position
   useEffect(() => {

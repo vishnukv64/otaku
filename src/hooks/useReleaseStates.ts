@@ -117,21 +117,33 @@ export function clearReleaseStateCache(mediaId?: string): void {
  * Hook to get release state for a single media item
  */
 export function useReleaseState(mediaId: string | undefined) {
+  // Initialize loading based on whether we have a mediaId to fetch
   const [state, setState] = useState<MediaReleaseState | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!!mediaId)
 
   useEffect(() => {
     if (!mediaId) {
-      setState(null)
-      setLoading(false)
+      // No mediaId - state resets happen in cleanup, so just return
       return
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional loading state before async fetch
     setLoading(true)
+    let active = true
+
     queueForBatch(mediaId).then((result) => {
-      setState(result)
-      setLoading(false)
+      if (active) {
+        setState(result)
+        setLoading(false)
+      }
     })
+
+    return () => {
+      active = false
+      // Reset state when mediaId changes or becomes undefined
+      setState(null)
+      setLoading(false)
+    }
   }, [mediaId])
 
   // Listen for release check events to update state
@@ -176,23 +188,26 @@ export function useReleaseState(mediaId: string | undefined) {
  * Hook to get release states for multiple media items
  */
 export function useReleaseStates(mediaIds: string[]) {
+  // Initialize loading based on whether we have mediaIds to fetch
   const [states, setStates] = useState<Map<string, MediaReleaseState>>(new Map())
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(mediaIds.length > 0)
 
   // Stable reference for media IDs
   const idsKey = useMemo(() => mediaIds.sort().join(','), [mediaIds])
 
   useEffect(() => {
     if (mediaIds.length === 0) {
-      setStates(new Map())
-      setLoading(false)
+      // No mediaIds - state resets happen in cleanup, so just return
       return
     }
 
     setLoading(true)
+    let active = true
 
     // Fetch all states
     Promise.all(mediaIds.map((id) => queueForBatch(id))).then((results) => {
+      if (!active) return
+
       const newStates = new Map<string, MediaReleaseState>()
       for (let i = 0; i < mediaIds.length; i++) {
         const state = results[i]
@@ -203,6 +218,14 @@ export function useReleaseStates(mediaIds: string[]) {
       setStates(newStates)
       setLoading(false)
     })
+
+    return () => {
+      active = false
+      // Reset state when mediaIds change or become empty
+      setStates(new Map())
+      setLoading(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- idsKey is intentionally used as stable reference for mediaIds
   }, [idsKey])
 
   /**
