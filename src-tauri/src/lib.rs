@@ -410,6 +410,7 @@ pub fn run() {
       commands::get_release_check_settings,
       commands::update_release_check_settings,
       commands::check_for_new_releases,
+      commands::stop_release_check,
       commands::get_release_check_status,
       commands::initialize_release_tracking,
       commands::get_release_tracking_status,

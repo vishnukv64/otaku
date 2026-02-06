@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
 import { DownloadManager } from '@/components/player/DownloadManager'
 import { NotificationCenter } from '@/components/notifications'
+import { ApiStatusIndicator } from './ApiStatusIndicator'
 import logoImage from '@/assets/logo.png'
 
 const navItems = [
@@ -183,6 +184,9 @@ export function TopNav({ onSearchClick }: TopNavProps) {
                 </span>
               )}
             </button>
+
+            {/* API Status Indicator */}
+            <ApiStatusIndicator />
 
             <Link
               to="/settings"

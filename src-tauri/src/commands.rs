@@ -2732,6 +2732,13 @@ pub async fn check_for_new_releases(
         .map_err(|e| format!("Release check failed: {}", e))
 }
 
+/// Stop the current release check
+#[tauri::command]
+pub async fn stop_release_check() -> Result<(), String> {
+    release_checker::stop_release_checker();
+    Ok(())
+}
+
 /// Get release check status
 #[tauri::command]
 pub async fn get_release_check_status(

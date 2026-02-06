@@ -15,6 +15,30 @@ import type {
   ChapterImages,
 } from '@/types/extension'
 
+// ==================== API Status Reporting ====================
+// Global event emitter for real-time API status updates
+// Used by ApiStatusIndicator to show connectivity status
+
+type ApiStatusListener = (type: 'anime' | 'manga', success: boolean, resultCount?: number) => void
+const apiStatusListeners = new Set<ApiStatusListener>()
+
+/**
+ * Subscribe to API status updates
+ * @param listener - Called when an API call completes
+ * @returns Unsubscribe function
+ */
+export function subscribeToApiStatus(listener: ApiStatusListener): () => void {
+  apiStatusListeners.add(listener)
+  return () => apiStatusListeners.delete(listener)
+}
+
+/**
+ * Report an API call result (internal use)
+ */
+function reportApiStatus(type: 'anime' | 'manga', success: boolean, resultCount?: number) {
+  apiStatusListeners.forEach(listener => listener(type, success, resultCount))
+}
+
 /**
  * Load an extension from JavaScript code
  * @param code - Extension JavaScript code
@@ -38,7 +62,14 @@ export async function searchAnime(
   page: number,
   allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('search_anime', { extensionId, query, page, allowAdult })
+  try {
+    const result = await invoke<SearchResults>('search_anime', { extensionId, query, page, allowAdult })
+    reportApiStatus('anime', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('anime', false)
+    throw err
+  }
 }
 
 /**
@@ -96,7 +127,14 @@ export async function discoverAnime(
   genres: string[] = [],
   allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('discover_anime', { extensionId, page, sortType, genres, allowAdult })
+  try {
+    const result = await invoke<SearchResults>('discover_anime', { extensionId, page, sortType, genres, allowAdult })
+    reportApiStatus('anime', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('anime', false)
+    throw err
+  }
 }
 
 // Season Results type
@@ -386,7 +424,14 @@ export async function searchManga(
   page: number,
   allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('search_manga', { extensionId, query, page, allowAdult })
+  try {
+    const result = await invoke<SearchResults>('search_manga', { extensionId, query, page, allowAdult })
+    reportApiStatus('manga', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('manga', false)
+    throw err
+  }
 }
 
 /**
@@ -433,7 +478,14 @@ export async function discoverManga(
   genres: string[] = [],
   allowAdult: boolean = false
 ): Promise<SearchResults> {
-  return await invoke('discover_manga', { extensionId, page, sortType, genres, allowAdult })
+  try {
+    const result = await invoke<SearchResults>('discover_manga', { extensionId, page, sortType, genres, allowAdult })
+    reportApiStatus('manga', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('manga', false)
+    throw err
+  }
 }
 
 /**
@@ -1649,6 +1701,14 @@ export async function updateReleaseCheckSettings(
  */
 export async function checkForNewReleases(): Promise<ReleaseCheckResult[]> {
   return await invoke('check_for_new_releases')
+}
+
+/**
+ * Stop the current release check
+ * Halts any ongoing release check operation
+ */
+export async function stopReleaseCheck(): Promise<void> {
+  return await invoke('stop_release_check')
 }
 
 /**

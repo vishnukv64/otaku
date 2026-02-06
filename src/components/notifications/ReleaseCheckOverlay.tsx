@@ -4,11 +4,16 @@
  * Shows a subtle overlay in the bottom-left corner displaying
  * what anime/manga is currently being checked for new releases.
  * Auto-hides when the check is complete.
+ *
+ * Features:
+ * - Dismiss: Hides the overlay but lets the check continue in background
+ * - Stop: Completely stops the release check operation
  */
 
 import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { Loader2, Tv, BookOpen, X } from 'lucide-react'
+import { Loader2, Tv, BookOpen, X, Square } from 'lucide-react'
+import { stopReleaseCheck } from '@/utils/tauri-commands'
 
 interface ReleaseCheckProgress {
   current_index: number
@@ -23,12 +28,28 @@ interface ReleaseCheckProgress {
 export function ReleaseCheckOverlay() {
   const [progress, setProgress] = useState<ReleaseCheckProgress | null>(null)
   const [isVisible, setIsVisible] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
   // Track if user dismissed the overlay for this check session
   const isDismissedRef = useRef(false)
 
   const handleDismiss = () => {
     isDismissedRef.current = true
     setIsVisible(false)
+  }
+
+  const handleStop = async () => {
+    setIsStopping(true)
+    try {
+      await stopReleaseCheck()
+      // Hide overlay after stopping
+      setIsVisible(false)
+      setProgress(null)
+      isDismissedRef.current = true
+    } catch (error) {
+      console.error('Failed to stop release check:', error)
+    } finally {
+      setIsStopping(false)
+    }
   }
 
   useEffect(() => {
@@ -119,14 +140,31 @@ export function ReleaseCheckOverlay() {
           </div>
         </div>
 
-        {/* Dismiss button */}
-        <button
-          onClick={handleDismiss}
-          className="flex-shrink-0 p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-          title="Dismiss"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        {/* Action buttons */}
+        <div className="flex-shrink-0 flex items-center gap-1">
+          {/* Stop button - stops the check entirely */}
+          <button
+            onClick={handleStop}
+            disabled={isStopping}
+            className="p-1.5 rounded-md text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            title="Stop checking"
+          >
+            {isStopping ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Square className="w-4 h-4 fill-current" />
+            )}
+          </button>
+
+          {/* Dismiss button - hides overlay but continues check */}
+          <button
+            onClick={handleDismiss}
+            className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            title="Dismiss (check continues in background)"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   )

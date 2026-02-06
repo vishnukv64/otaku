@@ -57,29 +57,51 @@ export function TagSelector({
 
   // Calculate position based on anchor element
   useLayoutEffect(() => {
-    if (isOpen && anchorRef?.current) {
-      const rect = anchorRef.current.getBoundingClientRect()
-      const popoverWidth = 256 // w-64 = 16rem = 256px
-      const viewportWidth = window.innerWidth
-      const viewportHeight = window.innerHeight
+    const updatePosition = () => {
+      if (isOpen && anchorRef?.current) {
+        const rect = anchorRef.current.getBoundingClientRect()
+        const popoverWidth = 256 // w-64 = 16rem = 256px
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
 
-      // Position below the anchor by default
-      let top = rect.bottom + 8 // 8px margin
-      let left = rect.left
+        // Position below the anchor by default
+        let top = rect.bottom + 8 // 8px margin
+        let left = rect.left
 
-      // Adjust if would overflow right edge
-      if (left + popoverWidth > viewportWidth - 16) {
-        left = viewportWidth - popoverWidth - 16
+        // Adjust if would overflow right edge
+        if (left + popoverWidth > viewportWidth - 16) {
+          left = viewportWidth - popoverWidth - 16
+        }
+
+        // Adjust if would overflow bottom (show above instead)
+        const estimatedHeight = 300 // Approximate max height
+        if (top + estimatedHeight > viewportHeight - 16) {
+          top = rect.top - estimatedHeight - 8
+          if (top < 16) top = 16 // Don't go above viewport
+        }
+
+        setPosition({ top, left: Math.max(16, left) })
       }
+    }
 
-      // Adjust if would overflow bottom (show above instead)
-      const estimatedHeight = 300 // Approximate max height
-      if (top + estimatedHeight > viewportHeight - 16) {
-        top = rect.top - estimatedHeight - 8
-        if (top < 16) top = 16 // Don't go above viewport
+    if (isOpen) {
+      // Calculate immediately
+      updatePosition()
+      // Recalculate after a frame to ensure layout has settled
+      const rafId = requestAnimationFrame(updatePosition)
+      // Also recalculate after a short delay for any animations
+      const timeoutId = setTimeout(updatePosition, 50)
+
+      // Update position on scroll or resize
+      window.addEventListener('scroll', updatePosition, true) // capture phase for nested scrolls
+      window.addEventListener('resize', updatePosition)
+
+      return () => {
+        cancelAnimationFrame(rafId)
+        clearTimeout(timeoutId)
+        window.removeEventListener('scroll', updatePosition, true)
+        window.removeEventListener('resize', updatePosition)
       }
-
-      setPosition({ top, left: Math.max(16, left) })
     }
   }, [isOpen, anchorRef])
 
