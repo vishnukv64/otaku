@@ -380,13 +380,24 @@ const extensionObject = {
 
   getDetails: (id) => {
     // Use persisted query for more complete data
-    const variables = { _id: id };
+    // Include allowAdult setting to ensure adult content is accessible when NSFW filter is disabled
+    const allowAdult = typeof __allowAdult !== 'undefined' ? __allowAdult : false;
+
+    const variables = {
+      _id: id,
+      search: {
+        allowAdult: allowAdult,
+        allowUnknown: false
+      }
+    };
     const extensions = {
       persistedQuery: {
         version: 1,
         sha256Hash: "9d7439c90f203e534ca778c4901f9aa2d3ad42c06243ab2c5e6b79612af32028"
       }
     };
+
+    console.log('[AllAnime] getDetails for ID:', id, 'allowAdult:', allowAdult);
 
     const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
@@ -403,7 +414,14 @@ const extensionObject = {
       const data = JSON.parse(response.body);
       const show = data?.data?.show;
 
-      if (!show) throw new Error('Anime not found');
+      if (!show) {
+        // Log the actual response for debugging
+        console.error('[AllAnime] getDetails failed - show is null/undefined');
+        console.error('[AllAnime] Request ID:', id, 'allowAdult:', allowAdult);
+        console.error('[AllAnime] Response status:', response.status);
+        console.error('[AllAnime] Response errors:', data?.errors);
+        throw new Error(allowAdult ? 'Anime not found' : 'Anime not found (may be adult content - try disabling NSFW filter)');
+      }
 
       // Parse available episodes - persisted query returns different structure
       let subEpisodes = [];

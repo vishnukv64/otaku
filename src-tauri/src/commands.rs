@@ -13,20 +13,21 @@ use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
 use crate::VideoServerInfo;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Emitter, Manager, State};
 use sqlx;
 
 /// Global state for loaded extensions (stores just the code, not runtimes)
+/// Uses RwLock to allow concurrent reads (most commands) while blocking only for writes (loading extensions)
 pub struct AppState {
-    pub extensions: Mutex<Vec<Extension>>,
+    pub extensions: RwLock<Vec<Extension>>,
     pub database: Arc<Database>,
 }
 
 impl AppState {
     pub fn new(database: Database) -> Self {
         Self {
-            extensions: Mutex::new(Vec::new()),
+            extensions: RwLock::new(Vec::new()),
             database: Arc::new(database),
         }
     }
@@ -44,8 +45,8 @@ pub async fn load_extension(
 
     let metadata = extension.metadata.clone();
 
-    let mut extensions = state.extensions.lock()
-        .map_err(|e| format!("Failed to lock extensions: {}", e))?;
+    let mut extensions = state.extensions.write()
+        .map_err(|e| format!("Failed to write lock extensions: {}", e))?;
 
     // Remove any existing extension with the same ID
     extensions.retain(|ext| ext.metadata.id != metadata.id);
@@ -69,7 +70,7 @@ pub async fn search_anime(
 ) -> Result<SearchResults, String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -97,7 +98,7 @@ pub async fn get_anime_details(
     extension_id: String,
     anime_id: String,
 ) -> Result<MediaDetails, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -123,7 +124,7 @@ pub async fn get_video_sources(
     extension_id: String,
     episode_id: String,
 ) -> Result<VideoSources, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -188,7 +189,7 @@ pub async fn stream_discover_anime(
     let allow_adult = allow_adult.unwrap_or(false);
     let pages_to_fetch = pages_to_fetch.unwrap_or(3);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -261,7 +262,7 @@ pub async fn stream_discover_manga(
     let allow_adult = allow_adult.unwrap_or(false);
     let pages_to_fetch = pages_to_fetch.unwrap_or(3);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -331,7 +332,7 @@ pub async fn discover_anime(
 ) -> Result<SearchResults, String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -360,7 +361,7 @@ pub async fn get_current_season_anime(
 ) -> Result<crate::extensions::types::SeasonResults, String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -393,7 +394,7 @@ pub async fn stream_current_season_anime(
     let allow_adult = allow_adult.unwrap_or(false);
     let pages_to_fetch = pages_to_fetch.unwrap_or(3);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -472,7 +473,7 @@ pub async fn get_home_content(
 ) -> Result<HomeContent, String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -514,7 +515,7 @@ pub async fn stream_home_content(
 ) -> Result<(), String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -670,7 +671,7 @@ pub async fn get_recommendations(
 ) -> Result<SearchResults, String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -696,7 +697,7 @@ pub async fn get_tags(
     extension_id: String,
     page: u32,
 ) -> Result<TagsResult, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -720,7 +721,7 @@ pub async fn get_tags(
 pub async fn list_extensions(
     state: State<'_, AppState>,
 ) -> Result<Vec<ExtensionMetadata>, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let metadata: Vec<ExtensionMetadata> = extensions.iter()
@@ -743,7 +744,7 @@ pub async fn search_manga(
 ) -> Result<SearchResults, String> {
     let allow_adult = allow_adult.unwrap_or(false);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -770,7 +771,7 @@ pub async fn get_manga_details(
     manga_id: String,
     allow_adult: Option<bool>,
 ) -> Result<MangaDetails, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -796,7 +797,7 @@ pub async fn get_chapter_images(
     extension_id: String,
     chapter_id: String,
 ) -> Result<ChapterImages, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -829,7 +830,7 @@ pub async fn discover_manga(
 
     log::debug!("[Manga] discover_manga called with genres: {:?}", genres);
 
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()
@@ -857,7 +858,7 @@ pub async fn get_manga_tags(
     extension_id: String,
     page: u32,
 ) -> Result<TagsResult, String> {
-    let extensions = state.extensions.lock()
+    let extensions = state.extensions.read()
         .map_err(|e| format!("Failed to lock extensions: {}", e))?;
 
     let extension = extensions.iter()

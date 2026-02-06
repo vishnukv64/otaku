@@ -728,7 +728,7 @@ async fn fetch_episode_info(
     log::debug!("Creating extension runtime with allow_adult={} (nsfw_filter={})", allow_adult, nsfw_filter);
 
     let extension = {
-        let extensions = app_state.extensions.lock()
+        let extensions = app_state.extensions.read()
             .map_err(|e| anyhow::anyhow!("Failed to lock extensions: {}", e))?;
 
         extensions.iter()

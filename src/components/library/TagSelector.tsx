@@ -3,9 +3,11 @@
  *
  * Popover for assigning tags to a media item.
  * Shows checkbox list of all tags with quick-create option.
+ * Uses a Portal to avoid being clipped by overflow:hidden parents.
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Tags, Loader2, X, Check } from 'lucide-react'
 import {
   getLibraryTags,
@@ -43,6 +45,7 @@ export function TagSelector({
   const [newTagName, setNewTagName] = useState('')
   const [creating, setCreating] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const [position, setPosition] = useState({ top: 0, left: 0 })
 
   // Load tags when popover opens
   useEffect(() => {
@@ -51,6 +54,34 @@ export function TagSelector({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mediaId])
+
+  // Calculate position based on anchor element
+  useLayoutEffect(() => {
+    if (isOpen && anchorRef?.current) {
+      const rect = anchorRef.current.getBoundingClientRect()
+      const popoverWidth = 256 // w-64 = 16rem = 256px
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+
+      // Position below the anchor by default
+      let top = rect.bottom + 8 // 8px margin
+      let left = rect.left
+
+      // Adjust if would overflow right edge
+      if (left + popoverWidth > viewportWidth - 16) {
+        left = viewportWidth - popoverWidth - 16
+      }
+
+      // Adjust if would overflow bottom (show above instead)
+      const estimatedHeight = 300 // Approximate max height
+      if (top + estimatedHeight > viewportHeight - 16) {
+        top = rect.top - estimatedHeight - 8
+        if (top < 16) top = 16 // Don't go above viewport
+      }
+
+      setPosition({ top, left: Math.max(16, left) })
+    }
+  }, [isOpen, anchorRef])
 
   // Close popover when clicking outside
   useEffect(() => {
@@ -134,10 +165,16 @@ export function TagSelector({
 
   if (!isOpen) return null
 
-  return (
+  // Use portal to render outside overflow:hidden containers
+  const popoverContent = (
     <div
       ref={popoverRef}
-      className="absolute left-0 top-full mt-2 w-64 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl border border-[var(--color-bg-hover)] z-50 overflow-hidden"
+      className="fixed w-64 bg-[var(--color-bg-secondary)] rounded-lg shadow-2xl border border-[var(--color-bg-hover)] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+      style={{
+        top: position.top,
+        left: position.left,
+        zIndex: 9999, // Very high z-index to appear above modal
+      }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-bg-hover)]">
@@ -156,17 +193,19 @@ export function TagSelector({
       {/* Content */}
       <div className="max-h-64 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center py-6">
-            <Loader2 className="w-5 h-5 animate-spin text-[var(--color-accent-primary)]" />
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+            <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Loading tags...</span>
           </div>
         ) : allTags.length === 0 && !showCreate ? (
-          <div className="py-4 px-3 text-center">
-            <p className="text-sm text-[var(--color-text-muted)] mb-3">
-              No tags yet
+          <div className="py-6 px-4 text-center">
+            <Tags className="w-8 h-8 mx-auto mb-2 text-[var(--color-text-secondary)]" />
+            <p className="text-sm text-[var(--color-text-secondary)] mb-3">
+              No tags created yet
             </p>
             <button
               onClick={() => setShowCreate(true)}
-              className="text-sm text-[var(--color-accent-primary)] hover:underline"
+              className="px-4 py-2 text-sm bg-[var(--color-accent-primary)] text-white rounded-lg hover:bg-[var(--color-accent-primary)]/90 transition-colors"
             >
               Create your first tag
             </button>
@@ -263,6 +302,9 @@ export function TagSelector({
       </div>
     </div>
   )
+
+  // Render via portal to escape overflow:hidden containers
+  return createPortal(popoverContent, document.body)
 }
 
 /**
