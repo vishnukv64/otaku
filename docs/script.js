@@ -424,11 +424,21 @@ async function init() {
         console.error('Failed to fetch release data');
         document.getElementById('download-text').textContent = 'Download Not Available';
         document.getElementById('cta-download-text').textContent = 'Download Not Available';
+        const versionBadge = document.getElementById('version-badge');
+        if (versionBadge) {
+            versionBadge.textContent = 'Cross-Platform';
+        }
         return;
     }
 
     console.log('Latest release:', release.version);
     console.log('Available assets:', release.assets.map(a => a.name));
+
+    // Update version badge
+    const versionBadge = document.getElementById('version-badge');
+    if (versionBadge) {
+        versionBadge.textContent = `v${release.version} • Cross-Platform`;
+    }
 
     // Get all download options
     const allOptions = getAllDownloadOptions(release.assets);
