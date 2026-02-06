@@ -5,6 +5,32 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.17] - 2026-02-06
+
+### Added
+- **API Status Indicator** - Real-time connectivity monitoring in the top navigation
+  - Subtle colored dot showing API health (green=online, red=offline, yellow=partial)
+  - Popover with detailed status for anime and manga endpoints
+  - Updates automatically as you browse (event-driven, not polling)
+  - Response time and result count display
+- **Release Check Stop Button** - Ability to halt ongoing release checks
+  - Stop button in release check overlay to cancel long-running checks
+  - Dismiss button to hide overlay while check continues in background
+- **Release Notification System V2** - Redesigned multi-signal detection
+  - Detects new releases via episode number, ID, and count signals
+  - Status normalization for better API compatibility
+  - Smart scheduling with configurable intervals
+  - Debug logging for troubleshooting
+
+### Fixed
+- **UI Blocking During Release Check** - Release checks no longer freeze the interface
+  - Moved to non-blocking background processing
+  - Progress updates without interrupting browsing
+- **Tags Popup Positioning** - Tag selector now correctly positions next to the button
+  - Added scroll and resize listeners for dynamic repositioning
+  - Uses requestAnimationFrame for accurate layout calculation
+- **Anime Details Loading** - Fixed 400 errors when loading anime details
+
 ## [0.1.16] - 2026-02-04
 
 ### Added
