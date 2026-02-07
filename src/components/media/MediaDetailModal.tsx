@@ -10,10 +10,10 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
@@ -96,9 +96,10 @@ export function MediaDetailModal({
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
   const [relatedAnime, setRelatedAnime] = useState<SearchResult[]>([])
-  const [_relatedLoading, setRelatedLoading] = useState(false)
+  const [relatedLoading, setRelatedLoading] = useState(false)
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
   const [showNewBadge, setShowNewBadge] = useState(false)
+  const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
 
   // Tag state
   const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
@@ -435,11 +436,17 @@ export function MediaDetailModal({
     const loadDetails = async () => {
       setLoading(true)
       setError(null)
+      setUsingCachedData(false)
+
+      let result: MediaDetails | null = null
+      let apiError: string | null = null
+
+      // Try to fetch from API first
       try {
-        const result = await getMediaDetails(extensionId, media.id)
+        result = await getMediaDetails(extensionId, media.id)
         setDetails(result)
 
-        // Save media details to database for library/continue watching
+        // Save media details to database for library/continue watching and offline cache
         try {
           const mediaEntry: MediaEntry = {
             id: result.id,
@@ -468,12 +475,79 @@ export function MediaDetailModal({
             updated_at: new Date().toISOString(),
           }
           await saveMediaDetails(mediaEntry)
+
+          // Cache episodes for offline fallback
+          if (result.episodes.length > 0) {
+            const episodeEntries: EpisodeEntry[] = result.episodes.map(ep => ({
+              id: ep.id,
+              media_id: result!.id,
+              extension_id: extensionId,
+              number: ep.number,
+              title: ep.title,
+              description: undefined, // Episode type doesn't have description
+              thumbnail_url: ep.thumbnail,
+              aired_date: undefined, // Not available from API
+              duration: undefined, // Not available from API
+            }))
+            await saveEpisodes(result.id, extensionId, episodeEntries)
+          }
         } catch (saveErr) {
-          console.error('Failed to save media details:', saveErr)
+          console.error('Failed to save media/episode details:', saveErr)
           // Non-fatal error, continue anyway
         }
+      } catch (err) {
+        apiError = err instanceof Error ? err.message : 'Failed to load details'
+        console.error('[MediaDetail] API failed, trying cache:', apiError)
 
-        // Check which episodes are downloaded
+        // API failed - try to load from cache
+        try {
+          const cached = await getCachedMediaDetails(media.id)
+          if (cached && cached.episodes.length > 0) {
+            // Convert cached data to MediaDetails format
+            const cachedDetails: MediaDetails = {
+              id: cached.media.id,
+              title: cached.media.title,
+              english_name: cached.media.english_name,
+              native_name: cached.media.native_name,
+              description: cached.media.description,
+              cover_url: cached.media.cover_url,
+              trailer_url: cached.media.trailer_url,
+              type: cached.media.content_type,
+              status: cached.media.status,
+              year: cached.media.year,
+              rating: cached.media.rating,
+              episode_count: cached.media.episode_count,
+              episode_duration: cached.media.episode_duration,
+              season: cached.media.season_quarter && cached.media.season_year
+                ? { quarter: cached.media.season_quarter, year: cached.media.season_year }
+                : undefined,
+              aired_start: cached.media.aired_start_year
+                ? { year: cached.media.aired_start_year, month: cached.media.aired_start_month, date: cached.media.aired_start_date }
+                : undefined,
+              genres: cached.media.genres ? JSON.parse(cached.media.genres) : [],
+              episodes: cached.episodes.map(ep => ({
+                id: ep.id,
+                number: ep.number,
+                title: ep.title,
+                thumbnail: ep.thumbnail_url,
+              })),
+            }
+            setDetails(cachedDetails)
+            setUsingCachedData(true)
+            result = cachedDetails
+            console.log('[MediaDetail] Loaded from cache:', cached.episodes.length, 'episodes')
+          } else {
+            // No cache available - show error
+            setError(apiError)
+          }
+        } catch (cacheErr) {
+          console.error('[MediaDetail] Cache also failed:', cacheErr)
+          setError(apiError)
+        }
+      }
+
+      // Check which episodes are downloaded (if we have details)
+      if (result) {
         try {
           const downloaded = new Set<number>()
           for (const episode of result.episodes) {
@@ -486,11 +560,9 @@ export function MediaDetailModal({
         } catch (checkErr) {
           console.error('Failed to check downloaded episodes:', checkErr)
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load details')
-      } finally {
-        setLoading(false)
       }
+
+      setLoading(false)
     }
 
     loadDetails()
@@ -588,15 +660,23 @@ export function MediaDetailModal({
     const loadRelated = async () => {
       setRelatedLoading(true)
       try {
-        // Search using the anime title to find related anime
-        const results = await searchAnime(extensionId, media.title, 1)
+        // Use first part of title for broader search (before ":", "-", "–", etc.)
+        // This helps find related anime when the full title is too specific
+        const searchTitle = media.title.split(/[:\-–—]/)[0].trim()
+        console.log('[Related Anime] Searching with:', searchTitle, '(original:', media.title, ')')
+
+        const results = await searchAnime(extensionId, searchTitle, 1)
+        console.log('[Related Anime] Search returned:', results.results.length, 'results')
+
         // Filter out the current anime and limit to 12 results
         const filtered = results.results
           .filter(item => item.id !== media.id)
           .slice(0, 12)
+
+        console.log('[Related Anime] After filtering:', filtered.length, 'results')
         setRelatedAnime(filtered)
       } catch (error) {
-        console.error('Failed to load related anime:', error)
+        console.error('[Related Anime] Failed to load:', error)
       } finally {
         setRelatedLoading(false)
       }
@@ -681,11 +761,78 @@ export function MediaDetailModal({
               <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
             </div>
           ) : error ? (
-            <div className="py-32 text-center">
-              <p className="text-[var(--color-text-secondary)]">{error}</p>
+            // Custom error UI for API failures (no cached data available)
+            <div className="py-20 px-8">
+              <div className="max-w-md mx-auto text-center">
+                {/* Error Icon */}
+                <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <WifiOff className="w-12 h-12 text-red-400" />
+                </div>
+
+                {/* Title */}
+                <h2 className="text-2xl font-bold mb-3 text-white">Unable to Load Details</h2>
+
+                {/* Description */}
+                <p className="text-[var(--color-text-secondary)] mb-6 leading-relaxed">
+                  Failed to fetch anime information from the source. This could be due to network issues or the source being temporarily unavailable.
+                </p>
+
+                {/* Error Details (collapsible) */}
+                <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 mb-6 text-left">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-400 mb-1">Error Details</p>
+                      <p className="text-xs text-[var(--color-text-muted)] font-mono break-all">{error}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Media Preview (from search result) */}
+                <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 mb-6">
+                  <div className="flex items-center gap-4">
+                    {media.cover_url && (
+                      <img
+                        src={media.cover_url}
+                        alt={media.title}
+                        className="w-16 h-24 object-cover rounded-lg"
+                      />
+                    )}
+                    <div className="text-left flex-1 min-w-0">
+                      <p className="font-medium text-white truncate">{media.title}</p>
+                      {media.year && (
+                        <p className="text-sm text-[var(--color-text-secondary)]">{media.year}</p>
+                      )}
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        No cached data available
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Help Text */}
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Try again later or check if the source extension is working properly.
+                </p>
+              </div>
             </div>
           ) : details ? (
             <>
+              {/* Cached Data Banner - shows when API failed but we have cached data */}
+              {usingCachedData && (
+                <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-3">
+                  <div className="flex items-center justify-center gap-3 text-amber-400">
+                    <Database className="w-5 h-5" />
+                    <span className="text-sm font-medium">
+                      Showing cached data — source unavailable
+                    </span>
+                    <span className="text-xs text-amber-400/60">
+                      (Episode links may not work)
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Hero Banner */}
               <div className="relative rounded-t-xl overflow-hidden">
                 {/* Background Image (blurred) */}
@@ -1340,7 +1487,22 @@ export function MediaDetailModal({
                 )}
 
                 {/* Related Anime */}
-                {relatedAnime.length > 0 && (
+                {relatedLoading && (
+                  <div className="mt-12">
+                    <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                      <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                      </svg>
+                      Related Anime
+                    </h2>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                      {[...Array(6)].map((_, i) => (
+                        <div key={i} className="aspect-[2/3] bg-[var(--color-bg-secondary)] rounded-lg animate-pulse" />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!relatedLoading && relatedAnime.length > 0 && (
                   <div className="mt-12">
                     <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
                       <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

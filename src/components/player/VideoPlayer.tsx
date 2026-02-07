@@ -156,7 +156,15 @@ export function VideoPlayer({
       setError(null)
 
       try {
-        // Loading video source
+        // CRITICAL: Clean up previous video source before loading new one
+        // This prevents double audio when switching between sources
+        video.pause()
+        if (hlsRef.current) {
+          hlsRef.current.destroy()
+          hlsRef.current = null
+        }
+        video.removeAttribute('src')
+        video.load() // Reset the video element
 
         // Wait for video server to be ready
         if (!videoServer) {
@@ -169,11 +177,7 @@ export function VideoPlayer({
                               currentSource.url.toLowerCase().includes('m3u8')
 
         if (isActuallyHls && Hls.isSupported()) {
-          // Try HLS with video server proxy for proper streaming
-          if (hlsRef.current) {
-            hlsRef.current.destroy()
-          }
-
+          // HLS.js already cleaned up at the start of loadVideo, create new instance
           const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
@@ -332,9 +336,16 @@ export function VideoPlayer({
     loadVideo()
 
     return () => {
+      // Thorough cleanup to prevent double audio
       if (hlsRef.current) {
         hlsRef.current.destroy()
         hlsRef.current = null
+      }
+      // Also clean up direct video sources
+      if (video) {
+        video.pause()
+        video.removeAttribute('src')
+        video.load()
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

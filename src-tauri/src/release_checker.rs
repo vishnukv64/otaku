@@ -337,7 +337,7 @@ pub async fn initialize_tracking_v2(
     .bind(latest_id)
     .bind(raw_status)
     .bind(normalized.as_str())
-    .bind(latest_number) // user_notified_up_to = current latest to avoid false notifications
+    .bind(None::<f32>) // user_notified_up_to = NULL, let release checker set this when notifying
     .bind(now)
     .bind(next_check)
     .execute(pool)

@@ -221,6 +221,36 @@ export function MangaReader({
   // Check if current mode is vertical scroll (webtoon or vertical)
   const isVerticalScrollMode = settings.readingMode === 'vertical' || settings.readingMode === 'webtoon'
 
+  // Preload images for single/double page modes
+  // Vertical modes handle their own preloading via VerticalScrollView
+  useEffect(() => {
+    // Skip for vertical modes - they handle their own preloading
+    if (isVerticalScrollMode) return
+    if (images.length === 0) return
+
+    const preloadCount = settings.preloadPages
+
+    // Preload next N pages
+    for (let i = 1; i <= preloadCount; i++) {
+      const nextPage = currentPage + i
+      const nextImage = images.find(img => img.page === nextPage)
+      if (nextImage) {
+        const img = new Image()
+        img.src = nextImage.url
+      }
+    }
+
+    // Preload 2 previous pages for back navigation
+    for (let i = 1; i <= 2; i++) {
+      const prevPage = currentPage - i
+      const prevImage = images.find(img => img.page === prevPage)
+      if (prevImage) {
+        const img = new Image()
+        img.src = prevImage.url
+      }
+    }
+  }, [currentPage, isVerticalScrollMode, settings.preloadPages, images])
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

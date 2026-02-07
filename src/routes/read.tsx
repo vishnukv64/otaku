@@ -5,7 +5,7 @@
  */
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Loader2, X, Home } from 'lucide-react'
 import { MangaReader } from '@/components/reader/MangaReader'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -16,10 +16,13 @@ import {
   getMangaDetails,
   getChapterImages,
   saveMediaDetails,
+  saveEpisodes,
+  getCachedMediaDetails,
   getReadingProgress,
   isChapterDownloaded,
   getDownloadedChapterImages,
   type MediaEntry,
+  type EpisodeEntry,
 } from '@/utils/tauri-commands'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { MangaDetails, ChapterImages } from '@/types/extension'
@@ -55,6 +58,7 @@ function ReadPage() {
   const [error, setError] = useState<string | null>(null)
   const [resumePage, setResumePage] = useState<number>(1)
   const [readChapters, setReadChapters] = useState<Set<string>>(new Set())
+  const shownResumeToastRef = useRef<string | null>(null)
 
   // Load manga details
   useEffect(() => {
@@ -64,8 +68,11 @@ function ReadPage() {
     }
 
     const loadDetails = async () => {
+      let result: MangaDetails | null = null
+
+      // Try to load from API first
       try {
-        const result = await getMangaDetails(extensionId, mangaId, !nsfwFilter)
+        result = await getMangaDetails(extensionId, mangaId, !nsfwFilter)
         console.log('[Read] Manga details loaded:', result.title, '- Genres from API:', result.genres)
 
         // Check if content is NSFW and should be blocked
@@ -85,9 +92,7 @@ function ReadPage() {
           result.chapters.sort((a, b) => a.number - b.number)
         }
 
-        setDetails(result)
-
-        // Save media details to database
+        // Save media details to database for offline use
         try {
           const genresJson = result.genres ? JSON.stringify(result.genres) : undefined
           console.log('[Read] Saving media with genres:', genresJson)
@@ -119,16 +124,71 @@ function ReadPage() {
             updated_at: new Date().toISOString(),
           }
           await saveMediaDetails(mediaEntry)
+
+          // Also cache chapters for offline reading
+          if (result.chapters.length > 0) {
+            const chapterEntries: EpisodeEntry[] = result.chapters.map(ch => ({
+              id: ch.id,
+              media_id: result!.id,
+              extension_id: extensionId,
+              number: ch.number,
+              title: ch.title,
+              description: undefined,
+              thumbnail_url: undefined,
+              aired_date: undefined,
+              duration: undefined,
+            }))
+            await saveEpisodes(result.id, extensionId, chapterEntries)
+          }
         } catch (saveErr) {
           console.error('Failed to save media details:', saveErr)
         }
+      } catch (apiErr) {
+        console.warn('[Read] API failed, trying cache:', apiErr)
 
-        // Set initial chapter if not provided
-        if (!initialChapterId && result.chapters.length > 0) {
-          setCurrentChapterId(result.chapters[0].id)
+        // API failed - try to load from cache
+        try {
+          const cached = await getCachedMediaDetails(mangaId)
+          if (cached && cached.episodes.length > 0) {
+            // Convert cached data to MangaDetails format
+            result = {
+              id: cached.media.id,
+              title: cached.media.title,
+              english_name: cached.media.english_name,
+              native_name: cached.media.native_name,
+              description: cached.media.description,
+              cover_url: cached.media.cover_url,
+              type: cached.media.content_type,
+              status: cached.media.status,
+              year: cached.media.year,
+              rating: cached.media.rating,
+              genres: cached.media.genres ? JSON.parse(cached.media.genres) : [],
+              chapters: cached.episodes.map(ch => ({
+                id: ch.id,
+                number: ch.number,
+                title: ch.title,
+              })),
+            }
+            // Sort chapters
+            result.chapters.sort((a, b) => a.number - b.number)
+            console.log('[Read] Loaded from cache:', cached.episodes.length, 'chapters')
+          }
+        } catch (cacheErr) {
+          console.error('[Read] Cache also failed:', cacheErr)
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load manga details')
+      }
+
+      // If we have no data from either source, show error
+      if (!result) {
+        setError('Failed to load manga details - no cached data available')
+        return
+      }
+
+      setDetails(result)
+
+      // Set initial chapter if not provided
+      if (!initialChapterId && result.chapters.length > 0) {
+        setCurrentChapterId(result.chapters[0].id)
       }
     }
 
@@ -154,7 +214,12 @@ function ReadPage() {
 
           if (progress && progress.current_page > 1) {
             setResumePage(progress.current_page)
-            toastInfo('Resuming Reading', `Resuming from page ${progress.current_page}`)
+
+            // Only show toast once per chapter (avoid duplicates from effect re-runs)
+            if (shownResumeToastRef.current !== currentChapterId) {
+              shownResumeToastRef.current = currentChapterId
+              toastInfo('Resuming Reading', `Resuming from page ${progress.current_page}`)
+            }
 
             // Mark as read if completed
             if (progress.completed) {

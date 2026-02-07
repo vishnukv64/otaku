@@ -413,6 +413,123 @@ pub async fn get_downloads_with_media(pool: &SqlitePool) -> Result<Vec<DownloadW
     Ok(result)
 }
 
+// Episode Entry for caching episode metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeEntry {
+    pub id: String,
+    pub media_id: String,
+    pub extension_id: String,
+    pub number: i32,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub aired_date: Option<String>,
+    pub duration: Option<i32>, // in seconds
+}
+
+/// Cached media details with episodes (for offline fallback)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedMediaDetails {
+    pub media: MediaEntry,
+    pub episodes: Vec<EpisodeEntry>,
+}
+
+/// Save episodes to database (upsert)
+pub async fn save_episodes(
+    pool: &SqlitePool,
+    media_id: &str,
+    extension_id: &str,
+    episodes: &[EpisodeEntry],
+) -> Result<()> {
+    // Delete existing episodes for this media first (to handle removed episodes)
+    sqlx::query("DELETE FROM episodes WHERE media_id = ?")
+        .bind(media_id)
+        .execute(pool)
+        .await?;
+
+    // Insert all episodes
+    for episode in episodes {
+        sqlx::query(
+            r#"
+            INSERT INTO episodes (id, media_id, extension_id, number, title, description, thumbnail_url, aired_date, duration)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&episode.id)
+        .bind(media_id)
+        .bind(extension_id)
+        .bind(episode.number)
+        .bind(&episode.title)
+        .bind(&episode.description)
+        .bind(&episode.thumbnail_url)
+        .bind(&episode.aired_date)
+        .bind(episode.duration)
+        .execute(pool)
+        .await?;
+    }
+
+    log::debug!("Saved {} episodes for media: {}", episodes.len(), media_id);
+
+    Ok(())
+}
+
+/// Get cached episodes for a media
+pub async fn get_cached_episodes(
+    pool: &SqlitePool,
+    media_id: &str,
+) -> Result<Vec<EpisodeEntry>> {
+    let episodes = sqlx::query_as::<_, EpisodeEntry>(
+        r#"
+        SELECT id, media_id, extension_id, number, title, description, thumbnail_url, aired_date, duration
+        FROM episodes
+        WHERE media_id = ?
+        ORDER BY number ASC
+        "#
+    )
+    .bind(media_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(episodes)
+}
+
+/// Get cached media details with episodes (for offline fallback)
+pub async fn get_cached_media_details(
+    pool: &SqlitePool,
+    media_id: &str,
+) -> Result<Option<CachedMediaDetails>> {
+    // Get media metadata
+    let media = get_media(pool, media_id).await?;
+
+    match media {
+        Some(media) => {
+            // Get cached episodes
+            let episodes = get_cached_episodes(pool, media_id).await?;
+
+            Ok(Some(CachedMediaDetails { media, episodes }))
+        }
+        None => Ok(None),
+    }
+}
+
+impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for EpisodeEntry {
+    fn from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        Ok(EpisodeEntry {
+            id: row.try_get("id")?,
+            media_id: row.try_get("media_id")?,
+            extension_id: row.try_get("extension_id")?,
+            number: row.try_get("number")?,
+            title: row.try_get("title")?,
+            description: row.try_get("description")?,
+            thumbnail_url: row.try_get("thumbnail_url")?,
+            aired_date: row.try_get("aired_date")?,
+            duration: row.try_get("duration")?,
+        })
+    }
+}
+
 impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for MediaEntry {
     fn from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;

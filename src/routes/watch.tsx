@@ -5,10 +5,10 @@
  */
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
-import { getMediaDetails, getVideoSources, saveMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type VideoServerUrls } from '@/utils/tauri-commands'
+import { getMediaDetails, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
 
@@ -40,6 +40,7 @@ function WatchPage() {
   const [error, setError] = useState<string | null>(null)
   const [resumeTime, setResumeTime] = useState<number>(0)
   const [videoServerInfo, setVideoServerInfo] = useState<VideoServerUrls | null>(null)
+  const shownResumeToastRef = useRef<string | null>(null)
 
   // Load video server info on mount
   useEffect(() => {
@@ -56,17 +57,18 @@ function WatchPage() {
     }
 
     const loadDetails = async () => {
+      let result: MediaDetails | null = null
+
+      // Try to load from API first
       try {
-        const result = await getMediaDetails(extensionId, animeId)
+        result = await getMediaDetails(extensionId, animeId)
 
         // Sort episodes in ascending order by episode number
         if (result.episodes) {
           result.episodes.sort((a, b) => a.number - b.number)
         }
 
-        setDetails(result)
-
-        // Save media details to database for continue watching
+        // Save media details and episodes to database for offline use
         try {
           const mediaEntry: MediaEntry = {
             id: result.id,
@@ -76,7 +78,7 @@ function WatchPage() {
             native_name: result.native_name,
             description: result.description,
             cover_url: result.cover_url,
-            banner_url: result.cover_url, // Use cover as banner if no separate banner
+            banner_url: result.cover_url,
             trailer_url: result.trailer_url,
             media_type: 'anime',
             content_type: result.type,
@@ -95,68 +97,126 @@ function WatchPage() {
             updated_at: new Date().toISOString(),
           }
           await saveMediaDetails(mediaEntry)
+
+          // Also cache episodes for offline playback
+          if (result.episodes.length > 0) {
+            const episodeEntries: EpisodeEntry[] = result.episodes.map(ep => ({
+              id: ep.id,
+              media_id: result!.id,
+              extension_id: extensionId,
+              number: ep.number,
+              title: ep.title,
+              description: undefined,
+              thumbnail_url: ep.thumbnail,
+              aired_date: undefined,
+              duration: undefined,
+            }))
+            await saveEpisodes(result.id, extensionId, episodeEntries)
+          }
         } catch (saveErr) {
           console.error('Failed to save media details:', saveErr)
-          // Non-fatal error, continue anyway
+        }
+      } catch (apiErr) {
+        console.warn('[Watch] API failed, trying cache:', apiErr)
+
+        // API failed - try to load from cache
+        try {
+          const cached = await getCachedMediaDetails(animeId)
+          if (cached && cached.episodes.length > 0) {
+            // Convert cached data to MediaDetails format
+            result = {
+              id: cached.media.id,
+              title: cached.media.title,
+              english_name: cached.media.english_name,
+              native_name: cached.media.native_name,
+              description: cached.media.description,
+              cover_url: cached.media.cover_url,
+              trailer_url: cached.media.trailer_url,
+              type: cached.media.content_type,
+              status: cached.media.status,
+              year: cached.media.year,
+              rating: cached.media.rating,
+              episode_count: cached.media.episode_count,
+              episode_duration: cached.media.episode_duration,
+              season: cached.media.season_quarter && cached.media.season_year
+                ? { quarter: cached.media.season_quarter, year: cached.media.season_year }
+                : undefined,
+              aired_start: cached.media.aired_start_year
+                ? { year: cached.media.aired_start_year, month: cached.media.aired_start_month, date: cached.media.aired_start_date }
+                : undefined,
+              genres: cached.media.genres ? JSON.parse(cached.media.genres) : [],
+              episodes: cached.episodes.map(ep => ({
+                id: ep.id,
+                number: ep.number,
+                title: ep.title,
+                thumbnail: ep.thumbnail_url,
+              })),
+            }
+            // Sort episodes
+            result.episodes.sort((a, b) => a.number - b.number)
+            console.log('[Watch] Loaded from cache:', cached.episodes.length, 'episodes')
+          }
+        } catch (cacheErr) {
+          console.error('[Watch] Cache also failed:', cacheErr)
+        }
+      }
+
+      // If we have no data from either source, show error
+      if (!result) {
+        setError('Failed to load anime details - no cached data available')
+        return
+      }
+
+      setDetails(result)
+
+      // Set initial episode if not provided
+      if (!initialEpisodeId && result.episodes.length > 0) {
+        let nextEpisode = result.episodes[0]
+
+        // Strategy: Find the last watched episode and play the next one
+        let lastWatchedIndex = -1
+        let hasAnyProgress = false
+
+        for (let i = 0; i < result.episodes.length; i++) {
+          const episode = result.episodes[i]
+          try {
+            const progress = await getWatchProgress(episode.id)
+            if (progress) {
+              hasAnyProgress = true
+              if (progress.completed || progress.progress_seconds > 0) {
+                lastWatchedIndex = i
+              }
+            }
+          } catch {
+            // Ignore errors
+          }
         }
 
-        // Set initial episode if not provided
-        if (!initialEpisodeId && result.episodes.length > 0) {
-          let nextEpisode = result.episodes[0]
-          
-          // Strategy: Find the last watched episode and play the next one
-          // If no watch history, default to the latest episode (for new release notifications)
-          let lastWatchedIndex = -1
-          let hasAnyProgress = false
-          
-          // Check all episodes to find the last one with progress
-          for (let i = 0; i < result.episodes.length; i++) {
-            const episode = result.episodes[i]
+        if (lastWatchedIndex >= 0) {
+          const nextIndex = lastWatchedIndex + 1
+          if (nextIndex < result.episodes.length) {
+            nextEpisode = result.episodes[nextIndex]
+          } else {
+            nextEpisode = result.episodes[result.episodes.length - 1]
+          }
+        } else if (!hasAnyProgress) {
+          nextEpisode = result.episodes[result.episodes.length - 1]
+        } else {
+          for (const episode of result.episodes) {
             try {
               const progress = await getWatchProgress(episode.id)
-              if (progress) {
-                hasAnyProgress = true
-                if (progress.completed || progress.progress_seconds > 0) {
-                  lastWatchedIndex = i
-                }
-              }
-            } catch {
-              // Ignore errors
-            }
-          }
-          
-          if (lastWatchedIndex >= 0) {
-            // Found watched episodes - play the next unwatched one
-            const nextIndex = lastWatchedIndex + 1
-            if (nextIndex < result.episodes.length) {
-              nextEpisode = result.episodes[nextIndex]
-            } else {
-              // All episodes watched, default to latest
-              nextEpisode = result.episodes[result.episodes.length - 1]
-            }
-          } else if (!hasAnyProgress) {
-            // No watch history at all - default to latest episode (useful for new release notifications)
-            nextEpisode = result.episodes[result.episodes.length - 1]
-          } else {
-            // Has some progress but none marked as watched/started - find first unwatched
-            for (const episode of result.episodes) {
-              try {
-                const progress = await getWatchProgress(episode.id)
-                if (!progress || !progress.completed) {
-                  nextEpisode = episode
-                  break
-                }
-              } catch {
+              if (!progress || !progress.completed) {
                 nextEpisode = episode
                 break
               }
+            } catch {
+              nextEpisode = episode
+              break
             }
           }
-
-          setCurrentEpisodeId(nextEpisode.id)
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load anime details')
+
+        setCurrentEpisodeId(nextEpisode.id)
       }
     }
 
@@ -187,8 +247,11 @@ function WatchPage() {
             const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
             setResumeTime(progress.progress_seconds)
 
-            // Show ephemeral toast (not stored in notification center)
-            toastInfo('Resuming Playback', `Resuming from ${timeStr}`)
+            // Only show toast once per episode (avoid duplicates from effect re-runs)
+            if (shownResumeToastRef.current !== currentEpisodeId) {
+              shownResumeToastRef.current = currentEpisodeId
+              toastInfo('Resuming Playback', `Resuming from ${timeStr}`)
+            }
           } else {
             setResumeTime(0)
           }
@@ -199,6 +262,7 @@ function WatchPage() {
         // Step 2: Load video sources AFTER watch progress is loaded
         // Check if episode is downloaded first
         const filePath = await getEpisodeFilePath(animeId, currentEpisode.number)
+        let localSourceLoaded = false
 
         if (filePath && videoServerInfo) {
           // Use video server for local file (proper Range request support for large files)
@@ -213,6 +277,7 @@ function WatchPage() {
             }],
             subtitles: []
           })
+          localSourceLoaded = true
           toastInfo('Offline Mode', 'Playing from downloaded video')
         } else if (filePath) {
           // Fallback: Try getLocalVideoUrl command with full path
@@ -227,14 +292,16 @@ function WatchPage() {
               }],
               subtitles: []
             })
+            localSourceLoaded = true
             toastInfo('Offline Mode', 'Playing from downloaded video')
           } catch {
-            // Fall through to streaming
+            // Local file loading failed - will fall through to streaming
+            console.warn('Failed to load local video file, falling back to streaming')
           }
         }
 
-        if (!filePath) {
-          // Fetch from extension
+        // Fetch from extension if no local source was loaded
+        if (!localSourceLoaded) {
           const result = await getVideoSources(extensionId, currentEpisodeId)
           setSources(result)
         }

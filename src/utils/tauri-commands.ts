@@ -1100,6 +1100,48 @@ export async function saveMediaDetails(media: MediaEntry): Promise<void> {
   return await invoke('save_media_details', { media })
 }
 
+/** Episode entry for caching */
+export interface EpisodeEntry {
+  id: string
+  media_id: string
+  extension_id: string
+  number: number
+  title?: string
+  description?: string
+  thumbnail_url?: string
+  aired_date?: string
+  duration?: number // in seconds
+}
+
+/** Cached media details with episodes (for offline fallback) */
+export interface CachedMediaDetails {
+  media: MediaEntry
+  episodes: EpisodeEntry[]
+}
+
+/**
+ * Save episodes to database for caching
+ * @param mediaId - Media ID
+ * @param extensionId - Extension ID
+ * @param episodes - Episodes to cache
+ */
+export async function saveEpisodes(
+  mediaId: string,
+  extensionId: string,
+  episodes: EpisodeEntry[]
+): Promise<void> {
+  return await invoke('save_episodes', { mediaId, extensionId, episodes })
+}
+
+/**
+ * Get cached media details with episodes (for offline fallback)
+ * @param mediaId - Media ID
+ * @returns Cached media details or null if not cached
+ */
+export async function getCachedMediaDetails(mediaId: string): Promise<CachedMediaDetails | null> {
+  return await invoke('get_cached_media_details', { mediaId })
+}
+
 /**
  * Get continue watching with full media details
  */

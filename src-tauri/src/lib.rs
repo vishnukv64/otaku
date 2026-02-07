@@ -369,6 +369,8 @@ pub fn run() {
       commands::bulk_remove_from_library,
       // Media
       commands::save_media_details,
+      commands::save_episodes,
+      commands::get_cached_media_details,
       commands::get_continue_watching_with_details,
       commands::get_continue_reading_with_details,
       commands::get_downloads_with_media,

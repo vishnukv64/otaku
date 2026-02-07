@@ -1823,6 +1823,34 @@ pub async fn get_downloads_with_media(
         .map_err(|e| format!("Failed to get downloads with media: {}", e))
 }
 
+/// Save episodes to database for caching
+#[tauri::command]
+pub async fn save_episodes(
+    state: State<'_, AppState>,
+    media_id: String,
+    extension_id: String,
+    episodes: Vec<crate::database::media::EpisodeEntry>,
+) -> Result<(), String> {
+    use crate::database::media::save_episodes as save_eps;
+
+    save_eps(state.database.pool(), &media_id, &extension_id, &episodes)
+        .await
+        .map_err(|e| format!("Failed to save episodes: {}", e))
+}
+
+/// Get cached media details with episodes (for offline fallback)
+#[tauri::command]
+pub async fn get_cached_media_details(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<crate::database::media::CachedMediaDetails>, String> {
+    use crate::database::media::get_cached_media_details as get_cached;
+
+    get_cached(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get cached media details: {}", e))
+}
+
 // ==================== Data Management Commands ====================
 
 /// Clear all watch history
