@@ -5,7 +5,7 @@
  * server selection, and episode navigation.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
 import {
   Play,
@@ -83,11 +83,15 @@ export function VideoPlayer({
   const defaultVolume = useSettingsStore((state) => state.defaultVolume)
   const autoDeleteWatched = useSettingsStore((state) => state.autoDeleteWatched)
 
+  // Get updateSettings from playerStore for persisting volume
+  const updatePlayerSettings = usePlayerStore((state) => state.updateSettings)
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [volume, setVolume] = useState(defaultVolume)
-  const [isMuted, setIsMuted] = useState(false)
+  // Initialize from playerStore (persisted) or fall back to defaultVolume for new users
+  const [volume, setVolume] = useState(playerSettings.volume ?? defaultVolume)
+  const [isMuted, setIsMuted] = useState(playerSettings.muted ?? false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP] = useState(false)
   const [showControls, setShowControls] = useState(true)
@@ -95,14 +99,27 @@ export function VideoPlayer({
   const [showEpisodes, setShowEpisodes] = useState(false)
   const [loading, setLoading] = useState(true)
   const [buffering, setBuffering] = useState(false)
+  const [isSeeking, setIsSeeking] = useState(false)
   const [bufferedPercentage, setBufferedPercentage] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [showNextEpisodeOverlay, setShowNextEpisodeOverlay] = useState(false)
   const [countdown, setCountdown] = useState(3)
 
+  // Progress bar hover preview state (time only - no thumbnails to avoid excessive requests)
+  const [hoverPreview, setHoverPreview] = useState<{
+    visible: boolean
+    x: number
+    time: number
+  }>({ visible: false, x: 0, time: 0 })
+  const progressBarRef = useRef<HTMLDivElement>(null)
+
   // Skip indicator state for stacking +10/-10 feature
   const [skipAmount, setSkipAmount] = useState<{ direction: 'forward' | 'backward'; amount: number } | null>(null)
   const skipTimeoutRef = useRef<number | null>(null)
+
+  // Volume indicator state for visual feedback
+  const [volumeIndicator, setVolumeIndicator] = useState<{ level: number; direction: 'up' | 'down' } | null>(null)
+  const volumeIndicatorTimeoutRef = useRef<number | null>(null)
 
   // Performance: Throttle time updates to prevent frame drops
   const lastTimeUpdateRef = useRef(0)
@@ -116,18 +133,23 @@ export function VideoPlayer({
   const [availableQualities, setAvailableQualities] = useState<string[]>(['Auto'])
   const [videoServer, setVideoServer] = useState<VideoServerUrls | null>(null)
 
-  // Group sources by server
-  const serverGroups = sources.reduce((acc, source, index) => {
-    const serverName = source.server || `Server ${index + 1}`
-    if (!acc[serverName]) {
-      acc[serverName] = []
-    }
-    acc[serverName].push({ ...source, originalIndex: index })
-    return acc
-  }, {} as Record<string, Array<VideoSource & { originalIndex: number }>>)
+  // Group sources by server (memoized to prevent unnecessary recalculations)
+  const serverGroups = useMemo(() => {
+    return sources.reduce((acc, source, index) => {
+      const serverName = source.server || `Server ${index + 1}`
+      if (!acc[serverName]) {
+        acc[serverName] = []
+      }
+      acc[serverName].push({ ...source, originalIndex: index })
+      return acc
+    }, {} as Record<string, Array<VideoSource & { originalIndex: number }>>)
+  }, [sources])
 
-  const servers = Object.keys(serverGroups)
-  const currentServerSources = serverGroups[servers[selectedServer]] || []
+  const servers = useMemo(() => Object.keys(serverGroups), [serverGroups])
+  const currentServerSources = useMemo(
+    () => serverGroups[servers[selectedServer]] || [],
+    [serverGroups, servers, selectedServer]
+  )
 
   // Load video server info on mount
   useEffect(() => {
@@ -359,15 +381,14 @@ export function VideoPlayer({
     video.playbackRate = playerSettings.playbackSpeed
   }, [playerSettings.playbackSpeed])
 
-  // Apply default volume on first load
+  // Apply persisted volume and muted state on first load
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    // Set default volume only if it hasn't been set by user yet
-    if (volume === defaultVolume) {
-      video.volume = defaultVolume
-    }
+    // Apply persisted volume from playerStore
+    video.volume = playerSettings.volume ?? defaultVolume
+    video.muted = playerSettings.muted ?? false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run on mount
 
@@ -631,6 +652,8 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
     video.muted = !video.muted
+    // Persist muted state to store
+    updatePlayerSettings({ muted: video.muted })
   }
 
   type FullscreenElement = HTMLDivElement & {
@@ -695,6 +718,9 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video) return
 
+    // Show seeking indicator
+    setIsSeeking(true)
+
     // Pause playback during seek to prevent audio desync
     const wasPlaying = !video.paused
     if (wasPlaying) {
@@ -706,6 +732,7 @@ export function VideoPlayer({
 
     // Wait for seeked event to ensure both audio and video are at the correct position
     const handleSeeked = () => {
+      setIsSeeking(false)
       if (wasPlaying) {
         video.play().catch((e) => console.error('Failed to resume after seek:', e))
       }
@@ -784,11 +811,37 @@ export function VideoPlayer({
           break
         case 'ArrowUp':
           e.preventDefault()
-          video.volume = Math.min(1, video.volume + 0.1)
+          {
+            const newVolume = Math.min(1, video.volume + 0.1)
+            video.volume = newVolume
+            // Persist volume to store
+            updatePlayerSettings({ volume: newVolume, muted: false })
+            // Show volume indicator
+            setVolumeIndicator({ level: newVolume, direction: 'up' })
+            if (volumeIndicatorTimeoutRef.current) {
+              clearTimeout(volumeIndicatorTimeoutRef.current)
+            }
+            volumeIndicatorTimeoutRef.current = setTimeout(() => {
+              setVolumeIndicator(null)
+            }, 800)
+          }
           break
         case 'ArrowDown':
           e.preventDefault()
-          video.volume = Math.max(0, video.volume - 0.1)
+          {
+            const newVolume = Math.max(0, video.volume - 0.1)
+            video.volume = newVolume
+            // Persist volume to store
+            updatePlayerSettings({ volume: newVolume })
+            // Show volume indicator
+            setVolumeIndicator({ level: newVolume, direction: 'down' })
+            if (volumeIndicatorTimeoutRef.current) {
+              clearTimeout(volumeIndicatorTimeoutRef.current)
+            }
+            volumeIndicatorTimeoutRef.current = setTimeout(() => {
+              setVolumeIndicator(null)
+            }, 800)
+          }
           break
         case 'n':
           e.preventDefault()
@@ -826,6 +879,29 @@ export function VideoPlayer({
     if (newVolume > 0) {
       video.muted = false
     }
+    // Persist volume to store
+    updatePlayerSettings({ volume: newVolume, muted: newVolume === 0 })
+  }
+
+  // Handle progress bar hover (time preview only)
+  const handleProgressHover = (e: React.MouseEvent<HTMLDivElement>) => {
+    const progressBar = progressBarRef.current
+    if (!progressBar || duration === 0) return
+
+    const rect = progressBar.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const percent = Math.max(0, Math.min(1, x / rect.width))
+    const time = percent * duration
+
+    setHoverPreview({
+      visible: true,
+      x,
+      time,
+    })
+  }
+
+  const handleProgressLeave = () => {
+    setHoverPreview((prev) => ({ ...prev, visible: false }))
   }
 
   const changeQuality = (quality: string) => {
@@ -870,6 +946,9 @@ export function VideoPlayer({
       }
       if (skipTimeoutRef.current) {
         clearTimeout(skipTimeoutRef.current)
+      }
+      if (volumeIndicatorTimeoutRef.current) {
+        clearTimeout(volumeIndicatorTimeoutRef.current)
       }
     }
   }, [])
@@ -1009,12 +1088,40 @@ export function VideoPlayer({
         </div>
       </div>
 
-      {/* Loading/Buffering Overlay */}
-      {(loading || buffering) && (
+      {/* Volume Indicator Overlay */}
+      {volumeIndicator && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+          <div className="flex flex-col items-center animate-in fade-in zoom-in duration-200">
+            <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
+              <div className="flex items-center gap-3">
+                {/* Volume icon */}
+                {volumeIndicator.level === 0 ? (
+                  <VolumeX className="w-8 h-8" />
+                ) : (
+                  <Volume2 className="w-8 h-8" />
+                )}
+                {/* Volume bar */}
+                <div className="w-24 h-2 bg-white/30 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-white rounded-full transition-all duration-100"
+                    style={{ width: `${volumeIndicator.level * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
+              {Math.round(volumeIndicator.level * 100)}%
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Loading/Buffering/Seeking Overlay */}
+      {(loading || buffering || isSeeking) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 pointer-events-none">
           <Loader2 className="w-16 h-16 animate-spin text-[var(--color-accent-primary)]" />
           <p className="mt-4 text-sm text-white/80">
-            {loading ? 'Loading video...' : 'Buffering...'}
+            {loading ? 'Loading video...' : isSeeking ? 'Seeking...' : 'Buffering...'}
           </p>
         </div>
       )}
@@ -1104,22 +1211,55 @@ export function VideoPlayer({
           showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
         }`}
       >
-        {/* Progress Bar */}
-        <div
-          className="w-full h-1.5 bg-white/20 rounded-full mb-4 cursor-pointer hover:h-2 transition-all relative overflow-hidden"
-          onClick={handleSeek}
-        >
-          {/* Buffer Bar */}
+        {/* Progress Bar with Hover Preview */}
+        <div className="relative mb-4">
+          {/* Hover Time Preview Tooltip */}
+          {hoverPreview.visible && (
+            <div
+              className="absolute bottom-full mb-3 transform -translate-x-1/2 pointer-events-none z-50"
+              style={{
+                left: `${Math.max(30, Math.min(hoverPreview.x, (progressBarRef.current?.clientWidth || 0) - 30))}px`,
+              }}
+            >
+              <div className="bg-black/95 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-xl border border-white/10">
+                <span className="text-sm font-medium text-white">
+                  {formatTime(hoverPreview.time)}
+                </span>
+              </div>
+              {/* Arrow pointing to progress bar */}
+              <div className="absolute left-1/2 transform -translate-x-1/2 -bottom-1">
+                <div className="w-2 h-2 bg-black/95 border-r border-b border-white/10 transform rotate-45" />
+              </div>
+            </div>
+          )}
+
+          {/* Progress Bar Track */}
           <div
-            className="absolute inset-y-0 left-0 bg-white/30 rounded-full transition-all"
-            style={{ width: `${bufferedPercentage}%` }}
-          />
-          {/* Progress Bar */}
-          <div
-            className="absolute inset-y-0 left-0 bg-[var(--color-accent-primary)] rounded-full"
-            style={{ width: `${(currentTime / duration) * 100}%` }}
+            ref={progressBarRef}
+            className="w-full h-1.5 bg-white/20 rounded-full cursor-pointer hover:h-2 transition-all relative overflow-visible"
+            onClick={handleSeek}
+            onMouseMove={handleProgressHover}
+            onMouseLeave={handleProgressLeave}
           >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
+            {/* Buffer Bar */}
+            <div
+              className="absolute inset-y-0 left-0 bg-white/30 rounded-full transition-all"
+              style={{ width: `${bufferedPercentage}%` }}
+            />
+            {/* Progress Bar */}
+            <div
+              className="absolute inset-y-0 left-0 bg-[var(--color-accent-primary)] rounded-full"
+              style={{ width: `${(currentTime / duration) * 100}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            {/* Hover Position Indicator */}
+            {hoverPreview.visible && (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-1 h-4 bg-white/60 rounded-full pointer-events-none"
+                style={{ left: `${hoverPreview.x}px` }}
+              />
+            )}
           </div>
         </div>
 
