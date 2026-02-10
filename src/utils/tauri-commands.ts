@@ -503,10 +503,11 @@ export async function getMangaTags(
 
 /**
  * Proxy an image request to avoid CORS issues (for manga pages)
+ * Uses tauri::ipc::Response on the Rust side for efficient binary transfer.
  * @param url - Image URL to proxy
- * @returns Image bytes as Uint8Array
+ * @returns Image bytes as ArrayBuffer
  */
-export async function proxyImageRequest(url: string): Promise<Uint8Array> {
+export async function proxyImageRequest(url: string): Promise<ArrayBuffer> {
   return await invoke('proxy_image_request', { url })
 }
 

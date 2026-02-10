@@ -878,11 +878,13 @@ pub async fn get_manga_tags(
 }
 
 /// Proxy image request to avoid CORS issues (for manga pages)
+/// Returns raw bytes via tauri::ipc::Response for efficient binary transfer
+/// (Vec<u8> would be JSON-serialized as a number array, which is very slow)
 #[tauri::command]
 pub async fn proxy_image_request(
     url: String,
-) -> Result<Vec<u8>, String> {
-    log::debug!("Proxying image request");
+) -> Result<tauri::ipc::Response, String> {
+    log::debug!("Proxying image request: {}", url);
 
     use std::io::Read;
 
@@ -907,10 +909,11 @@ pub async fn proxy_image_request(
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("Failed to read image: {}", e))?;
 
-            Ok(bytes)
+            log::debug!("Proxied image: {} bytes", bytes.len());
+            Ok(tauri::ipc::Response::new(bytes))
         }
         Err(e) => {
-            log::error!("Image proxy error: {:?}", e);
+            log::error!("Image proxy error for {}: {:?}", url, e);
             Err(format!("Image proxy request failed: {}", e))
         }
     }

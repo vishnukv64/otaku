@@ -16,12 +16,59 @@ import { useReaderStore } from '@/store/readerStore'
 import { saveReadingProgress } from '@/utils/tauri-commands'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { ChapterImage, Chapter } from '@/types/extension'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
 
 import { PageView } from './PageView'
 import { VerticalScrollView } from './VerticalScrollView'
 import { ReaderControls } from './ReaderControls'
 import { ReaderSettings } from './ReaderSettings'
 import { ChapterList } from './ChapterList'
+
+/** Sub-component for double-page mode images that proxies remote URLs */
+function DoublePageImage({
+  image,
+  fitMode,
+  zoom,
+  onClick,
+}: {
+  image: ChapterImage
+  fitMode: string
+  zoom: number
+  onClick: () => void
+}) {
+  const { src, loading, error } = useProxiedImage(image.url)
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center" style={{ width: 'calc(50vw - 1rem)' }}>
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (error || !src) return null
+
+  return (
+    <div className="h-full flex items-center justify-center">
+      <img
+        src={src}
+        alt={`Page ${image.page}`}
+        className="select-none"
+        style={{
+          maxHeight: fitMode === 'original' ? 'none' : '100%',
+          maxWidth: fitMode === 'original' ? 'none' : 'calc(50vw - 1rem)',
+          width: fitMode === 'width' ? 'calc(50vw - 1rem)' : 'auto',
+          height: fitMode === 'height' ? '100%' : 'auto',
+          objectFit: 'contain' as const,
+          transform: `scale(${zoom})`,
+          transformOrigin: 'center',
+        }}
+        draggable={false}
+        onClick={onClick}
+      />
+    </div>
+  )
+}
 
 interface MangaReaderProps {
   images: ChapterImage[]
@@ -221,35 +268,10 @@ export function MangaReader({
   // Check if current mode is vertical scroll (webtoon or vertical)
   const isVerticalScrollMode = settings.readingMode === 'vertical' || settings.readingMode === 'webtoon'
 
-  // Preload images for single/double page modes
-  // Vertical modes handle their own preloading via VerticalScrollView
-  useEffect(() => {
-    // Skip for vertical modes - they handle their own preloading
-    if (isVerticalScrollMode) return
-    if (images.length === 0) return
-
-    const preloadCount = settings.preloadPages
-
-    // Preload next N pages
-    for (let i = 1; i <= preloadCount; i++) {
-      const nextPage = currentPage + i
-      const nextImage = images.find(img => img.page === nextPage)
-      if (nextImage) {
-        const img = new Image()
-        img.src = nextImage.url
-      }
-    }
-
-    // Preload 2 previous pages for back navigation
-    for (let i = 1; i <= 2; i++) {
-      const prevPage = currentPage - i
-      const prevImage = images.find(img => img.page === prevPage)
-      if (prevImage) {
-        const img = new Image()
-        img.src = prevImage.url
-      }
-    }
-  }, [currentPage, isVerticalScrollMode, settings.preloadPages, images])
+  // Note: Image preloading for single/double page modes is handled by the
+  // useProxiedImage hook in each component. The hook proxies remote images
+  // through the Rust backend (adding required Referer headers), so native
+  // browser preloading via `new Image()` would not work for remote URLs.
 
   // Keyboard navigation
   useEffect(() => {
@@ -480,44 +502,20 @@ export function MangaReader({
             settings.fitMode === 'original' ? 'overflow-auto' : 'overflow-hidden'
           )}>
             {leftPage && (
-              <div className="h-full flex items-center justify-center">
-                <img
-                  src={leftPage.url}
-                  alt={`Page ${leftPage.page}`}
-                  className="select-none"
-                  style={{
-                    maxHeight: settings.fitMode === 'original' ? 'none' : '100%',
-                    maxWidth: settings.fitMode === 'original' ? 'none' : 'calc(50vw - 1rem)',
-                    width: settings.fitMode === 'width' ? 'calc(50vw - 1rem)' : 'auto',
-                    height: settings.fitMode === 'height' ? '100%' : 'auto',
-                    objectFit: 'contain',
-                    transform: `scale(${settings.zoom})`,
-                    transformOrigin: 'center',
-                  }}
-                  draggable={false}
-                  onClick={() => handlePageClick('left')}
-                />
-              </div>
+              <DoublePageImage
+                image={leftPage}
+                fitMode={settings.fitMode}
+                zoom={settings.zoom}
+                onClick={() => handlePageClick('left')}
+              />
             )}
             {rightPage && (
-              <div className="h-full flex items-center justify-center">
-                <img
-                  src={rightPage.url}
-                  alt={`Page ${rightPage.page}`}
-                  className="select-none"
-                  style={{
-                    maxHeight: settings.fitMode === 'original' ? 'none' : '100%',
-                    maxWidth: settings.fitMode === 'original' ? 'none' : 'calc(50vw - 1rem)',
-                    width: settings.fitMode === 'width' ? 'calc(50vw - 1rem)' : 'auto',
-                    height: settings.fitMode === 'height' ? '100%' : 'auto',
-                    objectFit: 'contain',
-                    transform: `scale(${settings.zoom})`,
-                    transformOrigin: 'center',
-                  }}
-                  draggable={false}
-                  onClick={() => handlePageClick('right')}
-                />
-              </div>
+              <DoublePageImage
+                image={rightPage}
+                fitMode={settings.fitMode}
+                zoom={settings.zoom}
+                onClick={() => handlePageClick('right')}
+              />
             )}
           </div>
         )

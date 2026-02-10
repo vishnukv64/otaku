@@ -11,6 +11,7 @@ import { Loader2, ImageOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ChapterImage } from '@/types/extension'
 import { FitMode } from '@/store/readerStore'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
 
 interface VerticalScrollViewProps {
   images: ChapterImage[]
@@ -26,9 +27,100 @@ interface VerticalScrollViewProps {
 // Max width for webtoon mode to ensure consistent image widths
 const WEBTOON_MAX_WIDTH = 800
 
-interface ImageState {
-  loaded: boolean
-  error: boolean
+/** Sub-component for each page image - uses proxy hook for remote URLs */
+function ScrollPageImage({
+  image,
+  shouldLoad,
+  isWebtoonMode,
+  imageStyle,
+  onLoad,
+  onError,
+}: {
+  image: ChapterImage
+  shouldLoad: boolean
+  isWebtoonMode: boolean
+  imageStyle: React.CSSProperties
+  onLoad: () => void
+  onError: () => void
+}) {
+  const { src, loading: proxyLoading, error: proxyError } = useProxiedImage(
+    image.url,
+    !shouldLoad, // skip proxying until image enters preload range
+  )
+
+  const [imgLoaded, setImgLoaded] = useState(false)
+  const [imgError, setImgError] = useState(false)
+
+  const handleLoad = () => {
+    setImgLoaded(true)
+    onLoad()
+  }
+
+  const handleError = () => {
+    setImgError(true)
+    onError()
+  }
+
+  const hasError = proxyError || imgError
+  const isFullyLoaded = imgLoaded && !!src
+
+  // Error state
+  if (hasError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-[var(--color-text-muted)]">
+        <ImageOff className="w-12 h-12 mb-2" />
+        <p className="text-sm">Failed to load page {image.page}</p>
+      </div>
+    )
+  }
+
+  // Image is proxied and ready to render (or already loaded)
+  if (src && !hasError) {
+    return (
+      <div className={cn('relative', isWebtoonMode && 'w-full')}>
+        {/* Loading spinner - shown while <img> element loads the blob */}
+        {!isFullyLoaded && (
+          <div
+            className="flex items-center justify-center bg-[var(--color-bg-secondary)]/30"
+            style={{ minHeight: isWebtoonMode ? '300px' : '50vh', width: '100%' }}
+          >
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+          </div>
+        )}
+        <img
+          src={src}
+          alt={`Page ${image.page}`}
+          onLoad={handleLoad}
+          onError={handleError}
+          style={{
+            ...imageStyle,
+            display: isFullyLoaded ? 'block' : 'none',
+          }}
+          className={cn('select-none', isWebtoonMode && 'w-full')}
+          loading="eager"
+          decoding="async"
+          draggable={false}
+        />
+      </div>
+    )
+  }
+
+  // Proxy is loading or not started yet (skipped)
+  return (
+    <div
+      className="w-full flex items-center justify-center bg-[var(--color-bg-secondary)]/20"
+      style={{
+        aspectRatio: isWebtoonMode ? '3/4' : '2/3',
+        maxHeight: isWebtoonMode ? '400px' : '100vh',
+      }}
+    >
+      {proxyLoading ? (
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+      ) : (
+        <span className="text-sm text-[var(--color-text-muted)]">Page {image.page}</span>
+      )}
+    </div>
+  )
 }
 
 export function VerticalScrollView({
@@ -43,7 +135,6 @@ export function VerticalScrollView({
 }: VerticalScrollViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const imageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
-  const [imageStates, setImageStates] = useState<Map<number, ImageState>>(new Map())
 
   // Use refs for scroll tracking to avoid re-renders during scroll
   const visiblePageRef = useRef(initialPage)
@@ -129,22 +220,6 @@ export function VerticalScrollView({
     }
   }, [preloadCenter])
 
-  const handleImageLoad = useCallback((page: number) => {
-    setImageStates(prev => {
-      const newMap = new Map(prev)
-      newMap.set(page, { loaded: true, error: false })
-      return newMap
-    })
-  }, [])
-
-  const handleImageError = useCallback((page: number) => {
-    setImageStates(prev => {
-      const newMap = new Map(prev)
-      newMap.set(page, { loaded: true, error: true })
-      return newMap
-    })
-  }, [])
-
   // Memoize shouldLoadImage check
   const shouldLoadImage = useCallback((page: number): boolean => {
     return Math.abs(page - preloadCenter) <= preloadCount
@@ -183,6 +258,10 @@ export function VerticalScrollView({
     }
   }, [fitMode, zoom, isWebtoonMode])
 
+  // Stable callbacks for image load/error (no-op since state is in sub-components)
+  const handleImageLoad = useCallback((_page: number) => {}, [])
+  const handleImageError = useCallback((_page: number) => {}, [])
+
   return (
     <div
       ref={containerRef}
@@ -210,89 +289,30 @@ export function VerticalScrollView({
           maxWidth: isWebtoonMode ? `${WEBTOON_MAX_WIDTH}px` : undefined,
         }}
       >
-        {images.map((image) => {
-          const state = imageStates.get(image.page)
-          const isLoaded = state?.loaded ?? false
-          const hasError = state?.error ?? false
-          const shouldLoad = shouldLoadImage(image.page)
-
-          return (
-            <div
-              key={image.page}
-              ref={(el) => {
-                if (el) {
-                  imageRefs.current.set(image.page, el)
-                  el.setAttribute('data-page', String(image.page))
-                }
-              }}
-              className={cn(
-                'relative',
-                isWebtoonMode ? 'w-full' : 'w-full flex justify-center'
-              )}
-            >
-              {/* Error state */}
-              {hasError && (
-                <div className="flex flex-col items-center justify-center py-20 text-[var(--color-text-muted)]">
-                  <ImageOff className="w-12 h-12 mb-2" />
-                  <p className="text-sm">Failed to load page {image.page}</p>
-                </div>
-              )}
-
-              {/* Image with loading indicator overlay */}
-              {shouldLoad && !hasError && (
-                <div className={cn('relative', isWebtoonMode && 'w-full')}>
-                  {/* Loading spinner - shown while image loads */}
-                  {!isLoaded && (
-                    <div
-                      className="flex items-center justify-center bg-[var(--color-bg-secondary)]/30"
-                      style={{ minHeight: isWebtoonMode ? '300px' : '50vh', width: '100%' }}
-                    >
-                      <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-                    </div>
-                  )}
-                  <img
-                    src={image.url}
-                    alt={`Page ${image.page}`}
-                    onLoad={() => handleImageLoad(image.page)}
-                    onError={() => handleImageError(image.page)}
-                    style={{
-                      ...imageStyle,
-                      display: isLoaded ? 'block' : 'none', // Hide until loaded to prevent layout shift
-                    }}
-                    className={cn('select-none', isWebtoonMode && 'w-full')}
-                    loading="eager"
-                    decoding="async"
-                    draggable={false}
-                  />
-                </div>
-              )}
-
-              {/* Placeholder for images not yet in preload range */}
-              {!shouldLoad && !isLoaded && (
-                <div
-                  className="w-full flex items-center justify-center bg-[var(--color-bg-secondary)]/20"
-                  style={{
-                    aspectRatio: isWebtoonMode ? '3/4' : '2/3',
-                    maxHeight: isWebtoonMode ? '400px' : '100vh',
-                  }}
-                >
-                  <span className="text-sm text-[var(--color-text-muted)]">Page {image.page}</span>
-                </div>
-              )}
-
-              {/* If image was loaded before but now out of preload range, keep showing it */}
-              {!shouldLoad && isLoaded && !hasError && (
-                <img
-                  src={image.url}
-                  alt={`Page ${image.page}`}
-                  style={imageStyle}
-                  className={cn('block select-none', isWebtoonMode && 'w-full')}
-                  draggable={false}
-                />
-              )}
-            </div>
-          )
-        })}
+        {images.map((image) => (
+          <div
+            key={image.page}
+            ref={(el) => {
+              if (el) {
+                imageRefs.current.set(image.page, el)
+                el.setAttribute('data-page', String(image.page))
+              }
+            }}
+            className={cn(
+              'relative',
+              isWebtoonMode ? 'w-full' : 'w-full flex justify-center'
+            )}
+          >
+            <ScrollPageImage
+              image={image}
+              shouldLoad={shouldLoadImage(image.page)}
+              isWebtoonMode={isWebtoonMode}
+              imageStyle={imageStyle}
+              onLoad={() => handleImageLoad(image.page)}
+              onError={() => handleImageError(image.page)}
+            />
+          </div>
+        ))}
 
         {/* Bottom padding for last page visibility */}
         <div className="h-[20vh]" />

@@ -6,6 +6,7 @@ import { useState, useRef } from 'react'
 import { Loader2, ImageOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FitMode } from '@/store/readerStore'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
 
 interface PageViewProps {
   imageUrl: string
@@ -32,32 +33,34 @@ export function PageView({
   onClick,
   className,
 }: PageViewProps) {
-  // Track loading/error state per imageUrl - reset when imageUrl changes
-  const [imageState, setImageState] = useState<{ url: string; loading: boolean; error: boolean }>({
-    url: imageUrl,
-    loading: true,
-    error: false,
-  })
-  const containerRef = useRef<HTMLDivElement>(null)
+  // Proxy remote images through the Rust backend (adds required Referer header)
+  const proxied = useProxiedImage(imageUrl)
 
-  // Reset state when imageUrl changes (React 18 pattern: adjusting state during rendering)
-  // This is the recommended way to reset state based on prop changes
-  if (imageState.url !== imageUrl) {
-    setImageState({ url: imageUrl, loading: true, error: false })
+  // Track <img> element load state separately from proxy fetch state
+  const [imgLoaded, setImgLoaded] = useState(false)
+  const [imgError, setImgError] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const prevUrlRef = useRef(imageUrl)
+
+  // Reset img load state when URL changes
+  if (prevUrlRef.current !== imageUrl) {
+    prevUrlRef.current = imageUrl
+    setImgLoaded(false)
+    setImgError(false)
   }
 
-  // Derive loading/error from combined state
-  const loading = imageState.loading
-  const error = imageState.error
-  const imageSrc = imageUrl // Use imageUrl directly
+  // Combined state: loading if proxy is fetching OR img hasn't loaded yet
+  const loading = proxied.loading || (!imgLoaded && !imgError && !proxied.error)
+  const error = proxied.error || imgError
+  const imageSrc = proxied.src
 
   const handleLoad = () => {
-    setImageState(prev => ({ ...prev, loading: false }))
+    setImgLoaded(true)
     onLoad?.()
   }
 
   const handleError = () => {
-    setImageState(prev => ({ ...prev, loading: false, error: true }))
+    setImgError(true)
     onError?.()
   }
 
