@@ -2,7 +2,6 @@
  * Settings Store - Application settings
  *
  * Handles:
- * - Theme preferences
  * - Appearance (grid density, continue watching)
  * - Content filtering (NSFW)
  * - Download configuration
@@ -19,7 +18,6 @@ const DB_KEY_SETTINGS = 'app_settings'
 
 interface SettingsData {
   // Appearance
-  theme: 'dark' | 'light'
   gridDensity: 'compact' | 'comfortable' | 'spacious'
   showContinueWatching: boolean
 
@@ -36,7 +34,6 @@ interface SettingsData {
   defaultVolume: number
   defaultPlaybackSpeed: number
   markWatchedThreshold: number
-  autoplayTrailers: boolean
 }
 
 interface SettingsState extends SettingsData {
@@ -52,7 +49,6 @@ interface SettingsState extends SettingsData {
 
 const defaultSettings: SettingsData = {
   // Appearance
-  theme: 'dark',
   gridDensity: 'comfortable',
   showContinueWatching: true,
 
@@ -69,7 +65,6 @@ const defaultSettings: SettingsData = {
   defaultVolume: 1.0,
   defaultPlaybackSpeed: 1.0,
   markWatchedThreshold: 90,
-  autoplayTrailers: true,
 }
 
 // Helper to save settings to database
@@ -86,7 +81,6 @@ const saveToDatabase = async (settings: SettingsData) => {
 
 // Extract only the data fields (not internal state or actions)
 const extractSettingsData = (state: SettingsState): SettingsData => ({
-  theme: state.theme,
   gridDensity: state.gridDensity,
   showContinueWatching: state.showContinueWatching,
   nsfwFilter: state.nsfwFilter,
@@ -97,7 +91,6 @@ const extractSettingsData = (state: SettingsState): SettingsData => ({
   defaultVolume: state.defaultVolume,
   defaultPlaybackSpeed: state.defaultPlaybackSpeed,
   markWatchedThreshold: state.markWatchedThreshold,
-  autoplayTrailers: state.autoplayTrailers,
 })
 
 export const useSettingsStore = create<SettingsState>()((set, get) => ({

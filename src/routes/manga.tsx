@@ -14,6 +14,8 @@ import {
   getContinueReadingWithDetails,
   streamDiscoverManga,
   onMangaDiscoverResults,
+  getDiscoverCache,
+  saveDiscoverCache,
   type DiscoverResultsEvent,
 } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
@@ -131,6 +133,9 @@ function MangaScreen() {
   // Track seen IDs to avoid duplicates across SSE events
   const seenIdsRef = useRef<Set<string>>(new Set())
 
+  // Cache key ref for browse results (updated when genres/filters change)
+  const browseCacheKeyRef = useRef('')
+
   // Handle SSE discover results
   const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
     // Deduplicate results using ref to track seen IDs
@@ -148,15 +153,25 @@ function MangaScreen() {
     setCurrentPage(event.page)
     setHasNextPage(event.has_next_page)
 
-    // Mark loading complete when last page is received
+    // Save to cache when last page is received
     if (event.is_last) {
       setRecommendationsLoading(false)
+      // Save all accumulated results to cache
+      setRecommendations(current => {
+        if (browseCacheKeyRef.current && current.length > 0) {
+          saveDiscoverCache(browseCacheKeyRef.current, JSON.stringify(current), 'manga').catch(() => {})
+        }
+        return current
+      })
     }
   }, [])
 
-  // Load recommendations via SSE (streams 3 pages progressively)
+  // Load recommendations via SSE (streams 3 pages progressively, API first with cache fallback)
   useEffect(() => {
     if (!extensionId) return
+
+    const cacheKey = `manga:browse:score:${userReadingGenres.join(',')}`
+    browseCacheKeyRef.current = cacheKey
 
     // Reset state for new stream
     setRecommendationsLoading(true)
@@ -171,7 +186,7 @@ function MangaScreen() {
 
     const startStreaming = async () => {
       try {
-        // Set up listener first
+        // Try API first - set up listener
         const unsub = await onMangaDiscoverResults((event) => {
           // Only process events if still mounted
           if (isMounted) {
@@ -192,8 +207,26 @@ function MangaScreen() {
         console.log('[Manga] Starting SSE streaming with genres:', userReadingGenres)
         await streamDiscoverManga(extensionId, 'score', userReadingGenres, !nsfwFilter, 3)
       } catch (err) {
-        console.error('Failed to stream manga:', err)
+        console.error('Failed to stream manga, trying cache:', err)
+
+        // SSE failed - try cache fallback
         if (isMounted) {
+          try {
+            const cached = await getDiscoverCache(cacheKey)
+            if (cached) {
+              const cachedResults: SearchResult[] = JSON.parse(cached.data)
+              const uniqueCached = cachedResults.filter(item => {
+                if (seenIdsRef.current.has(item.id)) return false
+                seenIdsRef.current.add(item.id)
+                return true
+              })
+              if (uniqueCached.length > 0) {
+                setRecommendations(uniqueCached)
+              }
+            }
+          } catch {
+            // Cache also failed
+          }
           setRecommendationsLoading(false)
         }
       }

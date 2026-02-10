@@ -1851,6 +1851,36 @@ pub async fn get_cached_media_details(
         .map_err(|e| format!("Failed to get cached media details: {}", e))
 }
 
+// ==================== Discover Cache Commands ====================
+
+/// Save discover results to cache
+#[tauri::command]
+pub async fn save_discover_cache(
+    state: State<'_, AppState>,
+    cache_key: String,
+    data: String, // JSON-encoded SearchResult array
+    media_type: String,
+) -> Result<(), String> {
+    use crate::database::discover_cache::save_discover_cache as save_cache;
+
+    save_cache(state.database.pool(), &cache_key, &data, &media_type)
+        .await
+        .map_err(|e| format!("Failed to save discover cache: {}", e))
+}
+
+/// Get cached discover results
+#[tauri::command]
+pub async fn get_discover_cache(
+    state: State<'_, AppState>,
+    cache_key: String,
+) -> Result<Option<crate::database::discover_cache::DiscoverCacheEntry>, String> {
+    use crate::database::discover_cache::get_discover_cache as get_cache;
+
+    get_cache(state.database.pool(), &cache_key)
+        .await
+        .map_err(|e| format!("Failed to get discover cache: {}", e))
+}
+
 // ==================== Data Management Commands ====================
 
 /// Clear all watch history

@@ -374,6 +374,9 @@ pub fn run() {
       commands::get_continue_watching_with_details,
       commands::get_continue_reading_with_details,
       commands::get_downloads_with_media,
+      // Discover Cache
+      commands::save_discover_cache,
+      commands::get_discover_cache,
       // Data Management
       commands::clear_all_watch_history,
       commands::clear_library,

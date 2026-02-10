@@ -17,7 +17,8 @@ import {
   Settings,
   Loader2,
   AlertCircle,
-  X,
+  RotateCcw,
+  SkipForward,
 } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
 import { saveWatchProgress, deleteEpisodeDownload, getVideoServerInfo, type VideoServerUrls } from '@/utils/tauri-commands'
@@ -440,11 +441,9 @@ export function VideoPlayer({
       // No-op here to reduce event handler overhead
     }
     const handleEnded = () => {
-      // Show next episode overlay if there's a next episode
-      if (onNextEpisode && currentEpisode && totalEpisodes && currentEpisode < totalEpisodes) {
-        setShowNextEpisodeOverlay(true)
-        setCountdown(3)
-      }
+      // Always show the end-of-episode overlay
+      setShowNextEpisodeOverlay(true)
+      setCountdown(5)
     }
 
     video.addEventListener('play', handlePlay)
@@ -470,15 +469,19 @@ export function VideoPlayer({
       video.removeEventListener('loadeddata', handleLoadedData)
       video.removeEventListener('progress', handleProgress)
     }
-  }, [currentEpisode, totalEpisodes, onNextEpisode, onProgress])
+  }, [onProgress])
 
   // Resume functionality is now handled via initialTime prop passed from watch.tsx
   // This ensures the video seeks to the saved position as soon as it loads,
   // avoiding race conditions between source loading and progress loading
 
-  // Handle next episode countdown
+  // Handle next episode countdown (only when autoPlayNext is ON and next episode exists)
+  const hasNextEpisode = !!(onNextEpisode && currentEpisode && totalEpisodes && currentEpisode < totalEpisodes)
+
   useEffect(() => {
     if (!showNextEpisodeOverlay) return
+    // Only auto-advance when autoPlayNext is enabled and there's a next episode
+    if (!playerSettings.autoPlayNext || !hasNextEpisode) return
 
     if (countdown === 0) {
       // Defer setState to avoid synchronous setState in effect body
@@ -494,7 +497,16 @@ export function VideoPlayer({
     }, 1000)
 
     return () => clearTimeout(timer)
-  }, [showNextEpisodeOverlay, countdown, onNextEpisode])
+  }, [showNextEpisodeOverlay, countdown, onNextEpisode, playerSettings.autoPlayNext, hasNextEpisode])
+
+  // Replay current episode from the beginning
+  const handlePlayAgain = () => {
+    const video = videoRef.current
+    if (!video) return
+    setShowNextEpisodeOverlay(false)
+    video.currentTime = 0
+    video.play().catch(() => {})
+  }
 
   // Save watch progress periodically and on unmount
   useEffect(() => {
@@ -1135,36 +1147,55 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Next Episode Overlay - Bottom Right */}
-      {showNextEpisodeOverlay && currentEpisode && totalEpisodes && (
-        <div className="absolute bottom-24 right-6 z-50 animate-in slide-in-from-right duration-300">
-          <div className="bg-black/90 backdrop-blur-md rounded-lg p-6 max-w-sm border border-white/20 shadow-2xl">
-            <div className="flex items-start gap-4">
-              <div className="flex-1">
-                <h3 className="text-lg font-bold mb-1">Next Episode</h3>
-                <p className="text-sm text-white/70 mb-3">
-                  Episode {currentEpisode + 1} starts in {countdown}s
+      {/* Episode End Overlay - Centered */}
+      {showNextEpisodeOverlay && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="flex flex-col items-center gap-6">
+            {/* Play Again button — always visible */}
+            <button
+              onClick={handlePlayAgain}
+              className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-6 rounded-xl transition-colors backdrop-blur-sm border border-white/10"
+            >
+              <RotateCcw size={20} />
+              Play Again
+            </button>
+
+            {/* Next Episode section — only when autoPlayNext is ON and next episode exists */}
+            {playerSettings.autoPlayNext && hasNextEpisode && currentEpisode && (
+              <div className="flex flex-col items-center gap-3">
+                <p className="text-sm text-white/70">
+                  Episode {currentEpisode + 1} in {countdown}s
                 </p>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-3">
                   <button
                     onClick={() => {
                       setShowNextEpisodeOverlay(false)
                       onNextEpisode?.()
                     }}
-                    className="flex-1 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white font-medium py-2 px-4 rounded-lg transition-colors text-sm"
+                    className="flex items-center gap-2 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white font-medium py-3 px-6 rounded-xl transition-colors"
                   >
-                    Play Now
+                    <SkipForward size={20} />
+                    Play Next Episode
                   </button>
                   <button
                     onClick={() => setShowNextEpisodeOverlay(false)}
-                    className="px-3 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
-                    title="Cancel"
+                    className="py-3 px-4 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors text-sm"
                   >
-                    <X size={18} />
+                    Cancel
                   </button>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* Simple dismiss when no autoplay */}
+            {(!playerSettings.autoPlayNext || !hasNextEpisode) && (
+              <button
+                onClick={() => setShowNextEpisodeOverlay(false)}
+                className="text-sm text-white/50 hover:text-white/80 transition-colors"
+              >
+                Dismiss
+              </button>
+            )}
           </div>
         </div>
       )}

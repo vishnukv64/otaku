@@ -11,6 +11,8 @@ import {
   getCurrentSeasonAnime,
   streamCurrentSeasonAnime,
   onSeasonAnimeDiscoverResults,
+  getDiscoverCache,
+  saveDiscoverCache,
   type DiscoverResultsEvent,
   type SeasonDiscoverResultsEvent,
 } from '@/utils/tauri-commands'
@@ -213,13 +215,19 @@ function AnimeScreen() {
     setFullSeasonPage(event.page)
     setFullSeasonHasNextPage(event.has_next_page)
 
-    // Mark loading complete when last page is received
+    // Save to cache when last page is received
     if (event.is_last) {
       setFullSeasonLoading(false)
+      // Save all accumulated results to cache
+      setFullSeasonAnime(current => {
+        const cacheKey = `anime:season:${event.year}:${event.season.toLowerCase()}`
+        saveDiscoverCache(cacheKey, JSON.stringify(current), 'anime').catch(() => {})
+        return current
+      })
     }
   }, [])
 
-  // Load full season anime via SSE when Season tab is activated
+  // Load full season anime via SSE when Season tab is activated (API first, cache fallback)
   useEffect(() => {
     if (!extensionId || activeTab !== 'season') return
 
@@ -237,6 +245,8 @@ function AnimeScreen() {
     // Track mounted state to handle async cleanup properly
     let isMounted = true
     let unsubscribe: (() => void) | null = null
+
+    const cacheKey = `anime:season:${currentSeasonInfo.year}:${currentSeasonInfo.season.toLowerCase()}`
 
     const startStreaming = async () => {
       try {
@@ -259,8 +269,26 @@ function AnimeScreen() {
         // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
         await streamCurrentSeasonAnime(extensionId, !nsfwFilter, 3)
       } catch (err) {
-        console.error('Failed to stream season anime:', err)
+        console.error('Failed to stream season anime, trying cache:', err)
+
+        // SSE failed - try cache fallback
         if (isMounted) {
+          try {
+            const cached = await getDiscoverCache(cacheKey)
+            if (cached) {
+              const cachedResults: SearchResult[] = JSON.parse(cached.data)
+              const uniqueCached = cachedResults.filter(item => {
+                if (fullSeasonSeenIdsRef.current.has(item.id)) return false
+                fullSeasonSeenIdsRef.current.add(item.id)
+                return true
+              })
+              if (uniqueCached.length > 0) {
+                setFullSeasonAnime(uniqueCached.sort((a, b) => (b.rating || 0) - (a.rating || 0)))
+              }
+            }
+          } catch {
+            // Cache also failed
+          }
           setFullSeasonLoading(false)
         }
       }
@@ -272,7 +300,7 @@ function AnimeScreen() {
       isMounted = false
       unsubscribe?.()
     }
-  }, [extensionId, activeTab, nsfwFilter, handleSeasonDiscoverResults])
+  }, [extensionId, activeTab, nsfwFilter, handleSeasonDiscoverResults, currentSeasonInfo])
 
   // Load more season anime
   const loadMoreSeasonAnime = useCallback(async () => {
@@ -327,6 +355,9 @@ function AnimeScreen() {
   // Track seen IDs to avoid duplicates across SSE events
   const seenIdsRef = useRef<Set<string>>(new Set())
 
+  // Cache key ref for browse results (updated when genres/filters change)
+  const browseCacheKeyRef = useRef('')
+
   // Handle SSE discover results
   const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
     // Deduplicate results using ref to track seen IDs
@@ -344,15 +375,25 @@ function AnimeScreen() {
     setCurrentPage(event.page)
     setHasNextPage(event.has_next_page)
 
-    // Mark loading complete when last page is received
+    // Save to cache when last page is received
     if (event.is_last) {
       setRecommendationsLoading(false)
+      // Save all accumulated results to cache
+      setRecommendations(current => {
+        if (browseCacheKeyRef.current && current.length > 0) {
+          saveDiscoverCache(browseCacheKeyRef.current, JSON.stringify(current), 'anime').catch(() => {})
+        }
+        return current
+      })
     }
   }, [])
 
-  // Load recommendations via SSE (streams 3 pages progressively)
+  // Load recommendations via SSE (streams 3 pages progressively, API first with cache fallback)
   useEffect(() => {
     if (!extensionId) return
+
+    const cacheKey = `anime:browse:score:${userWatchingGenres.join(',')}`
+    browseCacheKeyRef.current = cacheKey
 
     // Reset state for new stream
     setRecommendationsLoading(true)
@@ -367,7 +408,7 @@ function AnimeScreen() {
 
     const startStreaming = async () => {
       try {
-        // Set up listener first
+        // Try API first - set up listener
         const unsub = await onAnimeDiscoverResults((event) => {
           // Only process events if still mounted
           if (isMounted) {
@@ -387,8 +428,26 @@ function AnimeScreen() {
         // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
         await streamDiscoverAnime(extensionId, 'score', userWatchingGenres, !nsfwFilter, 3)
       } catch (err) {
-        console.error('Failed to stream anime:', err)
+        console.error('Failed to stream anime, trying cache:', err)
+
+        // SSE failed - try cache fallback
         if (isMounted) {
+          try {
+            const cached = await getDiscoverCache(cacheKey)
+            if (cached) {
+              const cachedResults: SearchResult[] = JSON.parse(cached.data)
+              const uniqueCached = cachedResults.filter(item => {
+                if (seenIdsRef.current.has(item.id)) return false
+                seenIdsRef.current.add(item.id)
+                return true
+              })
+              if (uniqueCached.length > 0) {
+                setRecommendations(uniqueCached)
+              }
+            }
+          } catch {
+            // Cache also failed
+          }
           setRecommendationsLoading(false)
         }
       }

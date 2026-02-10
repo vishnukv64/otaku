@@ -1905,4 +1905,37 @@ export async function deleteAppSetting(key: string): Promise<void> {
   return await invoke('delete_app_setting', { key })
 }
 
+// ==================== Discover Cache Commands ====================
 
+export interface DiscoverCacheEntry {
+  cache_key: string
+  data: string // JSON-encoded SearchResult array
+  media_type: 'anime' | 'manga' | 'mixed'
+  cached_at: string
+  updated_at: string
+}
+
+/**
+ * Save discover results to cache
+ * @param cacheKey - Unique cache key (e.g., "home:trending", "anime:browse:score")
+ * @param data - JSON-encoded SearchResult array
+ * @param mediaType - Type of media ('anime', 'manga', or 'mixed')
+ */
+export async function saveDiscoverCache(
+  cacheKey: string,
+  data: string,
+  mediaType: 'anime' | 'manga' | 'mixed'
+): Promise<void> {
+  return await invoke('save_discover_cache', { cacheKey, data, mediaType })
+}
+
+/**
+ * Get cached discover results
+ * @param cacheKey - Unique cache key
+ * @returns Cached discover results or null if not found
+ */
+export async function getDiscoverCache(
+  cacheKey: string
+): Promise<DiscoverCacheEntry | null> {
+  return await invoke('get_discover_cache', { cacheKey })
+}

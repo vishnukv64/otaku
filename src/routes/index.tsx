@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Loader2, AlertCircle } from 'lucide-react'
-import { loadExtension, discoverAnime } from '@/utils/tauri-commands'
+import { loadExtension, discoverAnime, getDiscoverCache, saveDiscoverCache } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { HeroSectionSkeleton } from '@/components/media/HeroSectionSkeleton'
@@ -62,7 +62,7 @@ function HomeScreen() {
     initExtension()
   }, [])
 
-  // Load content for all categories
+  // Load content for all categories (API first, cache fallback)
   useEffect(() => {
     if (!extensionId) return
 
@@ -76,7 +76,10 @@ function HomeScreen() {
 
       // Load each category
       for (const category of CATEGORIES) {
+        const cacheKey = `home:${category.id}`
+
         try {
+          // Try API first
           const results = await discoverAnime(
             extensionId,
             category.page,
@@ -106,8 +109,38 @@ function HomeScreen() {
           if (category.id === 'trending' && results.results.length > 0 && !featuredAnime) {
             setFeaturedAnime(results.results[0])
           }
+
+          // Save to cache for next time (fire-and-forget)
+          saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
         } catch (err) {
-          console.error(`Category ${category.id} error:`, err)
+          console.error(`Category ${category.id} API failed, trying cache:`, err)
+
+          // API failed - try cache fallback
+          try {
+            const cached = await getDiscoverCache(cacheKey)
+            if (cached) {
+              const cachedResults: SearchResult[] = JSON.parse(cached.data)
+              if (cachedResults.length > 0) {
+                setCategories(prev => ({
+                  ...prev,
+                  [category.id]: {
+                    id: category.id,
+                    items: cachedResults,
+                    loading: false,
+                    error: null,
+                  },
+                }))
+                if (category.id === 'trending' && !featuredAnime) {
+                  setFeaturedAnime(cachedResults[0])
+                }
+                continue // Skip error state, cache served the data
+              }
+            }
+          } catch {
+            // Cache also failed
+          }
+
+          // Both API and cache failed
           setCategories(prev => ({
             ...prev,
             [category.id]: {

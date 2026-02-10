@@ -131,22 +131,6 @@ function SettingsScreen() {
           description="App-wide preferences and display options"
         >
           <SettingRow
-            label="Theme"
-            description="Choose your preferred color scheme (Light mode coming soon)"
-          >
-            <SettingDropdown
-              value={settings.theme}
-              options={[
-                { value: 'dark', label: 'Dark' },
-                { value: 'light', label: 'Light (Coming Soon)' },
-              ]}
-              onChange={(value) =>
-                settings.updateSettings({ theme: value as 'dark' | 'light' })
-              }
-            />
-          </SettingRow>
-
-          <SettingRow
             label="NSFW Content Filter"
             description="Hide adult content in search and library"
           >
@@ -181,16 +165,6 @@ function SettingsScreen() {
             <SettingToggle
               value={playerSettings.autoPlayNext}
               onChange={(value) => updatePlayerSettings({ autoPlayNext: value })}
-            />
-          </SettingRow>
-
-          <SettingRow
-            label="Auto-play Trailers"
-            description="Automatically play trailer videos in homepage hero section"
-          >
-            <SettingToggle
-              value={settings.autoplayTrailers}
-              onChange={(value) => settings.updateSettings({ autoplayTrailers: value })}
             />
           </SettingRow>
 
