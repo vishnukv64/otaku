@@ -63,7 +63,6 @@ export function VideoPlayer({
   animeTitle,
   episodeTitle,
   currentEpisode,
-  totalEpisodes,
   episodes,
   onNextEpisode,
   onPreviousEpisode,
@@ -476,7 +475,9 @@ export function VideoPlayer({
   // avoiding race conditions between source loading and progress loading
 
   // Handle next episode countdown (only when autoPlayNext is ON and next episode exists)
-  const hasNextEpisode = !!(onNextEpisode && currentEpisode && totalEpisodes && currentEpisode < totalEpisodes)
+  // Use array index to determine if there's a next episode, not episode number vs count
+  const currentEpisodeIndex = episodes?.findIndex(ep => ep.number === currentEpisode) ?? -1
+  const hasNextEpisode = !!(onNextEpisode && episodes && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodes.length - 1)
 
   useEffect(() => {
     if (!showNextEpisodeOverlay) return
@@ -1161,10 +1162,10 @@ export function VideoPlayer({
             </button>
 
             {/* Next Episode section — only when autoPlayNext is ON and next episode exists */}
-            {playerSettings.autoPlayNext && hasNextEpisode && currentEpisode && (
+            {playerSettings.autoPlayNext && hasNextEpisode && (
               <div className="flex flex-col items-center gap-3">
                 <p className="text-sm text-white/70">
-                  Episode {currentEpisode + 1} in {countdown}s
+                  Episode {episodes?.[currentEpisodeIndex + 1]?.number ?? (currentEpisode != null ? currentEpisode + 1 : '?')} in {countdown}s
                 </p>
                 <div className="flex items-center gap-3">
                   <button
