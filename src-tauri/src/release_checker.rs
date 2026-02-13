@@ -578,7 +578,9 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             )
             AND COALESCE(rt.notification_enabled, 1) = 1
             AND (rt.next_scheduled_check IS NULL OR rt.next_scheduled_check <= ?)
-        ORDER BY rt.last_checked_at ASC NULLS FIRST
+        ORDER BY
+            CASE WHEN m.media_type = 'anime' THEN 0 ELSE 1 END,
+            rt.last_checked_at ASC NULLS FIRST
         "#
     )
     .bind(now)
@@ -745,7 +747,8 @@ async fn fetch_episode_info(
             let details = runtime.get_details(&media.media_id)
                 .context("Failed to get anime details")?;
 
-            let latest_ep = details.episodes.last();
+            let latest_ep = details.episodes.iter()
+                .max_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
 
             Ok(EpisodeInfo {
                 count: details.episodes.len() as i32,
@@ -758,7 +761,8 @@ async fn fetch_episode_info(
             let details = runtime.get_manga_details(&media.media_id)
                 .context("Failed to get manga details")?;
 
-            let latest_ch = details.chapters.last();
+            let latest_ch = details.chapters.iter()
+                .max_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
 
             Ok(EpisodeInfo {
                 count: details.chapters.len() as i32,

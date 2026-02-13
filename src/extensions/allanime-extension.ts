@@ -449,6 +449,9 @@ const extensionObject = {
         thumbnail: coverUrl
       }));
 
+      // Sort episodes by number (ascending)
+      episodes.sort((a, b) => a.number - b.number);
+
       // Log the specific fields we're interested in
       console.log('lastUpdateEnd:', show.lastUpdateEnd);
       console.log('broadcastInterval:', show.broadcastInterval);
