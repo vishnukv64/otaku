@@ -8,16 +8,17 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Play, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
-import { getContinueWatchingWithDetails, removeFromContinueWatching, type ContinueWatchingEntry } from '@/utils/tauri-commands'
+import { getContinueWatchingWithDetails, removeFromContinueWatching, loadExtension, type ContinueWatchingEntry } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from './MediaCard'
 import { MediaDetailModal } from './MediaDetailModal'
+import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
 import { notifySuccess, notifyError } from '@/utils/notify'
 
 interface ContinueWatchingSectionProps {
-  extensionId: string
+  extensionId?: string
 }
 
 export function ContinueWatchingSection({ extensionId }: ContinueWatchingSectionProps) {
@@ -27,8 +28,15 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
+  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!allanimeExtId) {
+      loadExtension(ALLANIME_EXTENSION).then(meta => setAllanimeExtId(meta.id)).catch(() => {})
+    }
+  }, [allanimeExtId])
 
   useEffect(() => {
     const loadContinueWatching = async () => {
@@ -95,13 +103,10 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
       to: '/watch',
       search: entry.completed
         ? {
-            extensionId,
-            animeId: entry.media.id,
-            // Don't pass episodeId - watch route will find next episode
+            malId: entry.media.id,
           }
         : {
-            extensionId,
-            animeId: entry.media.id,
+            malId: entry.media.id,
             episodeId: entry.episode_id,
           },
     })
@@ -238,7 +243,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
       {selectedMedia && (
         <MediaDetailModal
           media={selectedMedia}
-          extensionId={extensionId}
+          extensionId={allanimeExtId || undefined}
           isOpen={true}
           onClose={() => setSelectedMedia(null)}
           onMediaChange={setSelectedMedia}

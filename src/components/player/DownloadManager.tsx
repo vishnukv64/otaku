@@ -8,12 +8,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { X, Download, Trash2, CheckCircle, XCircle, Loader2, Folder, HardDrive, Copy, BookOpen, Tv, Pause, Play } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { ask } from '@tauri-apps/plugin-dialog'
 import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, clearCancelledDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { useSettingsStore } from '@/store/settingsStore'
 
 // Extension ID for AllAnime - used for navigation to watch page
-const ALLANIME_EXTENSION_ID = 'com.allanime.source'
 
 const DOWNLOAD_PROGRESS_EVENT = 'download-progress'
 const CHAPTER_DOWNLOAD_PROGRESS_EVENT = 'chapter-download-progress'
@@ -230,9 +230,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     const cleanFilename = filename.replace(/_/g, ' ').replace(/\.[^/.]+$/, '')
     const displayName = download ? `Episode ${download.episode_number}` : cleanFilename
 
-    if (!confirm(`Delete "${cleanFilename}"? This will permanently remove the file.`)) {
-      return
-    }
+    const confirmed = await ask(`Delete "${cleanFilename}"? This will permanently remove the file.`, { kind: 'warning' })
+    if (!confirmed) return
 
     try {
       await deleteDownload(downloadId)
@@ -257,9 +256,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       return
     }
 
-    if (!confirm(`Clear ${completedCount} completed download(s) from the list? Files will not be deleted.`)) {
-      return
-    }
+    const confirmed = await ask(`Clear ${completedCount} completed download(s) from the list? Files will not be deleted.`)
+    if (!confirmed) return
 
     try {
       await clearCompletedDownloads()
@@ -279,9 +277,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       return
     }
 
-    if (!confirm(`Clear ${failedCount} failed download(s) from the list?`)) {
-      return
-    }
+    const confirmed = await ask(`Clear ${failedCount} failed download(s) from the list?`)
+    if (!confirmed) return
 
     try {
       await clearFailedDownloads()
@@ -340,9 +337,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       return
     }
 
-    if (!confirm(`Delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`)) {
-      return
-    }
+    const confirmed = await ask(`Delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`, { kind: 'warning' })
+    if (!confirmed) return
 
     try {
       // Delete all downloads for this anime
@@ -382,9 +378,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     const chapter = chapterDownloads.find(d => d.media_id === mediaId && d.chapter_id === chapterId)
     const displayName = chapter ? `${chapter.media_title} Ch.${chapter.chapter_number}` : 'Chapter'
 
-    if (!confirm(`Delete "${displayName}"? This will permanently remove the downloaded images.`)) {
-      return
-    }
+    const confirmed = await ask(`Delete "${displayName}"? This will permanently remove the downloaded images.`, { kind: 'warning' })
+    if (!confirmed) return
 
     try {
       await deleteChapterDownload(mediaId, chapterId)
@@ -412,9 +407,8 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
       return
     }
 
-    if (!confirm(`Delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`)) {
-      return
-    }
+    const confirmed = await ask(`Delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`, { kind: 'warning' })
+    if (!confirmed) return
 
     try {
       // Delete all chapters for this manga
@@ -440,8 +434,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     navigate({
       to: '/watch',
       search: {
-        extensionId: ALLANIME_EXTENSION_ID,
-        animeId: mediaId,
+        malId: mediaId,
         episodeId: episodeId,
       },
     })

@@ -443,7 +443,7 @@ const extensionObject = {
       }
 
       const episodes = subEpisodes.map(epNum => ({
-        id: \`\${id}-\${epNum}\`,
+        id: \`\${id}::\${epNum}\`,
         number: parseFloat(epNum),
         title: \`Episode \${epNum}\`,
         thumbnail: coverUrl
@@ -506,9 +506,9 @@ const extensionObject = {
   },
 
   getSources: (episodeId) => {
-    const parts = episodeId.split('-');
-    const showId = parts.slice(0, -1).join('-');
-    const episodeString = parts[parts.length - 1];
+    const parts = episodeId.split('::');
+    const showId = parts[0];
+    const episodeString = parts[1];
 
     const sourcesQuery = \`query($showId: String! $translationType: VaildTranslationTypeEnumType! $episodeString: String!) { episode(showId: $showId translationType: $translationType episodeString: $episodeString) { episodeString sourceUrls } }\`;
 

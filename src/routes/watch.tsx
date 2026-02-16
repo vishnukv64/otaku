@@ -8,13 +8,13 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
-import { getMediaDetails, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, loadExtension, resolveAllanimeId, clearAllanimeMapping, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
+import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
 
 interface WatchSearch {
-  extensionId: string
-  animeId: string
+  malId: string
   episodeId?: string
 }
 
@@ -22,8 +22,7 @@ export const Route = createFileRoute('/watch')({
   component: WatchPage,
   validateSearch: (search: Record<string, unknown>): WatchSearch => {
     return {
-      extensionId: (search.extensionId as string) || '',
-      animeId: (search.animeId as string) || '',
+      malId: (search.malId as string) || '',
       episodeId: search.episodeId as string | undefined,
     }
   },
@@ -31,7 +30,7 @@ export const Route = createFileRoute('/watch')({
 
 function WatchPage() {
   const navigate = useNavigate()
-  const { extensionId, animeId, episodeId: initialEpisodeId } = Route.useSearch()
+  const { malId, episodeId: initialEpisodeId } = Route.useSearch()
 
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [sources, setSources] = useState<VideoSources | null>(null)
@@ -40,7 +39,10 @@ function WatchPage() {
   const [error, setError] = useState<string | null>(null)
   const [resumeTime, setResumeTime] = useState<number>(0)
   const [videoServerInfo, setVideoServerInfo] = useState<VideoServerUrls | null>(null)
+  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
+  const [allanimeId, setAllanimeId] = useState<string | null>(null)
   const shownResumeToastRef = useRef<string | null>(null)
+  const shownOfflineToastRef = useRef<string | null>(null)
 
   // Load video server info on mount
   useEffect(() => {
@@ -49,19 +51,19 @@ function WatchPage() {
       .catch((err) => console.error('Failed to get video server info:', err))
   }, [])
 
-  // Load anime details
+  // Load anime details from Jikan API
   useEffect(() => {
-    if (!extensionId || !animeId) {
-      setError('Missing extension ID or anime ID')
+    if (!malId) {
+      setError('Missing anime ID')
       return
     }
 
     const loadDetails = async () => {
       let result: MediaDetails | null = null
 
-      // Try to load from API first
+      // Try to load from Jikan API first
       try {
-        result = await getMediaDetails(extensionId, animeId)
+        result = await jikanAnimeDetails(parseInt(malId))
 
         // Sort episodes in ascending order by episode number
         if (result.episodes) {
@@ -72,7 +74,7 @@ function WatchPage() {
         try {
           const mediaEntry: MediaEntry = {
             id: result.id,
-            extension_id: extensionId,
+            extension_id: 'jikan',
             title: result.title,
             english_name: result.english_name,
             native_name: result.native_name,
@@ -103,7 +105,7 @@ function WatchPage() {
             const episodeEntries: EpisodeEntry[] = result.episodes.map(ep => ({
               id: ep.id,
               media_id: result!.id,
-              extension_id: extensionId,
+              extension_id: 'jikan',
               number: ep.number,
               title: ep.title,
               description: undefined,
@@ -111,7 +113,7 @@ function WatchPage() {
               aired_date: undefined,
               duration: undefined,
             }))
-            await saveEpisodes(result.id, extensionId, episodeEntries)
+            await saveEpisodes(result.id, 'jikan', episodeEntries)
           }
         } catch (saveErr) {
           console.error('Failed to save media details:', saveErr)
@@ -121,8 +123,8 @@ function WatchPage() {
 
         // API failed - try to load from cache
         try {
-          const cached = await getCachedMediaDetails(animeId)
-          if (cached && cached.episodes.length > 0) {
+          const cached = await getCachedMediaDetails(malId)
+          if (cached) {
             // Convert cached data to MediaDetails format
             result = {
               id: cached.media.id,
@@ -168,6 +170,20 @@ function WatchPage() {
       }
 
       setDetails(result)
+
+      // Load AllAnime extension and resolve ID for video sources
+      try {
+        const metadata = await loadExtension(ALLANIME_EXTENSION)
+        setAllanimeExtId(metadata.id)
+        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year)
+        if (resolvedId) {
+          setAllanimeId(resolvedId)
+        } else {
+          console.warn('[Watch] Could not resolve AllAnime ID for:', result.title)
+        }
+      } catch (err) {
+        console.warn('[Watch] Failed to load AllAnime extension:', err)
+      }
 
       // Set initial episode if not provided
       if (!initialEpisodeId && result.episodes.length > 0) {
@@ -221,7 +237,7 @@ function WatchPage() {
     }
 
     loadDetails()
-  }, [extensionId, animeId, initialEpisodeId])
+  }, [malId, initialEpisodeId])
 
   // Define current episode variables
   const currentEpisode = details?.episodes.find((ep) => ep.id === currentEpisodeId)
@@ -230,12 +246,14 @@ function WatchPage() {
   // Load watch progress and video sources for current episode
   // IMPORTANT: Load watch progress BEFORE sources to ensure resume time is set
   useEffect(() => {
-    if (!extensionId || !currentEpisodeId || !currentEpisode) return
+    if (!currentEpisodeId || !currentEpisode) return
 
     const loadProgressAndSources = async () => {
       setLoading(true)
       setError(null)
+      setSources(null)
 
+      let didComplete = false
       try {
         // Step 1: Load watch progress FIRST
         try {
@@ -261,12 +279,11 @@ function WatchPage() {
 
         // Step 2: Load video sources AFTER watch progress is loaded
         // Check if episode is downloaded first
-        const filePath = await getEpisodeFilePath(animeId, currentEpisode.number)
+        const filePath = await getEpisodeFilePath(malId, currentEpisode.number)
         let localSourceLoaded = false
 
         if (filePath && videoServerInfo) {
           // Use video server for local file (proper Range request support for large files)
-          // Use the /absolute endpoint with the full file path to support custom download locations
           const localUrl = `http://127.0.0.1:${videoServerInfo.port}/absolute?path=${encodeURIComponent(filePath)}&token=${videoServerInfo.token}`
           setSources({
             sources: [{
@@ -278,7 +295,10 @@ function WatchPage() {
             subtitles: []
           })
           localSourceLoaded = true
-          toastInfo('Offline Mode', 'Playing from downloaded video')
+          if (shownOfflineToastRef.current !== currentEpisodeId) {
+            shownOfflineToastRef.current = currentEpisodeId
+            toastInfo('Offline Mode', 'Playing from downloaded video')
+          }
         } else if (filePath) {
           // Fallback: Try getLocalVideoUrl command with full path
           try {
@@ -293,27 +313,56 @@ function WatchPage() {
               subtitles: []
             })
             localSourceLoaded = true
-            toastInfo('Offline Mode', 'Playing from downloaded video')
+            if (shownOfflineToastRef.current !== currentEpisodeId) {
+              shownOfflineToastRef.current = currentEpisodeId
+              toastInfo('Offline Mode', 'Playing from downloaded video')
+            }
           } catch {
             // Local file loading failed - will fall through to streaming
             console.warn('Failed to load local video file, falling back to streaming')
           }
         }
 
-        // Fetch from extension if no local source was loaded
+        // Fetch from AllAnime via bridge if no local source was loaded
         if (!localSourceLoaded) {
-          const result = await getVideoSources(extensionId, currentEpisodeId)
+          if (!allanimeExtId || !allanimeId) {
+            // Bridge still resolving - keep loading spinner visible
+            // Effect will re-run when allanimeId becomes available
+            return
+          }
+          // Build AllAnime episode ID: {allanimeId}::{episodeNumber}
+          const allanimeEpisodeId = `${allanimeId}::${currentEpisode.number}`
+          let result = await getVideoSources(allanimeExtId, allanimeEpisodeId)
+
+          // If no valid sources, the cached AllAnime ID may be wrong - clear and re-resolve
+          const hasValidSources = result.sources.some(s => s.url && s.url.length > 0)
+          if (!hasValidSources && malId && details) {
+            console.warn('[Watch] No valid sources - clearing stale mapping and re-resolving')
+            await clearAllanimeMapping(malId)
+            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year)
+            if (freshId && freshId !== allanimeId) {
+              setAllanimeId(freshId)
+              const freshEpisodeId = `${freshId}::${currentEpisode.number}`
+              result = await getVideoSources(allanimeExtId, freshEpisodeId)
+            }
+          }
+
           setSources(result)
         }
+        didComplete = true
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load video sources')
+        didComplete = true
       } finally {
-        setLoading(false)
+        // Only clear loading if we actually finished (not waiting for allanimeId)
+        if (didComplete) {
+          setLoading(false)
+        }
       }
     }
 
     loadProgressAndSources()
-  }, [extensionId, currentEpisodeId, currentEpisode, animeId, videoServerInfo])
+  }, [currentEpisodeId, currentEpisode, malId, videoServerInfo, allanimeExtId, allanimeId])
 
   const handleNextEpisode = () => {
     if (!details || currentEpisodeIndex === -1) return
@@ -363,7 +412,7 @@ function WatchPage() {
           {!loading && !error && sources && sources.sources.length > 0 && (
             <VideoPlayer
               sources={sources.sources}
-              mediaId={animeId}
+              mediaId={malId}
               episodeId={currentEpisodeId}
               animeTitle={details?.title}
               episodeTitle={currentEpisode?.title}

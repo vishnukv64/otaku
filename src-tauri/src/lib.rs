@@ -4,6 +4,7 @@ mod commands;
 mod database;
 mod downloads;
 mod extensions;
+mod jikan;
 mod media;
 mod notifications;
 mod release_checker;
@@ -435,6 +436,29 @@ pub fn run() {
       commands::list_available_backups,
       commands::get_default_backup_directory,
       commands::delete_backup,
+      // Jikan API
+      jikan::commands::jikan_watch_episodes_popular,
+      jikan::commands::jikan_search_anime,
+      jikan::commands::jikan_top_anime,
+      jikan::commands::jikan_season_now,
+      jikan::commands::jikan_season,
+      jikan::commands::jikan_season_upcoming,
+      jikan::commands::jikan_anime_details,
+      jikan::commands::jikan_anime_episodes,
+      jikan::commands::jikan_anime_recommendations,
+      jikan::commands::jikan_genres_anime,
+      jikan::commands::jikan_schedules,
+      jikan::commands::jikan_random_anime,
+      jikan::commands::jikan_search_manga,
+      jikan::commands::jikan_top_manga,
+      jikan::commands::jikan_manga_details,
+      jikan::commands::jikan_genres_manga,
+      jikan::commands::resolve_allanime_id,
+      jikan::commands::clear_allanime_mapping,
+      // Migration (AllAnime → Jikan)
+      commands::check_migration_needed,
+      commands::start_migration,
+      commands::get_migration_progress,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

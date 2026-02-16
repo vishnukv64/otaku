@@ -7,6 +7,7 @@
 
 import { useState } from 'react'
 import { X, CheckSquare, Tags, Trash2, ChevronDown, Loader2 } from 'lucide-react'
+import { ask } from '@tauri-apps/plugin-dialog'
 import {
   getLibraryTags,
   bulkUpdateLibraryStatus,
@@ -118,7 +119,8 @@ export function BulkActionBar({
   }
 
   const handleRemoveFromLibrary = async () => {
-    if (!confirm(`Remove ${selectedCount} items from your library?`)) return
+    const confirmed = await ask(`Remove ${selectedCount} items from your library?`, { kind: 'warning' })
+    if (!confirmed) return
 
     setLoading(true)
     setActionType('remove')

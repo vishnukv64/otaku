@@ -106,27 +106,48 @@ impl ExtensionRuntime {
                     }
                 }
 
-                // Execute request
-                match request.call() {
-                    Ok(response) => {
-                        let status = response.status();
-                        let mut body = String::new();
-                        let read_result = response.into_reader()
-                            .take(10_000_000)
-                            .read_to_string(&mut body);
+                // Get optional body for POST requests
+                let body = options.get::<_, Option<String>>("body")
+                    .unwrap_or(None);
 
-                        let _ = (status, read_result); // silence unused warnings
-
-                        // Return response object
-                        Ok(serde_json::json!({
-                            "status": status,
-                            "body": body
-                        }).to_string())
+                // Execute request (send body for POST, call() for GET)
+                // Use send_bytes to preserve the Content-Type header set by the extension
+                // (send_string overrides Content-Type to text/plain, which breaks JSON APIs)
+                let result = match body {
+                    Some(b) => request.send_bytes(b.as_bytes()),
+                    None => request.call(),
+                };
+                // Extract response from either Ok or Status error
+                // (ureq treats non-2xx as Err, but we want the body for GraphQL error messages)
+                let (status, response) = match result {
+                    Ok(resp) => (resp.status(), resp),
+                    Err(ureq::Error::Status(code, resp)) => {
+                        log::warn!("__fetch non-2xx status: {} for {}", code, url);
+                        (code, resp)
                     },
                     Err(e) => {
-                        log::error!("__fetch error: {:?}", e);
-                        Err(rquickjs::Error::Exception)
-                    },
+                        log::error!("__fetch transport error: {:?}", e);
+                        return Err(rquickjs::Error::Exception);
+                    }
+                };
+
+                {
+                    let mut body = String::new();
+                    let read_result = response.into_reader()
+                        .take(10_000_000)
+                        .read_to_string(&mut body);
+
+                    let _ = read_result;
+
+                    if status >= 400 {
+                        log::warn!("__fetch {} response body: {}", status, &body[..body.len().min(500)]);
+                    }
+
+                    // Return response object (including non-2xx so JS can inspect errors)
+                    Ok(serde_json::json!({
+                        "status": status,
+                        "body": body
+                    }).to_string())
                 }
             })?;
 

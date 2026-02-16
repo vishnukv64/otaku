@@ -8,6 +8,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   ExtensionMetadata,
+  SearchResult,
   SearchResults,
   MediaDetails,
   VideoSources,
@@ -1210,6 +1211,16 @@ export async function getProxyVideoUrl(url: string): Promise<string> {
   return await invoke('get_proxy_video_url', { url })
 }
 
+/**
+ * Get a proxied direct video URL for a YouTube video via Invidious API
+ * Used for trailer playback in production where YouTube iframe embeds fail
+ * @param videoId - YouTube video ID
+ * @returns Proxied video URL ready for <video> element
+ */
+export async function getYoutubeVideoUrl(videoId: string): Promise<string> {
+  return await invoke('get_youtube_video_url', { videoId })
+}
+
 // ==================== System Stats Commands ====================
 
 export interface SystemStats {
@@ -1939,4 +1950,281 @@ export async function getDiscoverCache(
   cacheKey: string
 ): Promise<DiscoverCacheEntry | null> {
   return await invoke('get_discover_cache', { cacheKey })
+}
+
+// ==================== Jikan API Commands ====================
+
+/**
+ * Get popular episodes from the Jikan API (anime with currently trending episodes)
+ * Returns deduplicated anime entries from /watch/episodes/popular
+ */
+export async function jikanWatchEpisodesPopular(): Promise<SearchResults> {
+  return await invoke('jikan_watch_episodes_popular')
+}
+
+/**
+ * Search for anime using the Jikan API (MyAnimeList)
+ * @param query - Search query
+ * @param page - Page number (1-indexed)
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanSearchAnime(
+  query: string,
+  page: number,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_search_anime', { query, page, sfw })
+    reportApiStatus('anime', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('anime', false)
+    throw err
+  }
+}
+
+/**
+ * Search for manga using the Jikan API (MyAnimeList)
+ * @param query - Search query
+ * @param page - Page number (1-indexed)
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanSearchManga(
+  query: string,
+  page: number,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_search_manga', { query, page, sfw })
+    reportApiStatus('manga', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('manga', false)
+    throw err
+  }
+}
+
+/**
+ * Get top anime from the Jikan API
+ * @param page - Page number (1-indexed)
+ * @param typeFilter - Optional type filter (e.g., "tv", "movie", "ova")
+ * @param filter - Optional filter (e.g., "airing", "upcoming", "bypopularity")
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanTopAnime(
+  page: number,
+  typeFilter?: string,
+  filter?: string,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_top_anime', { page, typeFilter, filter, sfw })
+    reportApiStatus('anime', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('anime', false)
+    throw err
+  }
+}
+
+/**
+ * Get top manga from the Jikan API
+ * @param page - Page number (1-indexed)
+ * @param typeFilter - Optional type filter (e.g., "manga", "novel", "manhwa")
+ * @param filter - Optional filter (e.g., "publishing", "upcoming", "bypopularity")
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanTopManga(
+  page: number,
+  typeFilter?: string,
+  filter?: string,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_top_manga', { page, typeFilter, filter, sfw })
+    reportApiStatus('manga', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('manga', false)
+    throw err
+  }
+}
+
+/**
+ * Get anime from the current season via Jikan API
+ * @param page - Page number (1-indexed)
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanSeasonNow(
+  page: number,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_season_now', { page, sfw })
+    reportApiStatus('anime', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('anime', false)
+    throw err
+  }
+}
+
+/**
+ * Get anime from a specific season via Jikan API
+ * @param year - Year (e.g., 2024)
+ * @param season - Season name ("winter", "spring", "summer", "fall")
+ * @param page - Page number (1-indexed)
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanSeason(
+  year: number,
+  season: string,
+  page: number,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  return await invoke('jikan_season', { year, season, page, sfw })
+}
+
+/**
+ * Get upcoming season anime via Jikan API
+ * @param page - Page number (1-indexed)
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanSeasonUpcoming(
+  page: number,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  return await invoke('jikan_season_upcoming', { page, sfw })
+}
+
+/**
+ * Get anime details from the Jikan API
+ * @param malId - MyAnimeList ID
+ */
+export async function jikanAnimeDetails(malId: number): Promise<MediaDetails> {
+  return await invoke('jikan_anime_details', { malId })
+}
+
+/**
+ * Get anime episodes from the Jikan API
+ * @param malId - MyAnimeList ID
+ * @param page - Page number (1-indexed)
+ */
+export async function jikanAnimeEpisodes(malId: number, page: number): Promise<SearchResults> {
+  return await invoke('jikan_anime_episodes', { malId, page })
+}
+
+/**
+ * Get anime recommendations from the Jikan API
+ * @param malId - MyAnimeList ID
+ */
+export async function jikanAnimeRecommendations(malId: number): Promise<SearchResults> {
+  return await invoke('jikan_anime_recommendations', { malId })
+}
+
+/**
+ * Get all anime genres from the Jikan API
+ */
+export async function jikanGenresAnime(): Promise<unknown> {
+  return await invoke('jikan_genres_anime')
+}
+
+/**
+ * Get all manga genres from the Jikan API
+ */
+export async function jikanGenresManga(): Promise<unknown> {
+  return await invoke('jikan_genres_manga')
+}
+
+/**
+ * Get anime schedules from the Jikan API
+ * @param day - Optional day filter ("monday", "tuesday", etc.)
+ * @param page - Page number (1-indexed)
+ * @param sfw - Whether to filter out NSFW content
+ */
+export async function jikanSchedules(
+  day?: string,
+  page: number = 1,
+  sfw: boolean = true
+): Promise<SearchResults> {
+  return await invoke('jikan_schedules', { day, page, sfw })
+}
+
+/**
+ * Get a random anime from the Jikan API
+ */
+export async function jikanRandomAnime(): Promise<SearchResult> {
+  return await invoke('jikan_random_anime')
+}
+
+/**
+ * Get manga details from the Jikan API
+ * @param malId - MyAnimeList ID
+ */
+export async function jikanMangaDetails(malId: number): Promise<MangaDetails> {
+  return await invoke('jikan_manga_details', { malId })
+}
+
+/**
+ * Resolve an AllAnime ID from a title and MAL ID
+ * Uses fuzzy matching to find the corresponding AllAnime entry
+ * @param title - Media title
+ * @param mediaType - Type of media ("anime" or "manga")
+ * @param malId - MyAnimeList ID as string
+ * @param englishTitle - Optional English title for better matching
+ * @param year - Optional year for disambiguation
+ * @returns The resolved AllAnime ID, or null if not found
+ */
+export async function resolveAllanimeId(
+  title: string,
+  mediaType: string,
+  malId: string,
+  englishTitle?: string,
+  year?: number
+): Promise<string | null> {
+  return await invoke('resolve_allanime_id', {
+    title,
+    englishTitle,
+    mediaType,
+    year,
+    malId,
+  })
+}
+
+export async function clearAllanimeMapping(malId: string): Promise<void> {
+  return await invoke('clear_allanime_mapping', { malId })
+}
+
+// ==================== Migration (AllAnime → Jikan) ====================
+
+export interface MigrationProgress {
+  total: number
+  processed: number
+  matched: number
+  archived: number
+  failed: number
+  current_title: string
+  status: string // "pending" | "running" | "completed" | "error"
+}
+
+/**
+ * Check if database has unmigrated AllAnime entries that need migration to Jikan/MAL IDs
+ */
+export async function checkMigrationNeeded(): Promise<boolean> {
+  return await invoke('check_migration_needed')
+}
+
+/**
+ * Start the migration process in the background.
+ * Emits "migration_progress" events as it runs.
+ */
+export async function startMigration(): Promise<void> {
+  return await invoke('start_migration')
+}
+
+/**
+ * Get the current migration progress (polling fallback)
+ */
+export async function getMigrationProgress(): Promise<MigrationProgress> {
+  return await invoke('get_migration_progress')
 }

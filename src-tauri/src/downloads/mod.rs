@@ -951,7 +951,7 @@ impl DownloadManager {
 
     /// Delete a downloaded episode by media ID and episode number
     pub async fn delete_episode_download(&self, media_id: &str, episode_number: i32) -> Result<()> {
-        // Find the download ID for this episode
+        // Find the download ID for this episode (any status, not just completed)
         let download_id = {
             let downloads = self.downloads.read().await;
             downloads
@@ -959,7 +959,6 @@ impl DownloadManager {
                 .find(|(_, d)| {
                     d.media_id == media_id
                         && d.episode_number == episode_number
-                        && d.status == DownloadStatus::Completed
                 })
                 .map(|(id, _)| id.clone())
         };
@@ -967,10 +966,44 @@ impl DownloadManager {
         if let Some(id) = download_id {
             self.delete_download(&id).await?;
             log::debug!("Deleted episode download: {} episode {}", media_id, episode_number);
-            Ok(())
-        } else {
-            anyhow::bail!("Episode download not found")
+            return Ok(());
         }
+
+        // Fallback: check the database directly (in-memory map may be out of sync)
+        if let Some(pool) = &self.db_pool {
+            let row = sqlx::query(
+                "SELECT id, file_path FROM downloads WHERE media_id = ? AND episode_number = ? LIMIT 1"
+            )
+            .bind(media_id)
+            .bind(episode_number)
+            .fetch_optional(pool.as_ref())
+            .await?;
+
+            if let Some(row) = row {
+                let id: String = row.try_get("id")?;
+                let file_path: String = row.try_get("file_path")?;
+
+                // Delete the file if it exists
+                if tokio::fs::metadata(&file_path).await.is_ok() {
+                    tokio::fs::remove_file(&file_path).await.ok();
+                    log::debug!("Deleted file: {}", file_path);
+                }
+
+                // Remove from database
+                sqlx::query("DELETE FROM downloads WHERE id = ?")
+                    .bind(&id)
+                    .execute(pool.as_ref())
+                    .await?;
+
+                // Remove from in-memory map
+                self.downloads.write().await.remove(&id);
+
+                log::debug!("Deleted episode download from DB fallback: {} episode {}", media_id, episode_number);
+                return Ok(());
+            }
+        }
+
+        anyhow::bail!("Episode download not found")
     }
 
     /// Get the downloads directory path

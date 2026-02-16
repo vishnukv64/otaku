@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createRootRoute, Outlet, Link } from '@tanstack/react-router'
 import { Toaster } from 'react-hot-toast'
 import { AppShell } from '@/components/layout/AppShell'
@@ -9,6 +9,8 @@ import { useSettingsStore } from '@/store/settingsStore'
 import { useReaderStore } from '@/store/readerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { ReleaseCheckOverlay } from '@/components/notifications/ReleaseCheckOverlay'
+import { MigrationScreen } from '@/components/MigrationScreen'
+import { checkMigrationNeeded } from '@/utils/tauri-commands'
 import { Home, Search, ArrowLeft } from 'lucide-react'
 
 function NotFoundPage() {
@@ -63,6 +65,18 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  const [migrationNeeded, setMigrationNeeded] = useState<boolean | null>(null)
+
+  // Check for pending data migration on startup
+  useEffect(() => {
+    checkMigrationNeeded()
+      .then(setMigrationNeeded)
+      .catch((err) => {
+        console.error('Failed to check migration status:', err)
+        setMigrationNeeded(false) // Don't block app on check failure
+      })
+  }, [])
+
   // Initialize all stores from database on app startup
   const initSettingsFromDatabase = useSettingsStore((state) => state.initFromDatabase)
   const initReaderFromDatabase = useReaderStore((state) => state.initFromDatabase)
@@ -85,6 +99,16 @@ function RootComponent() {
 
   // Check for app updates on launch and periodically
   useAutoUpdateCheck()
+
+  // Show migration screen while migration is needed (blocks all routes)
+  if (migrationNeeded) {
+    return <MigrationScreen onComplete={() => setMigrationNeeded(false)} />
+  }
+
+  // Still checking migration status — show nothing to avoid flash
+  if (migrationNeeded === null) {
+    return null
+  }
 
   return (
     <MediaStatusProvider>

@@ -50,9 +50,11 @@ interface MediaCardProps {
   }
   /** Media status from useMediaStatus hook */
   status?: MediaStatus
+  /** Rank number to display (e.g., 1-10 for Top 10 carousel) */
+  rank?: number
 }
 
-export function MediaCard({ media, onClick, progress, status }: MediaCardProps) {
+export function MediaCard({ media, onClick, progress, status, rank }: MediaCardProps) {
   // Use unified release state hook (V2) for NEW badge
   // Only fetch release state if user is tracking/watching this media
   const shouldCheckRelease = !progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)
@@ -222,9 +224,15 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
                       ★ {media.rating.toFixed(1)}
                     </span>
                   )}
-                  {media.year && (
+                  {media.rank && (
                     <>
                       {media.rating && <span>•</span>}
+                      <span className="text-blue-300 font-semibold">#{media.rank}</span>
+                    </>
+                  )}
+                  {media.year && (
+                    <>
+                      {(media.rating || media.rank) && <span>•</span>}
                       <span>{media.year}</span>
                     </>
                   )}
@@ -244,6 +252,22 @@ export function MediaCard({ media, onClick, progress, status }: MediaCardProps) 
                 )}
               </div>
             </div>
+
+            {/* Rank Number Overlay (for Top 10 carousel) */}
+            {rank != null && (
+              <div className="absolute -left-2 bottom-0 z-[5] pointer-events-none select-none">
+                <span
+                  className="text-[80px] font-black leading-none"
+                  style={{
+                    color: 'transparent',
+                    WebkitTextStroke: '2px rgba(255,255,255,0.7)',
+                    textShadow: '0 0 20px rgba(0,0,0,0.8)',
+                  }}
+                >
+                  {rank}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Title - Always Visible Below Image */}

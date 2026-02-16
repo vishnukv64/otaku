@@ -9,7 +9,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, CheckCircle2, XCircle, AlertCircle, Circle } from 'lucide-react'
-import { discoverAnime, discoverManga, subscribeToApiStatus } from '@/utils/tauri-commands'
+import { jikanTopAnime, jikanTopManga, subscribeToApiStatus } from '@/utils/tauri-commands'
 
 type ApiStatus = 'checking' | 'online' | 'offline' | 'error'
 
@@ -97,8 +97,8 @@ export function ApiStatusIndicator() {
     }))
 
     const [animeStatus, mangaStatus] = await Promise.all([
-      checkEndpoint(() => discoverAnime('com.allanime.source', 1, 'view', [], false)),
-      checkEndpoint(() => discoverManga('com.allanime.manga', 1, 'view', [], false)),
+      checkEndpoint(() => jikanTopAnime(1, undefined, 'airing')),
+      checkEndpoint(() => jikanTopManga(1, undefined, 'publishing')),
     ])
 
     setStatus(prev => ({

@@ -419,7 +419,7 @@ pub struct EpisodeEntry {
     pub id: String,
     pub media_id: String,
     pub extension_id: String,
-    pub number: i32,
+    pub number: f64, // f64 to support decimal manga chapter numbers (e.g. 34.5)
     pub title: Option<String>,
     pub description: Option<String>,
     pub thumbnail_url: Option<String>,
@@ -451,7 +451,7 @@ pub async fn save_episodes(
     for episode in episodes {
         sqlx::query(
             r#"
-            INSERT INTO episodes (id, media_id, extension_id, number, title, description, thumbnail_url, aired_date, duration)
+            INSERT OR REPLACE INTO episodes (id, media_id, extension_id, number, title, description, thumbnail_url, aired_date, duration)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )

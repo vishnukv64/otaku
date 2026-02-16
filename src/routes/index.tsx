@@ -1,7 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import { Loader2, AlertCircle } from 'lucide-react'
-import { loadExtension, discoverAnime, getDiscoverCache, saveDiscoverCache } from '@/utils/tauri-commands'
+import { useEffect, useRef, useState } from 'react'
+import { jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular, loadExtension, getDiscoverCache, saveDiscoverCache } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { HeroSectionSkeleton } from '@/components/media/HeroSectionSkeleton'
@@ -14,17 +13,13 @@ export const Route = createFileRoute('/')({
   component: HomeScreen,
 })
 
-// Content categories for the home page
-// sortType: 'view'/'update' = daily popular (dateRange: 1), 'score' = monthly popular (dateRange: 30)
+// Content categories for the home page using Jikan API
+// Note: 'trending' is fetched separately (used by hero + Top 10, not rendered as its own carousel)
 const CATEGORIES = [
-  { id: 'trending', title: 'Trending Now', sortType: 'view', page: 1 },
-  { id: 'recently-updated', title: 'Recently Updated', sortType: 'update', page: 1 },
-  { id: 'top-rated', title: 'Top Rated All Time', sortType: 'score', page: 1 },
-  { id: 'hot-today', title: 'Hot Today', sortType: 'view', page: 2 },
-  { id: 'new-episodes', title: 'New Episodes', sortType: 'update', page: 2 },
-  { id: 'all-time-classics', title: 'All-Time Classics', sortType: 'score', page: 2 },
-  { id: 'popular-series', title: 'Popular Series', sortType: 'view', page: 3 },
-  { id: 'must-watch', title: 'Must Watch', sortType: 'score', page: 3 },
+  { id: 'most-popular', title: 'Most Popular', fetch: () => jikanWatchEpisodesPopular() },
+  { id: 'this-season', title: 'This Season', fetch: () => jikanSeasonNow(1, true) },
+  { id: 'top-rated', title: 'Top Rated', fetch: () => jikanTopAnime(1, undefined, undefined, true) },
+  { id: 'upcoming', title: 'Upcoming', fetch: () => jikanSeasonUpcoming(1, true) },
 ]
 
 interface CategoryContent {
@@ -35,128 +30,117 @@ interface CategoryContent {
 }
 
 function HomeScreen() {
-  const [extensionId, setExtensionId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [allanimeExtensionId, setAllanimeExtensionId] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
   const [featuredIndex, setFeaturedIndex] = useState(0)
   const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
+  const trailerPlayingRef = useRef(false)
 
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // Load extension on mount
+  // Load AllAnime extension lazily in background (for ContinueWatching and modal)
   useEffect(() => {
-    const initExtension = async () => {
-      try {
-        const metadata = await loadExtension(ALLANIME_EXTENSION)
-        setExtensionId(metadata.id)
-        setLoading(false)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load extension')
-        setLoading(false)
-      }
-    }
-
-    initExtension()
+    loadExtension(ALLANIME_EXTENSION)
+      .then(metadata => setAllanimeExtensionId(metadata.id))
+      .catch(() => {})
   }, [])
 
-  // Load content for all categories (API first, cache fallback)
+  // Load trending (for hero + Top 10) and categories concurrently
   useEffect(() => {
-    if (!extensionId) return
-
-    const loadCategories = async () => {
+    const loadAll = async () => {
       // Initialize categories state
       const initialState: Record<string, CategoryContent> = {}
       CATEGORIES.forEach(cat => {
         initialState[cat.id] = { id: cat.id, items: [], loading: true, error: null }
       })
+      // Also init trending (not rendered as carousel, but needed for hero + Top 10)
+      initialState['trending'] = { id: 'trending', items: [], loading: true, error: null }
       setCategories(initialState)
 
-      // Load each category
-      for (const category of CATEGORIES) {
-        const cacheKey = `home:${category.id}`
-
-        try {
-          // Try API first
-          const results = await discoverAnime(
-            extensionId,
-            category.page,
-            category.sortType,
-            []
-          )
-
-          // Deduplicate results to avoid React key warnings
-          const uniqueResults = results.results.reduce((acc, item) => {
-            if (!acc.find(existing => existing.id === item.id)) {
-              acc.push(item)
-            }
-            return acc
-          }, [] as SearchResult[])
-
-          setCategories(prev => ({
-            ...prev,
-            [category.id]: {
-              id: category.id,
-              items: uniqueResults,
-              loading: false,
-              error: null,
-            },
-          }))
-
-          // Set initial featured anime from trending
-          if (category.id === 'trending' && results.results.length > 0 && !featuredAnime) {
-            setFeaturedAnime(results.results[0])
-          }
-
-          // Save to cache for next time (fire-and-forget)
-          saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
-        } catch (err) {
-          console.error(`Category ${category.id} API failed, trying cache:`, err)
-
-          // API failed - try cache fallback
+      // Load trending + all categories concurrently
+      await Promise.allSettled([
+        // Trending (hero section + Top 10)
+        (async () => {
+          const cacheKey = 'home:trending'
           try {
-            const cached = await getDiscoverCache(cacheKey)
-            if (cached) {
-              const cachedResults: SearchResult[] = JSON.parse(cached.data)
-              if (cachedResults.length > 0) {
-                setCategories(prev => ({
-                  ...prev,
-                  [category.id]: {
-                    id: category.id,
-                    items: cachedResults,
-                    loading: false,
-                    error: null,
-                  },
-                }))
-                if (category.id === 'trending' && !featuredAnime) {
-                  setFeaturedAnime(cachedResults[0])
-                }
-                continue // Skip error state, cache served the data
-              }
-            }
-          } catch {
-            // Cache also failed
-          }
+            const results = await jikanTopAnime(1, undefined, 'airing', true)
+            const uniqueResults = results.results.reduce((acc, item) => {
+              if (!acc.find(existing => existing.id === item.id)) acc.push(item)
+              return acc
+            }, [] as SearchResult[])
 
-          // Both API and cache failed
-          setCategories(prev => ({
-            ...prev,
-            [category.id]: {
-              id: category.id,
-              items: [],
-              loading: false,
-              error: err instanceof Error ? err.message : 'Failed to load',
-            },
-          }))
-        }
-      }
+            setCategories(prev => ({
+              ...prev,
+              trending: { id: 'trending', items: uniqueResults, loading: false, error: null },
+            }))
+            setFeaturedAnime(prev => prev || uniqueResults[0] || null)
+            saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
+          } catch (err) {
+            console.error('Trending API failed, trying cache:', err)
+            try {
+              const cached = await getDiscoverCache(cacheKey)
+              if (cached) {
+                const cachedResults: SearchResult[] = JSON.parse(cached.data)
+                if (cachedResults.length > 0) {
+                  setCategories(prev => ({
+                    ...prev,
+                    trending: { id: 'trending', items: cachedResults, loading: false, error: null },
+                  }))
+                  setFeaturedAnime(prev => prev || cachedResults[0])
+                  return
+                }
+              }
+            } catch { /* cache failed too */ }
+            setCategories(prev => ({
+              ...prev,
+              trending: { id: 'trending', items: [], loading: false, error: 'Failed to load' },
+            }))
+          }
+        })(),
+
+        // Other categories
+        ...CATEGORIES.map(async (category) => {
+          const cacheKey = `home:${category.id}`
+          try {
+            const results = await category.fetch()
+            const uniqueResults = results.results.reduce((acc, item) => {
+              if (!acc.find(existing => existing.id === item.id)) acc.push(item)
+              return acc
+            }, [] as SearchResult[])
+
+            setCategories(prev => ({
+              ...prev,
+              [category.id]: { id: category.id, items: uniqueResults, loading: false, error: null },
+            }))
+            saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
+          } catch (err) {
+            console.error(`Category ${category.id} API failed, trying cache:`, err)
+            try {
+              const cached = await getDiscoverCache(cacheKey)
+              if (cached) {
+                const cachedResults: SearchResult[] = JSON.parse(cached.data)
+                if (cachedResults.length > 0) {
+                  setCategories(prev => ({
+                    ...prev,
+                    [category.id]: { id: category.id, items: cachedResults, loading: false, error: null },
+                  }))
+                  return
+                }
+              }
+            } catch { /* cache failed too */ }
+            setCategories(prev => ({
+              ...prev,
+              [category.id]: { id: category.id, items: [], loading: false, error: err instanceof Error ? err.message : 'Failed to load' },
+            }))
+          }
+        }),
+      ])
     }
 
-    loadCategories()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensionId])
+    loadAll()
+  }, [])
 
   // Auto-rotate hero section every 10 seconds
   useEffect(() => {
@@ -164,6 +148,7 @@ function HomeScreen() {
     if (!trendingContent || trendingContent.items.length === 0) return
 
     const interval = setInterval(() => {
+      if (trailerPlayingRef.current) return
       setFeaturedIndex(prevIndex => {
         const nextIndex = (prevIndex + 1) % trendingContent.items.length
         setFeaturedAnime(trendingContent.items[nextIndex])
@@ -207,26 +192,6 @@ function HomeScreen() {
     setSelectedMedia(null)
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-[var(--color-accent-primary)] mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Extension Error</h2>
-          <p className="text-[var(--color-text-secondary)]">{error}</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
       <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto overflow-visible">
@@ -240,13 +205,25 @@ function HomeScreen() {
             totalItems={categories['trending']?.items.length || 1}
             currentIndex={featuredIndex}
             onIndexChange={handleFeaturedIndexChange}
+            onTrailerStateChange={(playing) => { trailerPlayingRef.current = playing }}
           />
         ) : (
           <HeroSectionSkeleton />
         )}
 
         {/* Continue Watching Section */}
-        {extensionId && <ContinueWatchingSection extensionId={extensionId} />}
+        <ContinueWatchingSection extensionId={allanimeExtensionId || undefined} />
+
+        {/* Top 10 Anime */}
+        {categories['trending']?.items.length >= 10 && (
+          <MediaCarousel
+            title="Top 10 Anime"
+            items={categories['trending'].items.slice(0, 10)}
+            loading={categories['trending']?.loading}
+            onItemClick={handleMediaClick}
+            showRank
+          />
+        )}
 
         {/* Content Carousels */}
         <div className="space-y-8 overflow-visible">
@@ -264,14 +241,15 @@ function HomeScreen() {
               />
             )
           })}
+
         </div>
       </div>
 
       {/* Media Detail Modal */}
-      {selectedMedia && extensionId && (
+      {selectedMedia && (
         <MediaDetailModal
           media={selectedMedia}
-          extensionId={extensionId}
+          extensionId={allanimeExtensionId || undefined}
           isOpen={isModalOpen}
           onClose={handleCloseModal}
           onMediaChange={setSelectedMedia}

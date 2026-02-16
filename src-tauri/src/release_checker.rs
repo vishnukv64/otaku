@@ -12,6 +12,7 @@
 
 use crate::commands::AppState;
 use crate::extensions::{ExtensionRuntime, ExtensionType};
+use crate::jikan::anime as jikan_anime;
 use crate::notifications::{emit_notification, NotificationPayload, NotificationType};
 use crate::status_normalizer::{normalize_status, NormalizedStatus};
 use anyhow::{Context, Result};
@@ -716,12 +717,38 @@ async fn get_nsfw_filter_setting(pool: &SqlitePool) -> bool {
     result.map(|v| v == "1").unwrap_or(false)
 }
 
-/// Fetch current episode info from extension
+/// Fetch current episode info from extension (or Jikan for MAL IDs)
 async fn fetch_episode_info(
     app_state: &AppState,
     pool: &SqlitePool,
     media: &EligibleMedia,
 ) -> Result<EpisodeInfo> {
+    // If media_id is a MAL ID (integer), use Jikan API directly.
+    // Post-migration anime uses MAL IDs; pre-migration anime uses AllAnime alphanumeric IDs.
+    if media.media_type == "anime" {
+        if let Ok(mal_id) = media.media_id.parse::<i64>() {
+            log::debug!("Using Jikan API for anime release check: MAL ID {}", mal_id);
+
+            let details = tokio::task::spawn_blocking(move || {
+                jikan_anime::anime_details(mal_id)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Jikan task failed: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Jikan API error: {}", e))?;
+
+            let latest_ep = details.episodes.iter()
+                .max_by(|a, b| a.number.partial_cmp(&b.number).unwrap_or(std::cmp::Ordering::Equal));
+
+            return Ok(EpisodeInfo {
+                count: details.episodes.len() as i32,
+                latest_number: latest_ep.map(|e| e.number),
+                latest_id: latest_ep.map(|e| e.id.clone()),
+                raw_status: details.status,
+            });
+        }
+    }
+
+    // Fallback: use extension system (manga, pre-migration anime with AllAnime IDs)
     // Get NSFW filter setting BEFORE acquiring lock to avoid holding lock across await
     // nsfwFilter=true means "hide adult content", so allow_adult should be !nsfwFilter
     let nsfw_filter = get_nsfw_filter_setting(pool).await;
@@ -1052,7 +1079,11 @@ async fn emit_release_notification(
     };
 
     let action_route = if result.media_type == "anime" {
-        format!("/watch?extensionId={}&animeId={}", result.extension_id, result.media_id)
+        if result.media_id.parse::<i64>().is_ok() {
+            format!("/watch?malId={}", result.media_id)
+        } else {
+            format!("/watch?extensionId={}&animeId={}", result.extension_id, result.media_id)
+        }
     } else {
         format!("/read?extensionId={}&mangaId={}", result.extension_id, result.media_id)
     };

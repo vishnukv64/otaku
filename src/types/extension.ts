@@ -39,6 +39,12 @@ export interface SearchResult {
   media_type?: string
   /** Genres for NSFW filtering */
   genres?: string[]
+  /** MAL rank (from Jikan) */
+  rank?: number
+  /** MAL popularity rank */
+  popularity?: number
+  /** Studios (from Jikan anime data) */
+  studios?: string[]
 }
 
 export interface SearchResults {
@@ -80,6 +86,16 @@ export interface MediaDetails {
   }
   last_update_end?: string // ISO 8601 timestamp of last episode release
   broadcast_interval?: number // Interval between episodes in milliseconds
+  /** MAL rank */
+  rank?: number
+  /** MAL popularity rank */
+  popularity?: number
+  /** Animation studios */
+  studios?: { name: string; mal_id: number }[]
+  /** Streaming platform links */
+  streaming_links?: { name: string; url: string }[]
+  /** Related anime/manga */
+  relations?: { relation: string; entry: { mal_id: number; type: string; name: string }[] }[]
 }
 
 export interface VideoSource {

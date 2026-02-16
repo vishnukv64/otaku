@@ -56,6 +56,9 @@ async-stream = "0.3"
 urlencoding = "2.1"
 tokio-util = { version = "0.7", features = ["io"] }
 
+# Jikan API
+lazy_static = "1.5"
+
 # System metrics
 sysinfo = "0.31"
 

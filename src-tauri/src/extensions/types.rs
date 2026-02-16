@@ -62,6 +62,15 @@ pub struct SearchResult {
     /// Genres for NSFW filtering
     #[serde(default)]
     pub genres: Option<Vec<String>>,
+    /// MAL rank (from Jikan)
+    #[serde(default)]
+    pub rank: Option<i32>,
+    /// MAL popularity rank
+    #[serde(default)]
+    pub popularity: Option<i32>,
+    /// Studios (from Jikan anime data)
+    #[serde(default)]
+    pub studios: Option<Vec<String>>,
 }
 
 /// Paginated search results

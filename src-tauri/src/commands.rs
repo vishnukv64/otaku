@@ -3229,3 +3229,43 @@ pub async fn delete_backup(
         .await
         .map_err(|e| format!("Failed to delete backup: {}", e))
 }
+
+// ============================================================================
+// Migration Commands (AllAnime → Jikan)
+// ============================================================================
+
+use crate::database::migration_runner::{self, MigrationProgress};
+
+/// Check if AllAnime → Jikan migration is needed
+#[tauri::command]
+pub async fn check_migration_needed(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    migration_runner::needs_migration(state.database.pool()).await
+}
+
+/// Start the AllAnime → Jikan migration in the background
+/// Returns immediately; emits "migration_progress" events as it runs
+#[tauri::command]
+pub async fn start_migration(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let pool = state.database.pool().clone();
+    tokio::spawn(async move {
+        if let Err(e) = migration_runner::run_migration(pool, app).await {
+            log::error!("Migration failed: {}", e);
+            let mut progress = migration_runner::MIGRATION_PROGRESS.lock().unwrap();
+            progress.status = "error".to_string();
+            progress.current_title = e;
+        }
+    });
+    Ok(())
+}
+
+/// Get current migration progress
+#[tauri::command]
+pub async fn get_migration_progress() -> Result<MigrationProgress, String> {
+    let progress = migration_runner::MIGRATION_PROGRESS.lock().unwrap().clone();
+    Ok(progress)
+}

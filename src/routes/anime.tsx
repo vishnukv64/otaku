@@ -4,17 +4,12 @@ import { Search, Loader2, AlertCircle, X, Sparkles, Calendar, Star } from 'lucid
 import { useMediaStore } from '@/store/mediaStore'
 import {
   loadExtension,
-  discoverAnime,
+  jikanTopAnime,
+  jikanSeasonNow,
+  jikanSeason,
   getContinueWatchingWithDetails,
-  streamDiscoverAnime,
-  onAnimeDiscoverResults,
-  getCurrentSeasonAnime,
-  streamCurrentSeasonAnime,
-  onSeasonAnimeDiscoverResults,
   getDiscoverCache,
   saveDiscoverCache,
-  type DiscoverResultsEvent,
-  type SeasonDiscoverResultsEvent,
 } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
@@ -53,9 +48,6 @@ export const Route = createFileRoute('/anime')({
   component: AnimeScreen,
 })
 
-// Use real AllAnime extension
-const EXTENSION_CODE = ALLANIME_EXTENSION
-
 type TabType = 'browse' | 'season'
 
 function AnimeScreen() {
@@ -65,9 +57,7 @@ function AnimeScreen() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const seasonLoadMoreRef = useRef<HTMLDivElement>(null)
-  const [extensionId, setExtensionId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [recommendations, setRecommendations] = useState<SearchResult[]>([])
@@ -81,8 +71,15 @@ function AnimeScreen() {
   // Tab state
   const [activeTab, setActiveTab] = useState<TabType>('browse')
 
-  // Current season info (for tab label) - initialize with calculated value
-  const [currentSeasonInfo, setCurrentSeasonInfo] = useState<{ season: string; year: number }>(getCurrentAnimeSeason)
+  // Current season info (for tab label) - calculated from current date
+  const [currentSeasonInfo] = useState<{ season: string; year: number }>(getCurrentAnimeSeason)
+
+  // Season browser selection state
+  const seasonOptions = ['winter', 'spring', 'summer', 'fall']
+  const currentYear = new Date().getFullYear()
+  const yearOptions = Array.from({ length: currentYear - 1999 }, (_, i) => currentYear - i)
+  const [selectedYear, setSelectedYear] = useState(currentSeasonInfo.year)
+  const [selectedSeason, setSelectedSeason] = useState(currentSeasonInfo.season.toLowerCase())
 
   // Full season state (for Season tab with infinite scroll)
   const [fullSeasonAnime, setFullSeasonAnime] = useState<SearchResult[]>([])
@@ -94,7 +91,7 @@ function AnimeScreen() {
   const fullSeasonLoadedRef = useRef(false) // Track if initial load has happened
   const prevNsfwFilterRef = useRef(nsfwFilter) // Track previous nsfwFilter
 
-  // Reset season data when nsfwFilter changes
+  // Reset season data when nsfwFilter or season/year selection changes
   useEffect(() => {
     if (prevNsfwFilterRef.current !== nsfwFilter) {
       prevNsfwFilterRef.current = nsfwFilter
@@ -103,6 +100,13 @@ function AnimeScreen() {
       fullSeasonSeenIdsRef.current.clear()
     }
   }, [nsfwFilter])
+
+  // Reset and reload when season/year selection changes
+  useEffect(() => {
+    fullSeasonLoadedRef.current = false
+    setFullSeasonAnime([])
+    fullSeasonSeenIdsRef.current.clear()
+  }, [selectedYear, selectedSeason])
 
   // Grid density class mapping (extended for 4K displays)
   // Added p-4 -m-4 to allow cards to scale on hover without being clipped
@@ -125,20 +129,11 @@ function AnimeScreen() {
   // Filter NSFW content from search results using both genres and title keywords
   const searchResults = filterNsfwContent(rawSearchResults, (item) => item.genres, nsfwFilter, (item) => item.title)
 
-  // Load AllAnime extension on mount
+  // Load AllAnime extension lazily in background (for modal downloads)
   useEffect(() => {
-    const initExtension = async () => {
-      try {
-        const metadata = await loadExtension(EXTENSION_CODE)
-        setExtensionId(metadata.id)
-        setLoading(false)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load extension')
-        setLoading(false)
-      }
-    }
-
-    initExtension()
+    loadExtension(ALLANIME_EXTENSION)
+      .then(metadata => setAllanimeExtId(metadata.id))
+      .catch(() => {})
   }, [])
 
   // Load user's watching genres for personalized recommendations
@@ -191,125 +186,81 @@ function AnimeScreen() {
     loadUserGenres()
   }, [])
 
-  // Handle SSE season discover results
-  const handleSeasonDiscoverResults = useCallback((event: SeasonDiscoverResultsEvent) => {
-    // Deduplicate results using ref to track seen IDs
-    const newUniqueResults = event.results.filter(item => {
-      if (fullSeasonSeenIdsRef.current.has(item.id)) return false
-      fullSeasonSeenIdsRef.current.add(item.id)
-      return true
-    })
-
-    if (newUniqueResults.length > 0) {
-      // Add new results and sort by rating
-      setFullSeasonAnime(prev => {
-        const combined = [...prev, ...newUniqueResults]
-        return combined.sort((a, b) => (b.rating || 0) - (a.rating || 0))
-      })
-    }
-
-    // Update season info from API (more accurate than calculated)
-    setCurrentSeasonInfo({ season: event.season, year: event.year })
-
-    // Update pagination state
-    setFullSeasonPage(event.page)
-    setFullSeasonHasNextPage(event.has_next_page)
-
-    // Save to cache when last page is received
-    if (event.is_last) {
-      setFullSeasonLoading(false)
-      // Save all accumulated results to cache
-      setFullSeasonAnime(current => {
-        const cacheKey = `anime:season:${event.year}:${event.season.toLowerCase()}`
-        saveDiscoverCache(cacheKey, JSON.stringify(current), 'anime').catch(() => {})
-        return current
-      })
-    }
-  }, [])
-
-  // Load full season anime via SSE when Season tab is activated (API first, cache fallback)
+  // Load full season anime via Jikan API when Season tab is activated (API first, cache fallback)
   useEffect(() => {
-    if (!extensionId || activeTab !== 'season') return
+    if (activeTab !== 'season') return
 
     // Only load if we haven't loaded yet (use ref to avoid dependency issues)
     if (fullSeasonLoadedRef.current) return
     fullSeasonLoadedRef.current = true
 
-    // Reset state for new stream
-    setFullSeasonLoading(true)
-    setFullSeasonAnime([])
-    fullSeasonSeenIdsRef.current.clear()
-    setFullSeasonPage(1)
-    setFullSeasonHasNextPage(true)
+    const isCurrentSeason = selectedYear === currentSeasonInfo.year &&
+      selectedSeason === currentSeasonInfo.season.toLowerCase()
+    const cacheKey = `anime:season:${selectedYear}:${selectedSeason}`
 
-    // Track mounted state to handle async cleanup properly
-    let isMounted = true
-    let unsubscribe: (() => void) | null = null
+    const loadSeasonAnime = async () => {
+      setFullSeasonLoading(true)
+      setFullSeasonAnime([])
+      fullSeasonSeenIdsRef.current.clear()
+      setFullSeasonPage(1)
+      setFullSeasonHasNextPage(true)
 
-    const cacheKey = `anime:season:${currentSeasonInfo.year}:${currentSeasonInfo.season.toLowerCase()}`
-
-    const startStreaming = async () => {
       try {
-        // Set up listener first
-        const unsub = await onSeasonAnimeDiscoverResults((event) => {
-          if (isMounted) {
-            handleSeasonDiscoverResults(event)
-          }
+        const results = isCurrentSeason
+          ? await jikanSeasonNow(1, nsfwFilter)
+          : await jikanSeason(selectedYear, selectedSeason, 1, nsfwFilter)
+
+        const uniqueResults = results.results.filter(item => {
+          if (fullSeasonSeenIdsRef.current.has(item.id)) return false
+          fullSeasonSeenIdsRef.current.add(item.id)
+          return true
         })
 
-        // Store unsubscribe if still mounted, otherwise cleanup immediately
-        if (isMounted) {
-          unsubscribe = unsub
-        } else {
-          unsub()
-          return
-        }
+        setFullSeasonAnime(uniqueResults.sort((a, b) => (b.rating || 0) - (a.rating || 0)))
+        setFullSeasonPage(1)
+        setFullSeasonHasNextPage(results.has_next_page)
 
-        // Start streaming (fetches 3 pages progressively)
-        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
-        await streamCurrentSeasonAnime(extensionId, !nsfwFilter, 3)
+        // Save to cache
+        saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
       } catch (err) {
-        console.error('Failed to stream season anime, trying cache:', err)
+        console.error('Failed to load season anime, trying cache:', err)
 
-        // SSE failed - try cache fallback
-        if (isMounted) {
-          try {
-            const cached = await getDiscoverCache(cacheKey)
-            if (cached) {
-              const cachedResults: SearchResult[] = JSON.parse(cached.data)
-              const uniqueCached = cachedResults.filter(item => {
-                if (fullSeasonSeenIdsRef.current.has(item.id)) return false
-                fullSeasonSeenIdsRef.current.add(item.id)
-                return true
-              })
-              if (uniqueCached.length > 0) {
-                setFullSeasonAnime(uniqueCached.sort((a, b) => (b.rating || 0) - (a.rating || 0)))
-              }
+        try {
+          const cached = await getDiscoverCache(cacheKey)
+          if (cached) {
+            const cachedResults: SearchResult[] = JSON.parse(cached.data)
+            const uniqueCached = cachedResults.filter(item => {
+              if (fullSeasonSeenIdsRef.current.has(item.id)) return false
+              fullSeasonSeenIdsRef.current.add(item.id)
+              return true
+            })
+            if (uniqueCached.length > 0) {
+              setFullSeasonAnime(uniqueCached.sort((a, b) => (b.rating || 0) - (a.rating || 0)))
             }
-          } catch {
-            // Cache also failed
           }
-          setFullSeasonLoading(false)
+        } catch {
+          // Cache also failed
         }
+      } finally {
+        setFullSeasonLoading(false)
       }
     }
 
-    startStreaming()
-
-    return () => {
-      isMounted = false
-      unsubscribe?.()
-    }
-  }, [extensionId, activeTab, nsfwFilter, handleSeasonDiscoverResults, currentSeasonInfo])
+    loadSeasonAnime()
+  }, [activeTab, nsfwFilter, currentSeasonInfo, selectedYear, selectedSeason])
 
   // Load more season anime
   const loadMoreSeasonAnime = useCallback(async () => {
-    if (!extensionId || fullSeasonLoadingMore || !fullSeasonHasNextPage) return
+    if (fullSeasonLoadingMore || !fullSeasonHasNextPage) return
 
     setFullSeasonLoadingMore(true)
     try {
       const nextPage = fullSeasonPage + 1
-      const result = await getCurrentSeasonAnime(extensionId, nextPage, !nsfwFilter)
+      const isCurrentSeason = selectedYear === currentSeasonInfo.year &&
+        selectedSeason === currentSeasonInfo.season.toLowerCase()
+      const result = isCurrentSeason
+        ? await jikanSeasonNow(nextPage, nsfwFilter)
+        : await jikanSeason(selectedYear, selectedSeason, nextPage, nsfwFilter)
 
       // Deduplicate
       const newResults = result.results.filter(item => {
@@ -330,7 +281,7 @@ function AnimeScreen() {
     } finally {
       setFullSeasonLoadingMore(false)
     }
-  }, [extensionId, fullSeasonPage, fullSeasonHasNextPage, fullSeasonLoadingMore, nsfwFilter])
+  }, [fullSeasonPage, fullSeasonHasNextPage, fullSeasonLoadingMore, nsfwFilter, selectedYear, selectedSeason, currentSeasonInfo])
 
   // Intersection observer for season tab infinite scroll
   useEffect(() => {
@@ -352,127 +303,91 @@ function AnimeScreen() {
     return () => observer.disconnect()
   }, [activeTab, fullSeasonHasNextPage, fullSeasonLoadingMore, fullSeasonLoading, loadMoreSeasonAnime])
 
-  // Track seen IDs to avoid duplicates across SSE events
+  // Track seen IDs to avoid duplicates
   const seenIdsRef = useRef<Set<string>>(new Set())
 
   // Cache key ref for browse results (updated when genres/filters change)
   const browseCacheKeyRef = useRef('')
+  const recommendationsLoadedRef = useRef(false)
+  const prevRecNsfwRef = useRef(nsfwFilter)
 
-  // Handle SSE discover results
-  const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
-    // Deduplicate results using ref to track seen IDs
-    const newUniqueResults = event.results.filter(item => {
-      if (seenIdsRef.current.has(item.id)) return false
-      seenIdsRef.current.add(item.id)
-      return true
-    })
-
-    if (newUniqueResults.length > 0) {
-      setRecommendations(prev => [...prev, ...newUniqueResults])
-    }
-
-    // Update pagination state
-    setCurrentPage(event.page)
-    setHasNextPage(event.has_next_page)
-
-    // Save to cache when last page is received
-    if (event.is_last) {
-      setRecommendationsLoading(false)
-      // Save all accumulated results to cache
-      setRecommendations(current => {
-        if (browseCacheKeyRef.current && current.length > 0) {
-          saveDiscoverCache(browseCacheKeyRef.current, JSON.stringify(current), 'anime').catch(() => {})
-        }
-        return current
-      })
-    }
-  }, [])
-
-  // Load recommendations via SSE (streams 3 pages progressively, API first with cache fallback)
+  // Reset browse data when nsfwFilter changes after initial load
   useEffect(() => {
-    if (!extensionId) return
+    if (prevRecNsfwRef.current !== nsfwFilter) {
+      prevRecNsfwRef.current = nsfwFilter
+      recommendationsLoadedRef.current = false
+      setRecommendations([])
+      seenIdsRef.current.clear()
+    }
+  }, [nsfwFilter])
 
-    const cacheKey = `anime:browse:score:${userWatchingGenres.join(',')}`
+  // Load recommendations via Jikan API (API first with cache fallback)
+  useEffect(() => {
+    if (recommendationsLoadedRef.current) return
+    recommendationsLoadedRef.current = true
+
+    const cacheKey = 'anime:browse:top'
     browseCacheKeyRef.current = cacheKey
 
-    // Reset state for new stream
+    // Only show loading if we have no existing data
     setRecommendationsLoading(true)
-    setRecommendations([])
     seenIdsRef.current.clear()
     setCurrentPage(1)
     setHasNextPage(true)
 
-    // Track mounted state to handle async cleanup properly
-    let isMounted = true
-    let unsubscribe: (() => void) | null = null
-
-    const startStreaming = async () => {
+    const loadRecommendations = async () => {
       try {
-        // Try API first - set up listener
-        const unsub = await onAnimeDiscoverResults((event) => {
-          // Only process events if still mounted
-          if (isMounted) {
-            handleDiscoverResults(event)
-          }
+        const results = await jikanTopAnime(1, undefined, 'favorite', nsfwFilter)
+
+        const uniqueResults = results.results.filter(item => {
+          if (seenIdsRef.current.has(item.id)) return false
+          seenIdsRef.current.add(item.id)
+          return true
         })
 
-        // Store unsubscribe if still mounted, otherwise cleanup immediately
-        if (isMounted) {
-          unsubscribe = unsub
-        } else {
-          unsub()
-          return
-        }
+        setRecommendations(uniqueResults)
+        setCurrentPage(1)
+        setHasNextPage(results.has_next_page)
 
-        // Start streaming (fetches 3 pages progressively)
-        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
-        await streamDiscoverAnime(extensionId, 'score', userWatchingGenres, !nsfwFilter, 3)
+        // Save to cache
+        if (uniqueResults.length > 0) {
+          saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
+        }
       } catch (err) {
-        console.error('Failed to stream anime, trying cache:', err)
+        console.error('Failed to load anime, trying cache:', err)
 
-        // SSE failed - try cache fallback
-        if (isMounted) {
-          try {
-            const cached = await getDiscoverCache(cacheKey)
-            if (cached) {
-              const cachedResults: SearchResult[] = JSON.parse(cached.data)
-              const uniqueCached = cachedResults.filter(item => {
-                if (seenIdsRef.current.has(item.id)) return false
-                seenIdsRef.current.add(item.id)
-                return true
-              })
-              if (uniqueCached.length > 0) {
-                setRecommendations(uniqueCached)
-              }
+        try {
+          const cached = await getDiscoverCache(cacheKey)
+          if (cached) {
+            const cachedResults: SearchResult[] = JSON.parse(cached.data)
+            const uniqueCached = cachedResults.filter(item => {
+              if (seenIdsRef.current.has(item.id)) return false
+              seenIdsRef.current.add(item.id)
+              return true
+            })
+            if (uniqueCached.length > 0) {
+              setRecommendations(uniqueCached)
             }
-          } catch {
-            // Cache also failed
           }
-          setRecommendationsLoading(false)
+        } catch {
+          // Cache also failed
         }
+      } finally {
+        setRecommendationsLoading(false)
       }
     }
 
-    startStreaming()
-
-    return () => {
-      isMounted = false
-      unsubscribe?.()
-    }
-    // Note: handleDiscoverResults is stable (empty deps) and used inside closure, so not needed in deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensionId, userWatchingGenres, nsfwFilter])
+    loadRecommendations()
+  }, [nsfwFilter])
 
   // Load more recommendations when scrolling to bottom
-  // SSE loads pages 1-3 initially, so infinite scroll starts from page 4
   const loadMoreRecommendations = useCallback(async () => {
-    if (!extensionId || loadingMore || !hasNextPage || searchInput) return
+    if (loadingMore || !hasNextPage || searchInput) return
 
     setLoadingMore(true)
     try {
-      // Start from page after SSE (which loads pages 1-3)
-      const nextPage = Math.max(currentPage + 1, 4)
-      const results = await discoverAnime(extensionId, nextPage, 'score', userWatchingGenres, !nsfwFilter)
+      const nextPage = currentPage + 1
+      const results = await jikanTopAnime(nextPage, undefined, 'favorite', nsfwFilter)
 
       // Deduplicate using the seenIds ref
       const newResults = results.results.filter(item => {
@@ -489,7 +404,7 @@ function AnimeScreen() {
     } finally {
       setLoadingMore(false)
     }
-  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userWatchingGenres, nsfwFilter])
+  }, [currentPage, hasNextPage, loadingMore, searchInput, nsfwFilter])
 
   // Intersection observer for infinite scroll (Browse tab)
   useEffect(() => {
@@ -513,8 +428,6 @@ function AnimeScreen() {
 
   // Debounced instant search - triggers as user types
   useEffect(() => {
-    if (!extensionId) return
-
     // If input is empty, clear search results
     if (!searchInput.trim()) {
       if (searchQuery) {
@@ -524,14 +437,13 @@ function AnimeScreen() {
     }
 
     // Debounce the search
-    // nsfwFilter=true means "hide adult content", so allowAdult should be false
     const timer = setTimeout(() => {
-      search(extensionId, searchInput, 1, !nsfwFilter)
+      search(searchInput, 1, nsfwFilter)
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchInput, extensionId, nsfwFilter])
+  }, [searchInput, nsfwFilter])
 
   // Clear search input
   const handleClearSearch = useCallback(() => {
@@ -550,29 +462,6 @@ function AnimeScreen() {
     },
     []
   )
-
-  if (loading) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-[var(--color-accent-primary)] mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Extension Error</h2>
-          <p className="text-[var(--color-text-secondary)]">{error}</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Season tab label
-  const seasonTabLabel = `${currentSeasonInfo.season} ${currentSeasonInfo.year}`
 
   return (
     <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
@@ -689,7 +578,7 @@ function AnimeScreen() {
             >
               <span className="flex items-center gap-2">
                 <Calendar className="w-4 h-4" />
-                {seasonTabLabel}
+                Seasons
               </span>
               {activeTab === 'season' && (
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent-primary)]" />
@@ -755,12 +644,39 @@ function AnimeScreen() {
           ) : (
             // ========== SEASON TAB ==========
             <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-[var(--color-accent-primary)]" />
-                  {seasonTabLabel} Anime
-                </h2>
-                <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+              <div className="flex flex-wrap items-center gap-3 mb-6">
+                {/* Season Chips */}
+                <div className="flex gap-1.5">
+                  {seasonOptions.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setSelectedSeason(s)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        selectedSeason === s
+                          ? 'bg-[var(--color-accent-primary)] text-white'
+                          : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Year Dropdown */}
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className="bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)]
+                             rounded-lg px-3 py-1.5 text-sm text-[var(--color-text-primary)]
+                             focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]"
+                >
+                  {yearOptions.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+
+                {/* Sort indicator */}
+                <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] ml-auto">
                   <Star className="w-4 h-4 text-yellow-400" />
                   Sorted by Rating
                 </div>
@@ -790,7 +706,7 @@ function AnimeScreen() {
                     )}
                     {!fullSeasonHasNextPage && fullSeasonAnime.length > 0 && (
                       <p className="text-sm text-[var(--color-text-muted)]">
-                        All {fullSeasonAnime.length} anime from {seasonTabLabel} loaded
+                        All {fullSeasonAnime.length} anime from {selectedSeason.charAt(0).toUpperCase() + selectedSeason.slice(1)} {selectedYear} loaded
                       </p>
                     )}
                   </div>
@@ -798,7 +714,7 @@ function AnimeScreen() {
               ) : (
                 <div className="text-center py-12">
                   <p className="text-[var(--color-text-secondary)]">
-                    No anime found for {seasonTabLabel}
+                    No anime found for {selectedSeason.charAt(0).toUpperCase() + selectedSeason.slice(1)} {selectedYear}
                   </p>
                 </div>
               )}
@@ -808,10 +724,10 @@ function AnimeScreen() {
       )}
 
       {/* Media Detail Modal */}
-      {selectedMedia && extensionId && (
+      {selectedMedia && (
         <MediaDetailModal
           media={selectedMedia}
-          extensionId={extensionId}
+          extensionId={allanimeExtId || undefined}
           isOpen={true}
           onClose={() => {
             setSelectedMedia(null)

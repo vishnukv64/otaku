@@ -27,9 +27,9 @@ interface MediaState {
 
   // Actions
   setSearchQuery: (query: string) => void
-  search: (extensionId: string, query: string, page?: number, allowAdult?: boolean) => Promise<void>
-  loadMoreResults: (extensionId: string, allowAdult?: boolean) => Promise<void>
-  selectMedia: (extensionId: string, animeId: string) => Promise<void>
+  search: (query: string, page?: number, sfw?: boolean) => Promise<void>
+  loadMoreResults: (sfw?: boolean) => Promise<void>
+  selectMedia: (animeId: string) => Promise<void>
   clearSearch: () => void
 }
 
@@ -47,11 +47,11 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
 
-  search: async (extensionId, query, page = 1, allowAdult = false) => {
+  search: async (query, page = 1, sfw = true) => {
     set({ searchLoading: true, searchError: null, searchQuery: query })
 
     try {
-      const results = await tauri.searchAnime(extensionId, query, page, allowAdult)
+      const results = await tauri.jikanSearchAnime(query, page, sfw)
 
       // Deduplicate results to avoid React key warnings
       const existingResults = page === 1 ? [] : get().searchResults
@@ -78,19 +78,19 @@ export const useMediaStore = create<MediaState>((set, get) => ({
     }
   },
 
-  loadMoreResults: async (extensionId, allowAdult = false) => {
+  loadMoreResults: async (sfw = true) => {
     const { currentPage, hasNextPage, searchQuery, searchLoading } = get()
 
     if (!hasNextPage || searchLoading) return
 
-    await get().search(extensionId, searchQuery, currentPage + 1, allowAdult)
+    await get().search(searchQuery, currentPage + 1, sfw)
   },
 
-  selectMedia: async (extensionId, animeId) => {
+  selectMedia: async (animeId) => {
     set({ selectedMediaLoading: true })
 
     try {
-      const details = await tauri.getAnimeDetails(extensionId, animeId)
+      const details = await tauri.jikanAnimeDetails(parseInt(animeId))
       set({ selectedMedia: details, selectedMediaLoading: false })
     } catch (error) {
       console.error('Failed to load media details:', error)

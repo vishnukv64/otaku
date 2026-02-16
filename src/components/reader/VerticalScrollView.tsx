@@ -289,9 +289,9 @@ export function VerticalScrollView({
           maxWidth: isWebtoonMode ? `${WEBTOON_MAX_WIDTH}px` : undefined,
         }}
       >
-        {images.map((image) => (
+        {images.map((image, idx) => (
           <div
-            key={image.page}
+            key={`${image.page}-${idx}`}
             ref={(el) => {
               if (el) {
                 imageRefs.current.set(image.page, el)

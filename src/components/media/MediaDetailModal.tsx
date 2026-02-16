@@ -13,7 +13,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { getMediaDetails, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, searchAnime, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
@@ -68,7 +69,7 @@ function isAiring(status?: string): boolean {
 
 interface MediaDetailModalProps {
   media: SearchResult
-  extensionId: string
+  extensionId?: string
   isOpen: boolean
   onClose: () => void
   onMediaChange?: (media: SearchResult) => void
@@ -101,6 +102,23 @@ export function MediaDetailModal({
   const [showNewBadge, setShowNewBadge] = useState(false)
   const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
 
+  // AllAnime extension for video sources (downloads)
+  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
+  const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!allanimeExtId) {
+      loadExtension(ALLANIME_EXTENSION).then(meta => setAllanimeExtId(meta.id)).catch(() => {})
+    }
+  }, [allanimeExtId])
+
+  // Resolve AllAnime show ID for downloads (maps MAL ID → AllAnime ID)
+  useEffect(() => {
+    if (!details || allanimeShowId) return
+    resolveAllanimeId(details.title, 'anime', media.id, details.english_name, details.year)
+      .then(id => { if (id) setAllanimeShowId(id) })
+      .catch(() => {})
+  }, [details, allanimeShowId, media.id])
+
   // Tag state
   const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
   const [showTagSelector, setShowTagSelector] = useState(false)
@@ -126,8 +144,7 @@ export function MediaDetailModal({
     navigate({
       to: '/watch',
       search: {
-        extensionId,
-        animeId: media.id,
+        malId: media.id,
         episodeId,
       },
     })
@@ -190,7 +207,12 @@ export function MediaDetailModal({
   }
 
   const handleDownloadEpisode = async (episodeId: string, episodeNumber: number) => {
-    if (!details) return
+    if (!details || !allanimeExtId || !allanimeShowId) {
+      if (!allanimeShowId) {
+        notifyError('Download Failed', 'Could not resolve anime on AllAnime. Try again.')
+      }
+      return
+    }
 
     // Skip if already downloaded or downloading
     if (downloadedEpisodes.has(episodeNumber) || downloadingEpisodes.has(episodeNumber)) {
@@ -198,8 +220,10 @@ export function MediaDetailModal({
     }
 
     try {
+      // Build AllAnime-format episode ID: {allanimeShowId}::{episodeNumber}
+      const allanimeEpisodeId = `${allanimeShowId}::${episodeNumber}`
       // Get video sources
-      const videoSources = await getVideoSources(extensionId, episodeId)
+      const videoSources = await getVideoSources(allanimeExtId, allanimeEpisodeId)
       if (!videoSources || !videoSources.sources || videoSources.sources.length === 0) {
         notifyError('Download Failed', `No video sources found for Episode ${episodeNumber}`)
         return
@@ -226,7 +250,12 @@ export function MediaDetailModal({
   }
 
   const handleDownloadAll = async () => {
-    if (!details) return
+    if (!details || !allanimeExtId || !allanimeShowId) {
+      if (!allanimeShowId) {
+        notifyError('Download Failed', 'Could not resolve anime on AllAnime. Try again.')
+      }
+      return
+    }
 
     try {
       let successCount = 0
@@ -242,8 +271,10 @@ export function MediaDetailModal({
             continue
           }
 
+          // Build AllAnime-format episode ID: {allanimeShowId}::{episodeNumber}
+          const allanimeEpisodeId = `${allanimeShowId}::${episode.number}`
           // Get video sources
-          const sources = await getVideoSources(extensionId, episode.id)
+          const sources = await getVideoSources(allanimeExtId, allanimeEpisodeId)
           if (!sources.sources || sources.sources.length === 0) {
             console.error(`No sources found for episode ${episode.number}`)
             failCount++
@@ -288,7 +319,12 @@ export function MediaDetailModal({
       return
     }
 
-    if (!details) return
+    if (!details || !allanimeExtId || !allanimeShowId) {
+      if (!allanimeShowId) {
+        notifyError('Download Failed', 'Could not resolve anime on AllAnime. Try again.')
+      }
+      return
+    }
 
     const selectedEpisodesList = details.episodes.filter(ep => selectedEpisodes.has(ep.id))
 
@@ -306,8 +342,10 @@ export function MediaDetailModal({
             continue
           }
 
+          // Build AllAnime-format episode ID: {allanimeShowId}::{episodeNumber}
+          const allanimeEpisodeId = `${allanimeShowId}::${episode.number}`
           // Get video sources
-          const sources = await getVideoSources(extensionId, episode.id)
+          const sources = await getVideoSources(allanimeExtId, allanimeEpisodeId)
           if (!sources.sources || sources.sources.length === 0) {
             console.error(`No sources found for episode ${episode.number}`)
             failCount++
@@ -369,7 +407,7 @@ export function MediaDetailModal({
       // Initialize release tracking for ongoing anime
       if (details && details.episodes.length > 0) {
         try {
-          await initializeReleaseTracking(media.id, extensionId, 'anime', details.episodes.length)
+          await initializeReleaseTracking(media.id, allanimeExtId || 'jikan', 'anime', details.episodes.length)
         } catch (trackingError) {
           console.error('Failed to initialize release tracking:', trackingError)
         }
@@ -413,7 +451,7 @@ export function MediaDetailModal({
         // Initialize release tracking for ongoing anime
         if (details && details.episodes.length > 0) {
           try {
-            await initializeReleaseTracking(media.id, extensionId, 'anime', details.episodes.length)
+            await initializeReleaseTracking(media.id, allanimeExtId || 'jikan', 'anime', details.episodes.length)
           } catch (trackingError) {
             console.error('Failed to initialize release tracking:', trackingError)
           }
@@ -433,37 +471,87 @@ export function MediaDetailModal({
   useEffect(() => {
     if (!isOpen) return
 
+    let aborted = false
+
     const loadDetails = async () => {
-      setLoading(true)
       setError(null)
       setUsingCachedData(false)
 
-      let result: MediaDetails | null = null
-      let apiError: string | null = null
+      let hasCachedData = false
 
-      // Try to fetch from API first
+      // Step 1: Try cache first for instant display
       try {
-        result = await getMediaDetails(extensionId, media.id)
-        setDetails(result)
+        const cached = await getCachedMediaDetails(media.id)
+        if (!aborted && cached && cached.episodes.length > 0) {
+          const cachedDetails: MediaDetails = {
+            id: cached.media.id,
+            title: cached.media.title,
+            english_name: cached.media.english_name,
+            native_name: cached.media.native_name,
+            description: cached.media.description,
+            cover_url: cached.media.cover_url,
+            trailer_url: cached.media.trailer_url,
+            type: cached.media.content_type,
+            status: cached.media.status,
+            year: cached.media.year,
+            rating: cached.media.rating,
+            episode_count: cached.media.episode_count,
+            episode_duration: cached.media.episode_duration,
+            season: cached.media.season_quarter && cached.media.season_year
+              ? { quarter: cached.media.season_quarter, year: cached.media.season_year }
+              : undefined,
+            aired_start: cached.media.aired_start_year
+              ? { year: cached.media.aired_start_year, month: cached.media.aired_start_month, date: cached.media.aired_start_date }
+              : undefined,
+            genres: cached.media.genres ? JSON.parse(cached.media.genres) : [],
+            episodes: cached.episodes.map(ep => ({
+              id: ep.id,
+              number: ep.number,
+              title: ep.title,
+              thumbnail: ep.thumbnail_url,
+            })),
+          }
+          setDetails(cachedDetails)
+          setLoading(false)
+          hasCachedData = true
+          console.log('[MediaDetail] Cache hit:', cached.episodes.length, 'episodes — showing instantly')
+        }
+      } catch {
+        // Cache miss or error — continue to API
+      }
 
-        // Save media details to database for library/continue watching and offline cache
+      // If no cache, show loading spinner
+      if (!hasCachedData) {
+        setLoading(true)
+      }
+
+      // Step 2: Fetch from API in background (regardless of cache)
+      try {
+        const result = await jikanAnimeDetails(parseInt(media.id))
+        if (aborted) return
+
+        setDetails(result)
+        setUsingCachedData(false)
+        setLoading(false)
+
+        // Save to cache for next time
         try {
           const mediaEntry: MediaEntry = {
             id: result.id,
-            extension_id: extensionId,
+            extension_id: 'jikan',
             title: result.title,
             english_name: result.english_name,
             native_name: result.native_name,
             description: result.description,
             cover_url: result.cover_url,
-            banner_url: result.cover_url, // Use cover as banner if no separate banner
+            banner_url: result.cover_url,
             trailer_url: result.trailer_url,
             media_type: 'anime',
             content_type: result.type,
             status: result.status,
             year: result.year,
             rating: result.rating,
-            episode_count: result.episodes.length,
+            episode_count: result.episode_count ?? result.episodes.length,
             episode_duration: result.episode_duration,
             season_quarter: result.season?.quarter,
             season_year: result.season?.year,
@@ -476,97 +564,72 @@ export function MediaDetailModal({
           }
           await saveMediaDetails(mediaEntry)
 
-          // Cache episodes for offline fallback
           if (result.episodes.length > 0) {
             const episodeEntries: EpisodeEntry[] = result.episodes.map(ep => ({
               id: ep.id,
-              media_id: result!.id,
-              extension_id: extensionId,
+              media_id: result.id,
+              extension_id: 'jikan',
               number: ep.number,
               title: ep.title,
-              description: undefined, // Episode type doesn't have description
+              description: undefined,
               thumbnail_url: ep.thumbnail,
-              aired_date: undefined, // Not available from API
-              duration: undefined, // Not available from API
+              aired_date: undefined,
+              duration: undefined,
             }))
-            await saveEpisodes(result.id, extensionId, episodeEntries)
+            await saveEpisodes(result.id, 'jikan', episodeEntries)
           }
         } catch (saveErr) {
           console.error('Failed to save media/episode details:', saveErr)
-          // Non-fatal error, continue anyway
         }
-      } catch (err) {
-        apiError = err instanceof Error ? err.message : 'Failed to load details'
-        console.error('[MediaDetail] API failed, trying cache:', apiError)
 
-        // API failed - try to load from cache
-        try {
-          const cached = await getCachedMediaDetails(media.id)
-          if (cached && cached.episodes.length > 0) {
-            // Convert cached data to MediaDetails format
-            const cachedDetails: MediaDetails = {
-              id: cached.media.id,
-              title: cached.media.title,
-              english_name: cached.media.english_name,
-              native_name: cached.media.native_name,
-              description: cached.media.description,
-              cover_url: cached.media.cover_url,
-              trailer_url: cached.media.trailer_url,
-              type: cached.media.content_type,
-              status: cached.media.status,
-              year: cached.media.year,
-              rating: cached.media.rating,
-              episode_count: cached.media.episode_count,
-              episode_duration: cached.media.episode_duration,
-              season: cached.media.season_quarter && cached.media.season_year
-                ? { quarter: cached.media.season_quarter, year: cached.media.season_year }
-                : undefined,
-              aired_start: cached.media.aired_start_year
-                ? { year: cached.media.aired_start_year, month: cached.media.aired_start_month, date: cached.media.aired_start_date }
-                : undefined,
-              genres: cached.media.genres ? JSON.parse(cached.media.genres) : [],
-              episodes: cached.episodes.map(ep => ({
-                id: ep.id,
-                number: ep.number,
-                title: ep.title,
-                thumbnail: ep.thumbnail_url,
-              })),
-            }
-            setDetails(cachedDetails)
-            setUsingCachedData(true)
-            result = cachedDetails
-            console.log('[MediaDetail] Loaded from cache:', cached.episodes.length, 'episodes')
-          } else {
-            // No cache available - show error
-            setError(apiError)
-          }
-        } catch (cacheErr) {
-          console.error('[MediaDetail] Cache also failed:', cacheErr)
-          setError(apiError)
-        }
-      }
-
-      // Check which episodes are downloaded (if we have details)
-      if (result) {
+        // Check downloaded episodes with fresh data
         try {
           const downloaded = new Set<number>()
           for (const episode of result.episodes) {
-            const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
-            if (isDownloaded) {
-              downloaded.add(episode.number)
-            }
+            const isDl = await isEpisodeDownloaded(media.id, episode.number)
+            if (isDl) downloaded.add(episode.number)
           }
-          setDownloadedEpisodes(downloaded)
+          if (!aborted) setDownloadedEpisodes(downloaded)
         } catch (checkErr) {
           console.error('Failed to check downloaded episodes:', checkErr)
         }
+      } catch (err) {
+        if (aborted) return
+        const apiError = err instanceof Error ? err.message : 'Failed to load details'
+        console.error('[MediaDetail] API failed:', apiError)
+
+        if (hasCachedData) {
+          // Cache is already showing — just mark it as cached-only
+          setUsingCachedData(true)
+        } else {
+          // No cache and no API — show error
+          setError(apiError)
+          setLoading(false)
+        }
       }
 
-      setLoading(false)
+      // Check downloaded episodes for cached data (if API didn't run this yet)
+      if (hasCachedData) {
+        try {
+          const cached = await getCachedMediaDetails(media.id)
+          if (!aborted && cached) {
+            const downloaded = new Set<number>()
+            for (const ep of cached.episodes) {
+              const isDl = await isEpisodeDownloaded(media.id, ep.number)
+              if (isDl) downloaded.add(ep.number)
+            }
+            if (!aborted) setDownloadedEpisodes(downloaded)
+          }
+        } catch {
+          // Non-critical
+        }
+      }
     }
 
     loadDetails()
-  }, [isOpen, extensionId, media.id])
+
+    return () => { aborted = true }
+  }, [isOpen, media.id])
 
   // Check if media is in library and favorite status
   useEffect(() => {
@@ -665,7 +728,7 @@ export function MediaDetailModal({
         const searchTitle = media.title.split(/[:\-–—]/)[0].trim()
         console.log('[Related Anime] Searching with:', searchTitle, '(original:', media.title, ')')
 
-        const results = await searchAnime(extensionId, searchTitle, 1)
+        const results = await jikanSearchAnime(searchTitle, 1, true)
         console.log('[Related Anime] Search returned:', results.results.length, 'results')
 
         // Filter out the current anime and limit to 12 results
@@ -683,7 +746,7 @@ export function MediaDetailModal({
     }
 
     loadRelated()
-  }, [isOpen, extensionId, media.id, media.title])
+  }, [isOpen, media.id, media.title])
 
   // Check for new episodes using episode watch history
   useEffect(() => {
@@ -1052,6 +1115,7 @@ export function MediaDetailModal({
                         {inLibrary ? (() => {
                           // Smart status display: Show "Watching" if user hasn't watched all episodes
                           let displayStatus = libraryStatus
+                          let isOnTrack = false
 
                           if (details && libraryStatus) {
                             // Count how many episodes have been watched
@@ -1062,6 +1126,15 @@ export function MediaDetailModal({
                             // If not all episodes are watched, override display to "Watching"
                             if (watchedCount < details.episodes.length && libraryStatus !== 'dropped') {
                               displayStatus = 'watching'
+                            } else if (
+                              isAiring(details.status) &&
+                              watchedCount >= details.episodes.length &&
+                              details.episode_count != null &&
+                              details.episodes.length < details.episode_count
+                            ) {
+                              // Caught up on all available episodes, but more are coming
+                              displayStatus = 'watching'
+                              isOnTrack = true
                             }
                           }
 
@@ -1070,14 +1143,20 @@ export function MediaDetailModal({
                               key="in-library-btn"
                               onClick={handleRemoveFromLibrary}
                               disabled={libraryLoading}
-                              className="flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border bg-green-600 text-white border-green-500 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className={`flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${
+                                isOnTrack
+                                  ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
+                                  : 'bg-green-600 text-white border-green-500 hover:bg-green-700'
+                              }`}
                             >
                               {libraryLoading ? (
                                 <Loader2 size={22} className="animate-spin" />
+                              ) : isOnTrack ? (
+                                <CheckCircle size={22} />
                               ) : (
                                 <Check size={22} />
                               )}
-                              <span>{displayStatus ? getStatusLabel(displayStatus) : 'In My List'}</span>
+                              <span>{isOnTrack ? 'On Track' : displayStatus ? getStatusLabel(displayStatus) : 'In My List'}</span>
                             </button>
                           )
                         })() : (
@@ -1242,17 +1321,17 @@ export function MediaDetailModal({
                             ? formatRelativeTime(details.last_update_end)
                             : 'Recently'}
                       </div>
-                      {/* Next Episode Countdown */}
-                      {(media.latest_episode_date || details.last_update_end) && details.broadcast_interval && (
-                        <div className="mt-4">
-                          <NextEpisodeCountdown
-                            latestEpisodeDate={media.latest_episode_date}
-                            lastUpdateEnd={details.last_update_end}
-                            broadcastInterval={details.broadcast_interval}
-                            status={details.status}
-                          />
-                        </div>
-                      )}
+                    </div>
+                  )}
+                  {/* Next Episode Countdown - independent of Last Aired card */}
+                  {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
+                    <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                      <NextEpisodeCountdown
+                        latestEpisodeDate={media.latest_episode_date}
+                        lastUpdateEnd={details.last_update_end}
+                        broadcastInterval={details.broadcast_interval}
+                        status={details.status}
+                      />
                     </div>
                   )}
                 </div>
@@ -1345,9 +1424,9 @@ export function MediaDetailModal({
                           onClick={selectionMode ? () => toggleEpisodeSelection(episode.id) : undefined}
                         >
                           {/* Thumbnail or placeholder */}
-                          {episode.thumbnail ? (
+                          {episode.thumbnail || details.cover_url ? (
                             <img
-                              src={episode.thumbnail}
+                              src={(episode.thumbnail || details.cover_url)!}
                               alt={episode.title || `Episode ${episode.number}`}
                               className="w-full h-full object-cover"
                             />

@@ -9,6 +9,7 @@
 
 import { useCallback } from 'react'
 import useEmblaCarousel from 'embla-carousel-react'
+import { WheelGesturesPlugin } from 'embla-carousel-wheel-gestures'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { MediaCard, MediaCardSkeleton } from './MediaCard'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -20,6 +21,8 @@ interface MediaCarouselProps {
   items: SearchResult[]
   loading?: boolean
   onItemClick?: (item: SearchResult) => void
+  /** When true, displays rank numbers (1, 2, 3...) on each card */
+  showRank?: boolean
 }
 
 // Flex-basis classes for carousel items based on grid density
@@ -47,15 +50,18 @@ const skeletonGridClasses = {
   spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-6',
 }
 
-export function MediaCarousel({ title, items, loading = false, onItemClick }: MediaCarouselProps) {
+export function MediaCarousel({ title, items, loading = false, onItemClick, showRank }: MediaCarouselProps) {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const { getStatus } = useMediaStatusContext()
 
-  const [emblaRef, emblaApi] = useEmblaCarousel({
-    align: 'start',
-    slidesToScroll: 'auto',
-    containScroll: 'trimSnaps',
-  })
+  const [emblaRef, emblaApi] = useEmblaCarousel(
+    {
+      align: 'start',
+      slidesToScroll: 'auto',
+      containScroll: 'trimSnaps',
+    },
+    [WheelGesturesPlugin({ forceWheelAxis: 'x' })]
+  )
 
   const scrollPrev = useCallback(() => {
     if (emblaApi) emblaApi.scrollPrev()
@@ -122,7 +128,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
           ref={emblaRef}
         >
           <div className={`flex ${carouselGapClasses[gridDensity]} px-4 -mx-4 py-4`}>
-            {items.map((item) => (
+            {items.map((item, index) => (
               <div
                 key={item.id}
                 className={carouselItemClasses[gridDensity]}
@@ -131,6 +137,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick }: Me
                   media={item}
                   onClick={() => onItemClick?.(item)}
                   status={getStatus(item.id)}
+                  rank={showRank ? index + 1 : undefined}
                 />
               </div>
             ))}

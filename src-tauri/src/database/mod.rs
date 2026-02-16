@@ -17,6 +17,7 @@ pub mod media;
 pub mod tags;
 pub mod export_import;
 pub mod discover_cache;
+pub mod migration_runner;
 
 /// Database manager with connection pooling
 pub struct Database {
@@ -97,6 +98,9 @@ impl Database {
             ("012_library_tags.sql", include_str!("../../migrations/012_library_tags.sql")),
             ("013_release_tracking_v2.sql", include_str!("../../migrations/013_release_tracking_v2.sql")),
             ("014_discover_cache.sql", include_str!("../../migrations/014_discover_cache.sql")),
+            ("015_id_mappings.sql", include_str!("../../migrations/015_id_mappings.sql")),
+            ("016_clear_stale_mappings.sql", include_str!("../../migrations/016_clear_stale_mappings.sql")),
+            ("017_migration_archive.sql", include_str!("../../migrations/017_migration_archive.sql")),
         ];
 
         for (name, migration_sql) in migrations {

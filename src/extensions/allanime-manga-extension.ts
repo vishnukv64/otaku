@@ -1,48 +1,77 @@
 // AllAnime Manga Extension Code
 // This will be loaded into the extension system for manga
+//
+// Uses inline GraphQL via HTTP POST (following the Tachiyomi/keiyoushi pattern)
+// to avoid persisted query hash rotation issues.
 
 export const ALLANIME_MANGA_EXTENSION = `
 const extensionObject = {
   id: "com.allanime.manga",
   name: "AllAnime Manga",
-  version: "1.0.0",
+  version: "1.1.0",
   type: "manga",
   language: "en",
   baseUrl: "https://api.allanime.day",
 
-  search: (query, page) => {
-    // Use the correct manga search query hash
-    const variables = {
-      search: {
-        query: query,
-        isManga: true
+  // Helper: make a GraphQL POST request to AllAnime API
+  _gqlPost: (query, variables) => {
+    const body = JSON.stringify({ query: query, variables: variables });
+    const responseStr = __fetch('https://api.allanime.day/api', {
+      method: 'POST',
+      headers: {
+        'Referer': 'https://allmanga.to',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Content-Type': 'application/json',
+        'Origin': 'https://allmanga.to'
       },
+      body: body
+    });
+    const response = JSON.parse(responseStr);
+    return JSON.parse(response.body);
+  },
+
+  // Helper: make a persisted query GET request (fallback for queries without inline support)
+  _persistedGet: (variables, sha256Hash) => {
+    const extensions = { persistedQuery: { version: 1, sha256Hash: sha256Hash } };
+    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
+    const responseStr = __fetch(url, {
+      method: 'GET',
+      headers: {
+        'Referer': 'https://allmanga.to',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+      }
+    });
+    const response = JSON.parse(responseStr);
+    return JSON.parse(response.body);
+  },
+
+  search: (query, page) => {
+    const searchQuery = \`query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeMangaEnumType, $countryOrigin: VaildCountryOriginEnumType) {
+      mangas(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
+        edges {
+          _id
+          name
+          thumbnail
+          englishName
+          description
+          airedStart
+          status
+          score
+          genres
+        }
+      }
+    }\`;
+
+    const variables = {
+      search: { query: query, isManga: true },
       limit: 26,
       page: page || 1,
       translationType: "sub",
       countryOrigin: "ALL"
     };
 
-    const extensions = {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: "3a4b7e9ef62953484a05dd40f35b35b118ad2ff3d5e72d2add79bcaa663271e7"
-      }
-    };
-
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
-
     try {
-      const responseStr = __fetch(url, {
-        method: 'GET',
-        headers: {
-          'Referer': 'https://allmanga.to',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
-        }
-      });
-
-      const response = JSON.parse(responseStr);
-      const data = JSON.parse(response.body);
+      const data = extensionObject._gqlPost(searchQuery, variables);
       const mangas = data?.data?.mangas?.edges || [];
 
       const results = mangas.map(manga => {
@@ -75,8 +104,24 @@ const extensionObject = {
   },
 
   discover: (page, sortType, genres) => {
-    // If genres are provided, use persisted query with genre filter and isManga: true
+    // If genres are provided, use inline GraphQL POST with genre filter
     if (genres && genres.length > 0) {
+      const genreQuery = \`query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeMangaEnumType, $countryOrigin: VaildCountryOriginEnumType) {
+        mangas(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
+          edges {
+            _id
+            name
+            thumbnail
+            englishName
+            description
+            airedStart
+            status
+            score
+            genres
+          }
+        }
+      }\`;
+
       const variables = {
         search: {
           allowAdult: typeof __allowAdult !== 'undefined' ? __allowAdult : false,
@@ -90,28 +135,10 @@ const extensionObject = {
         countryOrigin: "ALL"
       };
 
-      const extensions = {
-        persistedQuery: {
-          version: 1,
-          sha256Hash: "3a4b7e9ef62953484a05dd40f35b35b118ad2ff3d5e72d2add79bcaa663271e7"
-        }
-      };
-
-      const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
-
       console.log('[MangaExtension] Discover with genres:', genres);
 
       try {
-        const responseStr = __fetch(url, {
-          method: 'GET',
-          headers: {
-            'Referer': 'https://allmanga.to',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
-          }
-        });
-
-        const response = JSON.parse(responseStr);
-        const data = JSON.parse(response.body);
+        const data = extensionObject._gqlPost(genreQuery, variables);
         const mangas = data?.data?.mangas?.edges || [];
 
         console.log('[MangaExtension] Genre search returned', mangas.length, 'results');
@@ -145,9 +172,7 @@ const extensionObject = {
       }
     }
 
-    // Use the popular query with type: "manga"
-    // For 'score' sortType: use dateRange 30 to get monthly popular, then sort by score
-    // For other sortTypes: use dateRange 1 for daily trending
+    // Popular/trending: use persisted query GET (queryPopular doesn't have a known inline schema)
     const dateRange = sortType === 'score' ? 30 : 1;
 
     const variables = {
@@ -159,26 +184,8 @@ const extensionObject = {
       allowUnknown: false
     };
 
-    const extensions = {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: "1fc9651b0d4c3b9dfd2fa6e1d50b8f4d11ce37f988c23b8ee20f82159f7c1147"
-      }
-    };
-
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
-
     try {
-      const responseStr = __fetch(url, {
-        method: 'GET',
-        headers: {
-          'Referer': 'https://allmanga.to',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
-        }
-      });
-
-      const response = JSON.parse(responseStr);
-      const data = JSON.parse(response.body);
+      const data = extensionObject._persistedGet(variables, "1fc9651b0d4c3b9dfd2fa6e1d50b8f4d11ce37f988c23b8ee20f82159f7c1147");
       const recommendations = data?.data?.queryPopular?.recommendations || [];
 
       let results = recommendations.map((rec) => {
@@ -205,7 +212,6 @@ const extensionObject = {
         };
       });
 
-      // For 'score' sortType, sort results by rating (highest first)
       if (sortType === 'score') {
         results = results.sort((a, b) => {
           const ratingA = a.rating || 0;
@@ -228,46 +234,40 @@ const extensionObject = {
   },
 
   getDetails: (id) => {
-    // Use the correct persisted query for manga details
-    // Note: allowAdult must match NSFW settings - if manga is adult and allowAdult is false, API returns null
+    const detailsQuery = \`query($_id: String!) {
+      manga(_id: $_id) {
+        _id
+        name
+        englishName
+        nativeName
+        thumbnail
+        description
+        genres
+        tags
+        status
+        score
+        type
+        altNames
+        authors
+        airedStart
+        availableChaptersDetail
+      }
+    }\`;
+
+    const variables = { _id: id };
     const allowAdult = typeof __allowAdult !== 'undefined' ? __allowAdult : false;
-
-    const variables = {
-      _id: id,
-      search: {
-        allowAdult: allowAdult,
-        allowUnknown: false
-      }
-    };
-
-    const extensions = {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: "90024aeae9c1a4d3ace0473871dd1902e47fbcb8781ccbcd8ad81f8bb1f313ee"
-      }
-    };
-
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
     console.log('[MangaExtension] getDetails for ID:', id, 'allowAdult:', allowAdult);
 
     try {
-      const responseStr = __fetch(url, {
-        method: 'GET',
-        headers: {
-          'Referer': 'https://allmanga.to',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
-        }
-      });
-
-      const response = JSON.parse(responseStr);
-      const data = JSON.parse(response.body);
+      const data = extensionObject._gqlPost(detailsQuery, variables);
       const manga = data?.data?.manga;
 
       if (!manga) {
         console.error('[MangaExtension] Manga not found in response. This can happen if:',
           '1) The manga ID is invalid',
           '2) The manga is adult content and NSFW filter is enabled (allowAdult:', allowAdult, ')');
+        console.error('[MangaExtension] Response errors:', data?.errors);
         throw new Error(allowAdult ? 'Manga not found' : 'Manga not found (may be adult content - try disabling NSFW filter)');
       }
 
@@ -322,35 +322,23 @@ const extensionObject = {
     const mangaId = parts.slice(0, -1).join('-');
     const chapterString = parts[parts.length - 1];
 
-    // Use the correct persisted query format with limit/offset
+    const chapterQuery = \`query($mangaId: String!, $translationType: VaildTranslationTypeMangaEnumType!, $chapterString: String!) {
+      chapterPages(mangaId: $mangaId, translationType: $translationType, chapterString: $chapterString) {
+        edges {
+          pictureUrls
+          pictureUrlHead
+        }
+      }
+    }\`;
+
     const variables = {
       mangaId: mangaId,
       translationType: "sub",
-      chapterString: chapterString,
-      limit: 1000,
-      offset: 0
+      chapterString: chapterString
     };
-
-    const extensions = {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: "4a048654fbac31f11e201ac8bd34d748b514c28d2781b674d057d064282e620e"
-      }
-    };
-
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
     try {
-      const responseStr = __fetch(url, {
-        method: 'GET',
-        headers: {
-          'Referer': 'https://allmanga.to',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
-        }
-      });
-
-      const response = JSON.parse(responseStr);
-      const data = JSON.parse(response.body);
+      const data = extensionObject._gqlPost(chapterQuery, variables);
 
       // Response structure: data.chapterPages.edges[0].pictureUrls
       const edges = data?.data?.chapterPages?.edges;
@@ -397,32 +385,15 @@ const extensionObject = {
   },
 
   getTags: (page) => {
+    // getTags uses a persisted query (no known inline equivalent for queryTags)
     const variables = {
       search: { format: "manga" },
       page: page || 1,
       limit: 50
     };
 
-    const extensions = {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: "fbd24de3aec73d35332185b621beec15396aaf8e8ae00183ddac6c19fbf8adcf"
-      }
-    };
-
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
-
     try {
-      const responseStr = __fetch(url, {
-        method: 'GET',
-        headers: {
-          'Referer': 'https://allmanga.to',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
-        }
-      });
-
-      const response = JSON.parse(responseStr);
-      const data = JSON.parse(response.body);
+      const data = extensionObject._persistedGet(variables, "fbd24de3aec73d35332185b621beec15396aaf8e8ae00183ddac6c19fbf8adcf");
       const edges = data?.data?.queryTags?.edges || [];
 
       const genres = [];
@@ -459,3 +430,4 @@ const extensionObject = {
   }
 };
 `
+
