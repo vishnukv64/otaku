@@ -176,7 +176,17 @@ function WatchPage() {
       try {
         const metadata = await loadExtension(ALLANIME_EXTENSION)
         setAllanimeExtId(metadata.id)
-        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year, result.title_synonyms)
+        console.log('[Watch] Resolving AllAnime ID for:', {
+          title: result.title,
+          english_name: result.english_name,
+          synonyms: result.title_synonyms,
+          type: result.type,
+          episode_count: result.episode_count,
+          year: result.year,
+          malId,
+        })
+        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year, result.title_synonyms, result.type, result.episode_count)
+        console.log('[Watch] Resolved AllAnime ID:', resolvedId)
         if (resolvedId) {
           setAllanimeId(resolvedId)
         } else {
@@ -340,7 +350,7 @@ function WatchPage() {
           if (!hasValidSources && malId && details) {
             console.warn('[Watch] No valid sources - clearing stale mapping and re-resolving')
             await clearAllanimeMapping(malId)
-            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year, details.title_synonyms)
+            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year, details.title_synonyms, details.type, details.episode_count)
             if (freshId && freshId !== allanimeId) {
               setAllanimeId(freshId)
               const freshEpisodeId = `${freshId}::${currentEpisode.number}`
@@ -489,7 +499,7 @@ function WatchPage() {
 
   // Desktop / landscape fullscreen layout
   return (
-    <div className="fixed inset-0 bg-black z-50" style={{ padding: 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)' }}>
+    <div className="fixed inset-0 bg-black z-50">
       <div className="w-full h-full">
         <div className="w-full h-full">
           {loading && (

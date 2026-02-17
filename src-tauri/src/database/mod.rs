@@ -102,6 +102,9 @@ impl Database {
             ("016_clear_stale_mappings.sql", include_str!("../../migrations/016_clear_stale_mappings.sql")),
             ("017_migration_archive.sql", include_str!("../../migrations/017_migration_archive.sql")),
             ("018_discover_cache_ttl.sql", include_str!("../../migrations/018_discover_cache_ttl.sql")),
+            ("019_clear_mappings_v2.sql", include_str!("../../migrations/019_clear_mappings_v2.sql")),
+            ("020_clear_mappings_v3.sql", include_str!("../../migrations/020_clear_mappings_v3.sql")),
+            ("021_clear_mappings_v4.sql", include_str!("../../migrations/021_clear_mappings_v4.sql")),
         ];
 
         for (name, migration_sql) in migrations {

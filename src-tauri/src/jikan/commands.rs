@@ -161,12 +161,16 @@ pub async fn resolve_allanime_id(
     year: Option<i32>,
     mal_id: String,
     synonyms: Option<Vec<String>>,
+    anime_type: Option<String>,
+    episode_count: Option<i32>,
 ) -> Result<Option<String>, String> {
     // Check cache first
     let pool = state.database.pool();
     if let Some(cached) = bridge::get_cached_mapping(pool, &mal_id).await? {
+        log::info!("BRIDGE CACHE HIT: mal_id={} → allanime_id={}", mal_id, cached);
         return Ok(Some(cached));
     }
+    log::info!("BRIDGE CACHE MISS: mal_id={}, searching AllAnime for '{}'", mal_id, title);
 
     let title_clone = title.clone();
     let mal_clone = mal_id.clone();
@@ -176,23 +180,28 @@ pub async fn resolve_allanime_id(
 
     // Search AllAnime directly using inline GraphQL (no extension needed)
     let result = tokio::task::spawn_blocking(move || {
+        let hints = bridge::MatchHints {
+            media_type: anime_type,
+            episode_count,
+        };
         bridge::resolve_via_search(
             &title_clone,
             english_title.as_deref(),
             year,
             &media_for_search,
             &synonyms_vec,
+            &hints,
         )
     })
     .await
     .map_err(|e| format!("Task error: {}", e))??;
 
-    // Cache the result
-    if let Some(ref allanime_id) = result {
-        bridge::save_mapping(pool, &mal_clone, allanime_id, &media_for_cache, &title).await?;
+    // Cache the result (with match score)
+    if let Some((ref allanime_id, score)) = result {
+        bridge::save_mapping(pool, &mal_clone, allanime_id, &media_for_cache, &title, Some(score)).await?;
     }
 
-    Ok(result)
+    Ok(result.map(|(id, _)| id))
 }
 
 #[tauri::command]

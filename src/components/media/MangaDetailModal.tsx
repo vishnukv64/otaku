@@ -226,7 +226,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       try {
         // Step 1: Try bridge resolution (cached mappings)
         const bridgeId = await resolveAllanimeId(
-          details.title, 'manga', manga.id, details.english_name, details.year, details.title_synonyms
+          details.title, 'manga', manga.id, details.english_name, details.year, details.title_synonyms, details.type, details.totalChapters
         )
         if (bridgeId) {
           setAllanimeShowId(bridgeId)

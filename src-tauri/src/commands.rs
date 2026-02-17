@@ -1971,8 +1971,8 @@ pub async fn clear_library(
 pub async fn clear_all_data(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Clear all tables
-    let tables = vec!["watch_history", "library", "media"];
+    // Clear all tables (including id_mappings cache)
+    let tables = vec!["watch_history", "library", "media", "id_mappings"];
 
     for table in tables {
         sqlx::query(&format!("DELETE FROM {}", table))

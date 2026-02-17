@@ -26,7 +26,7 @@ import { DownloadButton } from './DownloadButton'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { notifySuccess } from '@/utils/notify'
-import { isMobile, isAndroid } from '@/utils/platform'
+import { isMobile, isAndroid, isIOS } from '@/utils/platform'
 
 // Helper to create proxy URL for HLS streaming via embedded video server
 function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
@@ -1130,9 +1130,9 @@ export function VideoPlayer({
       style={{
         // Hide cursor when controls are hidden (immersive mode)
         cursor: !showControls && !isPiP ? 'none' : 'default',
-        // Android: CSS fullscreen since we bypass the browser Fullscreen API
+        // Mobile (Android/iOS): CSS fullscreen since we bypass the browser Fullscreen API
         // Native bridge hides system bars, but we still need to fill the viewport
-        ...(isAndroid() && isFullscreen ? {
+        ...((isAndroid() || isIOS()) && isFullscreen ? {
           position: 'fixed' as const,
           inset: 0,
           zIndex: 9999,

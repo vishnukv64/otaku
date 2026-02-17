@@ -2228,7 +2228,9 @@ export async function resolveAllanimeId(
   malId: string,
   englishTitle?: string,
   year?: number,
-  synonyms?: string[]
+  synonyms?: string[],
+  animeType?: string,
+  episodeCount?: number,
 ): Promise<string | null> {
   return await invoke('resolve_allanime_id', {
     title,
@@ -2237,6 +2239,8 @@ export async function resolveAllanimeId(
     year,
     malId,
     synonyms,
+    animeType,
+    episodeCount,
   })
 }
 

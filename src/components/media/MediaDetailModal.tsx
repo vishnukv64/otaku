@@ -120,7 +120,7 @@ export function MediaDetailModal({
   // Resolve AllAnime show ID for downloads (maps MAL ID → AllAnime ID)
   useEffect(() => {
     if (!details || allanimeShowId) return
-    resolveAllanimeId(details.title, 'anime', media.id, details.english_name, details.year, details.title_synonyms)
+    resolveAllanimeId(details.title, 'anime', media.id, details.english_name, details.year, details.title_synonyms, details.type, details.episode_count)
       .then(id => { if (id) setAllanimeShowId(id) })
       .catch(() => {})
   }, [details, allanimeShowId, media.id])
