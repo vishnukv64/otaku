@@ -5,7 +5,7 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-02-17
+## [1.0.0] - 2026-02-18
 
 ### Breaking Changes
 - **Jikan API Migration** - Primary metadata source migrated from AllAnime to Jikan (MyAnimeList)
@@ -79,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Settings Page** - Mobile-responsive layout improvements
 
 ### Fixed
+- **Landing Page Android Support** - Android download option always visible on landing page
+  - Android OS detection for mobile visitors (serves APK as primary download)
+  - Fallback to GitHub releases page when APK asset is not yet available
+  - Android platform link shown to all desktop visitors alongside Windows/macOS/Linux
+  - Updated meta tags, hero description, and feature cards for cross-platform messaging
 - **Landing Page Version Badge** - Now dynamically reads version from package config
 - **ESLint Errors** - Resolved linting issues for CI pipeline
 - **Continue Reading Section** - Fixed chapter completion removing progress entries

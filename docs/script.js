@@ -53,6 +53,15 @@ function detectOS() {
         };
     }
 
+    // Detect Android
+    if (userAgent.includes('android')) {
+        return {
+            os: 'android',
+            arch: 'aarch64',
+            displayName: 'Android'
+        };
+    }
+
     // Detect Windows
     if (platform.includes('win') || userAgent.includes('windows')) {
         return {
@@ -91,7 +100,8 @@ const assetPatterns = {
     macArm: /_aarch64\.dmg$/,
     linuxAppImage: /\.AppImage$/,
     linuxDeb: /\.deb$/,
-    linuxRpm: /\.rpm$/
+    linuxRpm: /\.rpm$/,
+    androidApk: /_aarch64\.apk$/
 };
 
 // Fetch latest release from GitHub
@@ -149,6 +159,9 @@ function matchAsset(os, arch, assets) {
             }
             return linuxAsset;
 
+        case 'android':
+            return assets.find(a => assetPatterns.androidApk.test(a.name));
+
         default:
             return null;
     }
@@ -163,7 +176,8 @@ function getAllDownloadOptions(assets) {
         macArm: assets.find(a => assetPatterns.macArm.test(a.name)),
         linuxAppImage: assets.find(a => assetPatterns.linuxAppImage.test(a.name)),
         linuxDeb: assets.find(a => assetPatterns.linuxDeb.test(a.name)),
-        linuxRpm: assets.find(a => assetPatterns.linuxRpm.test(a.name))
+        linuxRpm: assets.find(a => assetPatterns.linuxRpm.test(a.name)),
+        androidApk: assets.find(a => assetPatterns.androidApk.test(a.name))
     };
 }
 
@@ -246,10 +260,19 @@ function createPlatformLinks(currentOS, currentArch, allOptions) {
         });
     }
 
+    if (currentOS !== 'android') {
+        platforms.push({
+            icon: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.341a.96.96 0 0 0-.96.96.96.96 0 0 0 .96.96.96.96 0 0 0 .96-.96.96.96 0 0 0-.96-.96zm-11.046 0a.96.96 0 0 0-.96.96.96.96 0 0 0 .96.96.96.96 0 0 0 .96-.96.96.96 0 0 0-.96-.96zm11.405-6.02l1.997-3.46a.416.416 0 0 0-.152-.566.416.416 0 0 0-.566.152l-2.024 3.506A12.3 12.3 0 0 0 12 8.004a12.3 12.3 0 0 0-5.137.949L4.839 5.447a.416.416 0 0 0-.566-.152.416.416 0 0 0-.152.566l1.997 3.46C2.688 11.196.343 14.857 0 19.2h24c-.344-4.343-2.688-8.004-6.118-9.879z"/></svg>`,
+            label: 'Android',
+            asset: allOptions.androidApk,
+            url: `https://github.com/${GITHUB_REPO}/releases`
+        });
+    }
+
     // Create platform links
     platforms.forEach(platform => {
         const link = document.createElement('a');
-        link.href = platform.asset.downloadUrl;
+        link.href = platform.asset ? platform.asset.downloadUrl : platform.url;
         link.className = 'platform-link';
         link.innerHTML = `
             <span class="platform-icon">${platform.icon}</span>
