@@ -403,9 +403,9 @@ export function MangaReader({
       const deltaX = e.changedTouches[0].clientX - startX
       if (Math.abs(deltaX) < 50) return // ignore small swipes
       if (settings.readingDirection === 'rtl') {
-        deltaX > 0 ? handleNextPage() : handlePreviousPage()
+        if (deltaX > 0) { handleNextPage() } else { handlePreviousPage() }
       } else {
-        deltaX < 0 ? handleNextPage() : handlePreviousPage()
+        if (deltaX < 0) { handleNextPage() } else { handlePreviousPage() }
       }
     }
 

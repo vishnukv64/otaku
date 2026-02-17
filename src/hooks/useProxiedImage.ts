@@ -41,16 +41,11 @@ export function useProxiedImage(
   const [error, setError] = useState(false)
 
   const blobUrlRef = useRef<string | null>(null)
-  const currentUrlRef = useRef(url)
+  const [prevUrl, setPrevUrl] = useState(url)
 
-  // Handle URL changes (React 18 render-time state adjustment)
-  if (currentUrlRef.current !== url) {
-    currentUrlRef.current = url
-    // Revoke old blob URL
-    if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current)
-      blobUrlRef.current = null
-    }
+  // Handle URL changes (render-time state adjustment — React 18 pattern)
+  if (prevUrl !== url) {
+    setPrevUrl(url)
     if (isLocalUrl(url)) {
       setSrc(url)
       setLoading(false)
@@ -62,11 +57,22 @@ export function useProxiedImage(
     }
   }
 
+  // Revoke blob URL when source URL changes or on unmount
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
+    }
+  }, [url])
+
+  // Fetch image through proxy
   useEffect(() => {
     if (isLocalUrl(url)) return
     if (blobUrlRef.current) return // Already fetched for this URL
     if (skip) {
-      setLoading(false) // Not loading while skipped
+      setLoading(false) // eslint-disable-line react-hooks/set-state-in-effect -- not loading while skipped
       return
     }
 
@@ -93,15 +99,6 @@ export function useProxiedImage(
       cancelled = true
     }
   }, [url, skip])
-
-  // Cleanup blob URL on unmount only
-  useEffect(() => {
-    return () => {
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current)
-      }
-    }
-  }, [])
 
   return { src, loading, error }
 }

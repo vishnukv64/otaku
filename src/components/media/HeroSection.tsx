@@ -42,7 +42,7 @@ export function HeroSection({
 
   // Reset trailer when media changes (hero rotation)
   useEffect(() => {
-    setShowTrailer(false)
+    setShowTrailer(false) // eslint-disable-line react-hooks/set-state-in-effect
   }, [media.id])
 
   // Notify parent when trailer state changes

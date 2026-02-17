@@ -5,7 +5,7 @@
  * and rewrites all database references. Auto-dismisses on completion.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { Loader2, CheckCircle2, AlertTriangle, Database } from 'lucide-react'
 import { startMigration } from '@/utils/tauri-commands'
@@ -34,22 +34,22 @@ export function MigrationScreen({ onComplete }: MigrationScreenProps) {
     current_title: '',
     status: 'pending',
   })
-  const [started, setStarted] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Start migration on mount
+  const startedRef = useRef(false)
   const beginMigration = useCallback(async () => {
-    if (started) return
-    setStarted(true)
+    if (startedRef.current) return
+    startedRef.current = true
     try {
       await startMigration()
     } catch (err) {
       setError(String(err))
     }
-  }, [started])
+  }, [])
 
   useEffect(() => {
-    beginMigration()
+    beginMigration() // eslint-disable-line react-hooks/set-state-in-effect
   }, [beginMigration])
 
   // Listen for progress events

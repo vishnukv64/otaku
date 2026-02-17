@@ -95,6 +95,10 @@ function RootComponent() {
     })
   }, [initSettingsFromDatabase, initReaderFromDatabase, initPlayerFromDatabase])
 
+  // Must be called before any early returns (rules of hooks)
+  const settingsInitialized = useSettingsStore((s) => s._initialized)
+  const onboardingCompleted = useSettingsStore((s) => s.onboardingCompleted)
+
   // Initialize notification event listener at root level
   // This ensures notifications are received app-wide
   useNotificationEvents()
@@ -106,10 +110,6 @@ function RootComponent() {
   if (migrationNeeded) {
     return <MigrationScreen onComplete={() => setMigrationNeeded(false)} />
   }
-
-  // Still checking migration status or settings not ready — show nothing to avoid flash
-  const settingsInitialized = useSettingsStore((s) => s._initialized)
-  const onboardingCompleted = useSettingsStore((s) => s.onboardingCompleted)
 
   if (migrationNeeded === null || !settingsInitialized) {
     return null

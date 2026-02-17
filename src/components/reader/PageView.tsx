@@ -40,11 +40,11 @@ export function PageView({
   const [imgLoaded, setImgLoaded] = useState(false)
   const [imgError, setImgError] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const prevUrlRef = useRef(imageUrl)
+  const [prevImageUrl, setPrevImageUrl] = useState(imageUrl)
 
-  // Reset img load state when URL changes
-  if (prevUrlRef.current !== imageUrl) {
-    prevUrlRef.current = imageUrl
+  // Reset img load state when URL changes (render-time state adjustment)
+  if (prevImageUrl !== imageUrl) {
+    setPrevImageUrl(imageUrl)
     setImgLoaded(false)
     setImgError(false)
   }

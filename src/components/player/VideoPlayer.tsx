@@ -742,7 +742,7 @@ export function VideoPlayer({
       enterFs()
         .then(() => {
           if (isMobile()) {
-            const orient = screen.orientation as any
+            const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
             orient?.lock?.('landscape')
               ?.then?.(() => console.log('[VideoPlayer] Orientation locked to landscape'))
               ?.catch?.((err: Error) => console.warn('[VideoPlayer] Orientation lock failed:', err))
@@ -760,7 +760,7 @@ export function VideoPlayer({
         doc.msExitFullscreen()
       }
       if (isMobile()) {
-        const orient = screen.orientation as any
+        const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
         orient?.unlock?.()
       }
     }
@@ -769,7 +769,7 @@ export function VideoPlayer({
   // Android native bridge fullscreen via @JavascriptInterface in MainActivity.kt
   // Hides system bars (status + navigation) and locks to landscape
   const androidToggleFullscreen = () => {
-    const bridge = (window as any).OtakuBridge
+    const bridge = (window as Window & { OtakuBridge?: { enterFullscreen: () => void; exitFullscreen: () => void } }).OtakuBridge
     if (!bridge) {
       console.warn('[VideoPlayer] OtakuBridge not available, falling back to web fullscreen')
       webToggleFullscreen()
@@ -801,10 +801,10 @@ export function VideoPlayer({
         await win.setFullscreen(newFullscreen)
         setIsFullscreen(newFullscreen)
         if (newFullscreen) {
-          const orient = screen.orientation as any
+          const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
           orient?.lock?.('landscape')?.catch?.(() => {})
         } else {
-          const orient = screen.orientation as any
+          const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
           orient?.unlock?.()
         }
       } catch (err) {

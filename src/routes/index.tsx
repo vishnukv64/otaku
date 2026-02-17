@@ -72,7 +72,7 @@ function HomeScreen() {
   // Set initial featured anime when trending data arrives
   useEffect(() => {
     if (trending.data.length > 0 && !featuredAnime) {
-      setFeaturedAnime(trending.data[0])
+      setFeaturedAnime(trending.data[0]) // eslint-disable-line react-hooks/set-state-in-effect
     }
   }, [trending.data, featuredAnime])
 
