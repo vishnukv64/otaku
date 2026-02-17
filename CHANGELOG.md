@@ -5,6 +5,84 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-02-17
+
+### Breaking Changes
+- **Jikan API Migration** - Primary metadata source migrated from AllAnime to Jikan (MyAnimeList)
+  - All anime and manga metadata (titles, descriptions, scores, genres, status) now fetched from MAL via Jikan API
+  - AllAnime is now used **only** for video streaming sources and manga chapter images
+  - New `src-tauri/src/jikan/` module with dedicated client, types, and commands
+- **Route Parameter Changes** - Frontend routes now use `malId` URL parameter instead of `extensionId + animeId`
+  - `/watch?malId=...` replaces `/watch?extensionId=...&animeId=...`
+  - `/read?malId=...` replaces `/read?extensionId=...&animeId=...`
+  - Old routes are incompatible — bookmarks and saved links from v0.x will not work
+- **Database Schema Migration** - 8 new SQLite migrations (014–021)
+  - `discover_cache` table for offline-first browsing (migration 014)
+  - `id_mappings` table for MAL ID ↔ AllAnime ID bridge cache (migration 015)
+  - `migration_archive` table for auditing migrated entries from old format (migration 017)
+  - `discover_cache` TTL column for stale-while-revalidate caching (migration 018)
+  - `id_mappings` gains `match_score` column for confidence tracking (migration 019)
+  - Multiple cache-clearing migrations (016, 019, 020, 021) to re-resolve IDs as matching improved
+- **AllAnime Bridge System** - New `jikan/bridge.rs` maps MAL IDs to AllAnime IDs
+  - Direct GraphQL search against AllAnime API with inline queries (not persisted query hashes)
+  - Multi-signal title similarity scoring with length-ratio awareness
+  - Year and episode count validation to prevent wrong-show matches
+  - Results cached in SQLite `id_mappings` table with confidence scores
+  - Stale mapping recovery when video sources fail
+
+### Added
+- **Migration Screen** - In-app data migration UI when upgrading from v0.x
+  - Animated progress indicator with embla-carousel wheel gestures
+  - Archives old AllAnime-keyed data and re-maps to MAL IDs
+  - Shows migration status per entry (matched, archived, failed)
+- **Mobile Support & iOS Build Pipeline** - Full responsive mobile layout
+  - Bottom tab bar navigation for mobile devices
+  - Mobile-optimized hero section (`MobileHeroSection` component)
+  - Mobile notification center with slide-up sheet
+  - `useMobileLayout` hook for responsive breakpoint detection
+  - `platform.ts` utilities for platform-specific behavior
+  - iOS capabilities configuration and build workflow
+- **Onboarding Flow** - First-launch welcome experience
+  - Welcome page with feature highlights
+  - Setup wizard for initial configuration
+  - Step indicator and feature cards
+  - Themed in app's red and black color scheme
+- **Discover Caching** - Instant page loads with offline-first browsing
+  - Caches browse/search results in SQLite with configurable TTL (30min default)
+  - Stale-while-revalidate pattern: shows cached data immediately, refreshes in background
+  - Separate cache keys per category (trending, seasonal, top-rated)
+- **Media Details & Episode Caching** - Reduced API calls for previously viewed content
+  - Caches full media details and episode lists
+  - Background revalidation for stale entries
+- **Image Proxy System** - Reliable image loading for hotlink-protected sources
+  - `useProxiedImage` hook routes remote images through Rust backend
+  - `proxy_image_request` Tauri command adds required `Referer` headers
+  - Fixes manga page images that were blocked without proper headers
+- **Jikan Query Hook** (`useJikanQuery`) - React hook for Jikan API integration
+  - Handles loading states, errors, and caching
+  - Type-safe responses matching Jikan API structures
+- **BottomSheet UI Component** - Reusable slide-up sheet for mobile interactions
+- **Continue Reading Fix** - Reading progress properly persists when completing chapters
+
+### Changed
+- **VideoPlayer Refactored** - Improved state management and user experience
+  - Uses episode index for next episode logic instead of episode ID parsing
+  - Better error recovery and loading states
+- **Episode Sorting** - Enhanced sorting and retrieval logic for both anime and manga
+  - Handles mixed numeric/special episode numbering
+  - Proper ordering for decimal episodes (e.g., 12.5)
+- **AllAnime Extensions** - Updated to work with bridge-resolved IDs
+  - Manga extension refactored for Jikan-first metadata flow
+  - Lazy loading: AllAnime extension only loaded when needed for streaming
+- **Release Checker** - Updated for Jikan API compatibility
+- **Notifications** - Adapted for MAL-based media identification
+- **Settings Page** - Mobile-responsive layout improvements
+
+### Fixed
+- **Landing Page Version Badge** - Now dynamically reads version from package config
+- **ESLint Errors** - Resolved linting issues for CI pipeline
+- **Continue Reading Section** - Fixed chapter completion removing progress entries
+
 ## [0.1.17] - 2026-02-06
 
 ### Added
