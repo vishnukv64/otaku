@@ -10,8 +10,10 @@ import { useReaderStore } from '@/store/readerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { ReleaseCheckOverlay } from '@/components/notifications/ReleaseCheckOverlay'
 import { MigrationScreen } from '@/components/MigrationScreen'
+import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow'
 import { checkMigrationNeeded } from '@/utils/tauri-commands'
 import { Home, Search, ArrowLeft } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
 
 function NotFoundPage() {
   return (
@@ -105,9 +107,23 @@ function RootComponent() {
     return <MigrationScreen onComplete={() => setMigrationNeeded(false)} />
   }
 
-  // Still checking migration status — show nothing to avoid flash
-  if (migrationNeeded === null) {
+  // Still checking migration status or settings not ready — show nothing to avoid flash
+  const settingsInitialized = useSettingsStore((s) => s._initialized)
+  const onboardingCompleted = useSettingsStore((s) => s.onboardingCompleted)
+
+  if (migrationNeeded === null || !settingsInitialized) {
     return null
+  }
+
+  // Show onboarding for first-time users
+  if (!onboardingCompleted) {
+    return (
+      <OnboardingFlow
+        onComplete={() => {
+          useSettingsStore.getState().updateSettings({ onboardingCompleted: true })
+        }}
+      />
+    )
   }
 
   return (
@@ -116,7 +132,7 @@ function RootComponent() {
         <Outlet />
       </AppShell>
       <Toaster
-        position="bottom-right"
+        position={isMobile() ? "top-center" : "bottom-right"}
         toastOptions={{
           // Default styling for all toasts
           style: {

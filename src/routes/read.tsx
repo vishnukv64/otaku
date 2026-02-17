@@ -21,9 +21,13 @@ import {
   getReadingProgress,
   isChapterDownloaded,
   getDownloadedChapterImages,
+  resolveAllanimeId,
+  loadExtension,
+  searchManga,
   type MediaEntry,
   type EpisodeEntry,
 } from '@/utils/tauri-commands'
+import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { MangaDetails, ChapterImages } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
@@ -32,6 +36,7 @@ interface ReadSearch {
   extensionId: string
   mangaId: string
   chapterId?: string
+  malId?: string
 }
 
 export const Route = createFileRoute('/read')({
@@ -41,14 +46,21 @@ export const Route = createFileRoute('/read')({
       extensionId: (search.extensionId as string) || '',
       mangaId: (search.mangaId as string) || '',
       chapterId: search.chapterId as string | undefined,
+      malId: search.malId as string | undefined,
     }
   },
 })
 
 function ReadPage() {
   const navigate = useNavigate()
-  const { extensionId, mangaId, chapterId: initialChapterId } = Route.useSearch()
+  const { extensionId, mangaId, chapterId: initialChapterId, malId } = Route.useSearch()
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
+
+  // Use MAL ID for progress/library tracking when available, otherwise fall back to AllAnime ID
+  const trackingId = malId || mangaId
+
+  // Debug logging for ContinueReading navigation issues
+  console.log('[Read] Mounted with params:', { extensionId, mangaId, initialChapterId, malId, trackingId })
 
   const [details, setDetails] = useState<MangaDetails | null>(null)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
@@ -60,10 +72,97 @@ function ReadPage() {
   const [readChapters, setReadChapters] = useState<Set<string>>(new Set())
   const shownResumeToastRef = useRef<string | null>(null)
 
+  // AllAnime ID resolution for Jikan (MAL ID) entries
+  // When malId is provided and equals mangaId, we need to resolve the AllAnime ID
+  const needsResolution = malId !== undefined && malId === mangaId
+  const [resolvedMangaId, setResolvedMangaId] = useState<string | null>(needsResolution ? null : mangaId)
+  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
+
+  // Load AllAnime extension when resolution is needed
+  useEffect(() => {
+    if (!needsResolution) {
+      setResolvedMangaId(mangaId)
+      return
+    }
+
+    loadExtension(ALLANIME_MANGA_EXTENSION)
+      .then(meta => setAllanimeExtId(meta.id))
+      .catch(err => {
+        console.error('[Read] Failed to load AllAnime extension:', err)
+        setError('Failed to load manga reader extension')
+      })
+  }, [needsResolution, mangaId])
+
+  // Resolve AllAnime ID from MAL ID (bridge + fallback search)
+  useEffect(() => {
+    if (!needsResolution || !allanimeExtId) return
+
+    const resolve = async () => {
+      try {
+        // Try cached media details to get the title for bridge resolution
+        let title = ''
+        let englishTitle: string | undefined
+        let year: number | undefined
+
+        try {
+          const cached = await getCachedMediaDetails(malId!)
+          title = cached?.media.title || ''
+          englishTitle = cached?.media.english_name ?? undefined
+          year = cached?.media.year ?? undefined
+        } catch (cacheErr) {
+          console.warn('[Read] Cache lookup failed, will try bridge with MAL ID only:', cacheErr)
+        }
+
+        if (title) {
+          // Step 1: Bridge resolution (SQLite cache + GraphQL search)
+          const bridgeId = await resolveAllanimeId(title, 'manga', malId!, englishTitle, year)
+          if (bridgeId) {
+            console.log('[Read] Resolved AllAnime ID via bridge:', bridgeId)
+            setResolvedMangaId(bridgeId)
+            return
+          }
+
+          // Step 2: Fallback — search AllAnime directly
+          const searchResults = await searchManga(allanimeExtId, title, 1, true)
+          if (searchResults.results.length > 0) {
+            console.log('[Read] Resolved AllAnime ID via search:', searchResults.results[0].id)
+            setResolvedMangaId(searchResults.results[0].id)
+            return
+          }
+        }
+
+        // Step 3: If no cached title, try bridge with just the MAL ID (it may have a cached mapping)
+        if (!title) {
+          const bridgeId = await resolveAllanimeId('', 'manga', malId!, undefined, undefined)
+          if (bridgeId) {
+            console.log('[Read] Resolved AllAnime ID via bridge (no title):', bridgeId)
+            setResolvedMangaId(bridgeId)
+            return
+          }
+        }
+
+        console.error('[Read] Could not resolve AllAnime ID for MAL ID:', malId)
+        setError('Could not find this manga for reading. Try opening it from the manga page.')
+        setLoading(false)
+      } catch (err) {
+        console.error('[Read] AllAnime ID resolution failed:', err)
+        setError('Failed to resolve manga source for reading')
+        setLoading(false)
+      }
+    }
+
+    resolve()
+  }, [needsResolution, allanimeExtId, malId])
+
+  // Effective extension ID: use AllAnime extension for Jikan entries, otherwise the passed extensionId
+  const effectiveExtId = needsResolution ? (allanimeExtId || extensionId) : extensionId
+
   // Load manga details
   useEffect(() => {
-    if (!extensionId || !mangaId) {
-      setError('Missing extension ID or manga ID')
+    if (!effectiveExtId || !resolvedMangaId) {
+      if (!needsResolution && (!extensionId || !mangaId)) {
+        setError('Missing extension ID or manga ID')
+      }
       return
     }
 
@@ -72,7 +171,7 @@ function ReadPage() {
 
       // Try to load from API first
       try {
-        result = await getMangaDetails(extensionId, mangaId, !nsfwFilter)
+        result = await getMangaDetails(effectiveExtId, resolvedMangaId, !nsfwFilter)
         console.log('[Read] Manga details loaded:', result.title, '- Genres from API:', result.genres)
 
         // Check if content is NSFW and should be blocked
@@ -98,8 +197,8 @@ function ReadPage() {
           console.log('[Read] Saving media with genres:', genresJson)
 
           const mediaEntry: MediaEntry = {
-            id: result.id,
-            extension_id: extensionId,
+            id: trackingId,
+            extension_id: malId ? 'jikan' : extensionId,
             title: result.title,
             english_name: result.english_name,
             native_name: result.native_name,
@@ -129,8 +228,8 @@ function ReadPage() {
           if (result.chapters.length > 0) {
             const chapterEntries: EpisodeEntry[] = result.chapters.map(ch => ({
               id: ch.id,
-              media_id: result!.id,
-              extension_id: extensionId,
+              media_id: trackingId,
+              extension_id: malId ? 'jikan' : extensionId,
               number: ch.number,
               title: ch.title,
               description: undefined,
@@ -138,7 +237,7 @@ function ReadPage() {
               aired_date: undefined,
               duration: undefined,
             }))
-            await saveEpisodes(result.id, extensionId, chapterEntries)
+            await saveEpisodes(trackingId, malId ? 'jikan' : extensionId, chapterEntries)
           }
         } catch (saveErr) {
           console.error('Failed to save media details:', saveErr)
@@ -148,7 +247,7 @@ function ReadPage() {
 
         // API failed - try to load from cache
         try {
-          const cached = await getCachedMediaDetails(mangaId)
+          const cached = await getCachedMediaDetails(trackingId)
           if (cached && cached.episodes.length > 0) {
             // Convert cached data to MangaDetails format
             result = {
@@ -181,19 +280,32 @@ function ReadPage() {
       // If we have no data from either source, show error
       if (!result) {
         setError('Failed to load manga details - no cached data available')
+        setLoading(false)
         return
       }
 
       setDetails(result)
 
-      // Set initial chapter if not provided
+      // Set initial chapter or validate the provided chapter ID
       if (!initialChapterId && result.chapters.length > 0) {
         setCurrentChapterId(result.chapters[0].id)
+      } else if (initialChapterId && result.chapters.length > 0) {
+        // Validate that the saved chapter ID exists in the loaded chapters
+        const chapterExists = result.chapters.some(ch => ch.id === initialChapterId)
+        if (!chapterExists) {
+          // Chapter ID mismatch (AllAnime may have changed IDs, or manga was re-imported)
+          // Try to find a chapter with matching number from reading progress
+          console.warn(`[Read] Chapter ID "${initialChapterId}" not found in loaded chapters, falling back`)
+          setCurrentChapterId(result.chapters[0].id)
+        }
+      } else if (result.chapters.length === 0) {
+        setError('This manga has no available chapters')
+        setLoading(false)
       }
     }
 
     loadDetails()
-  }, [extensionId, mangaId, initialChapterId, nsfwFilter])
+  }, [effectiveExtId, resolvedMangaId, trackingId, initialChapterId, nsfwFilter])
 
   // Get current chapter info
   const currentChapter = details?.chapters.find((ch) => ch.id === currentChapterId)
@@ -201,7 +313,7 @@ function ReadPage() {
 
   // Load chapter images and reading progress
   useEffect(() => {
-    if (!extensionId || !currentChapterId || !currentChapter) return
+    if (!effectiveExtId || !resolvedMangaId || !currentChapterId || !currentChapter) return
 
     const loadChapterData = async () => {
       setLoading(true)
@@ -233,11 +345,11 @@ function ReadPage() {
         }
 
         // Step 2: Check if chapter is downloaded first
-        const downloaded = await isChapterDownloaded(mangaId, currentChapterId)
+        const downloaded = await isChapterDownloaded(trackingId, currentChapterId)
 
         if (downloaded) {
           // Load from local storage
-          const localPaths = await getDownloadedChapterImages(mangaId, currentChapterId)
+          const localPaths = await getDownloadedChapterImages(trackingId, currentChapterId)
 
           if (localPaths.length > 0) {
             // Convert local file paths to asset URLs
@@ -258,7 +370,7 @@ function ReadPage() {
         }
 
         // Step 3: Load chapter images from network
-        const images = await getChapterImages(extensionId, currentChapterId)
+        const images = await getChapterImages(effectiveExtId, currentChapterId)
         setChapterImages(images)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load chapter images')
@@ -268,7 +380,7 @@ function ReadPage() {
     }
 
     loadChapterData()
-  }, [extensionId, mangaId, currentChapterId, currentChapter])
+  }, [effectiveExtId, resolvedMangaId, trackingId, currentChapterId, currentChapter])
 
   const handleNextChapter = () => {
     if (!details || currentChapterIndex === -1) return
@@ -342,7 +454,7 @@ function ReadPage() {
         {!loading && !error && !isNsfwBlocked && chapterImages && chapterImages.images.length > 0 && (
           <MangaReader
             images={chapterImages.images}
-            mangaId={mangaId}
+            mangaId={trackingId}
             chapterId={currentChapterId}
             _mangaTitle={details?.title}
             _chapterTitle={chapterImages.title}

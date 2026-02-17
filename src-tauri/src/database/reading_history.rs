@@ -235,7 +235,8 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for ReadingHistory {
             id: row.try_get("id")?,
             media_id: row.try_get("media_id")?,
             chapter_id: row.try_get("chapter_id")?,
-            chapter_number: row.try_get("chapter_number")?,
+            chapter_number: row.try_get::<f64, _>("chapter_number")
+                .or_else(|_| row.try_get::<i64, _>("chapter_number").map(|n| n as f64))?,
             current_page: row.try_get("current_page")?,
             total_pages: row.try_get("total_pages")?,
             completed: row.try_get("completed")?,

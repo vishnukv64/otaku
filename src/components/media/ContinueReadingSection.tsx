@@ -88,12 +88,15 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
   }
 
   const handleContinueReading = (entry: ContinueReadingEntry) => {
+    const isJikanEntry = entry.media.extension_id === 'jikan'
+
     navigate({
       to: '/read',
       search: {
         extensionId,
         mangaId: entry.media.id,
         chapterId: entry.chapter_id,
+        ...(isJikanEntry ? { malId: entry.media.id } : {}),
       },
     })
   }
@@ -216,25 +219,39 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
 
                       {/* Progress badge - inside image at bottom */}
                       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent pt-6 pb-2 px-2">
-                        <div className="flex justify-between items-center text-xs text-white">
-                          <span className="font-semibold">Ch. {entry.chapter_number}</span>
-                          <span className="text-white/70">{pageProgress}</span>
-                        </div>
-                        {entry.total_pages && (
-                          <div className="mt-1.5 h-1 bg-white/20 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all"
-                              style={{ width: `${(entry.current_page / entry.total_pages) * 100}%` }}
-                            />
-                          </div>
+                        {entry.completed ? (
+                          <>
+                            <div className="flex justify-between items-center text-xs text-white">
+                              <span className="font-semibold">Next: Ch. {entry.chapter_number + 1}</span>
+                              <span className="text-emerald-400 font-medium">Completed</span>
+                            </div>
+                            <div className="mt-1.5 h-1 bg-white/20 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500 rounded-full w-full" />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex justify-between items-center text-xs text-white">
+                              <span className="font-semibold">Ch. {entry.chapter_number}</span>
+                              <span className="text-white/70">{pageProgress}</span>
+                            </div>
+                            {entry.total_pages && (
+                              <div className="mt-1.5 h-1 bg-white/20 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all"
+                                  style={{ width: `${(entry.current_page / entry.total_pages) * 100}%` }}
+                                />
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
 
-                      {/* Resume overlay on hover */}
+                      {/* Resume/Next overlay on hover */}
                       <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity bg-black/50">
                         <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent-primary)] rounded-lg">
                           <BookOpen className="w-5 h-5" />
-                          <span className="text-sm font-bold">RESUME</span>
+                          <span className="text-sm font-bold">{entry.completed ? 'NEXT CHAPTER' : 'RESUME'}</span>
                         </div>
                       </div>
                     </div>

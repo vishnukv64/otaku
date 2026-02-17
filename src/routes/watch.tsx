@@ -8,6 +8,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
+import { useMobileLayout } from '@/hooks/useMobileLayout'
 import { jikanAnimeDetails, loadExtension, resolveAllanimeId, clearAllanimeMapping, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
@@ -175,7 +176,7 @@ function WatchPage() {
       try {
         const metadata = await loadExtension(ALLANIME_EXTENSION)
         setAllanimeExtId(metadata.id)
-        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year)
+        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year, result.title_synonyms)
         if (resolvedId) {
           setAllanimeId(resolvedId)
         } else {
@@ -339,7 +340,7 @@ function WatchPage() {
           if (!hasValidSources && malId && details) {
             console.warn('[Watch] No valid sources - clearing stale mapping and re-resolving')
             await clearAllanimeMapping(malId)
-            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year)
+            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year, details.title_synonyms)
             if (freshId && freshId !== allanimeId) {
               setAllanimeId(freshId)
               const freshEpisodeId = `${freshId}::${currentEpisode.number}`
@@ -390,11 +391,106 @@ function WatchPage() {
     navigate({ to: '/anime' })
   }
 
+  const { isMobile, isPortrait } = useMobileLayout()
+  const mobilePortrait = isMobile && isPortrait
+
+  // Mobile portrait: video top + episode list below (scrollable page)
+  if (mobilePortrait) {
+    return (
+      <div className="min-h-screen bg-black" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+        {/* Back header */}
+        <div className="flex items-center px-3 py-2">
+          <button
+            onClick={handleGoBack}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-white/80 active:text-white text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Back
+          </button>
+        </div>
+
+        {/* Video area — 16:9 */}
+        <div className="w-full aspect-video bg-black">
+          {loading && (
+            <div className="w-full h-full flex items-center justify-center">
+              <Loader2 className="w-10 h-10 animate-spin text-[var(--color-accent-primary)]" />
+            </div>
+          )}
+          {error && (
+            <div className="w-full h-full flex flex-col items-center justify-center text-white p-4">
+              <p className="text-base font-semibold mb-1">Error Loading Video</p>
+              <p className="text-sm text-[var(--color-text-secondary)]">{error}</p>
+            </div>
+          )}
+          {!loading && !error && sources && sources.sources.length > 0 && (
+            <VideoPlayer
+              sources={sources.sources}
+              mediaId={malId}
+              episodeId={currentEpisodeId}
+              episodeTitle={currentEpisode?.title}
+              currentEpisode={currentEpisode?.number}
+              totalEpisodes={details?.episodes.length}
+              episodes={details?.episodes}
+              onEpisodeSelect={handleEpisodeSelect}
+              onNextEpisode={handleNextEpisode}
+              onPreviousEpisode={handlePreviousEpisode}
+              initialTime={resumeTime}
+              autoPlay
+            />
+          )}
+          {!loading && !error && sources && sources.sources.length === 0 && (
+            <div className="w-full h-full flex flex-col items-center justify-center text-white p-4">
+              <p className="text-base font-semibold mb-1">No Video Sources</p>
+              <p className="text-sm text-[var(--color-text-secondary)]">No streaming sources available.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Episode info + list below video */}
+        <div className="p-4">
+          {details && (
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-white">{details.title}</h2>
+              {currentEpisode && (
+                <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                  Episode {currentEpisode.number}{currentEpisode.title ? ` - ${currentEpisode.title}` : ''}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Episode grid */}
+          {details?.episodes && details.episodes.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">Episodes</h3>
+              <div className="grid grid-cols-4 gap-2">
+                {details.episodes.map((ep) => (
+                  <button
+                    key={ep.id}
+                    onClick={() => handleEpisodeSelect(ep.id)}
+                    className={`py-2.5 rounded text-sm font-medium transition-colors ${
+                      ep.id === currentEpisodeId
+                        ? 'bg-[var(--color-accent-primary)] text-white'
+                        : 'bg-white/10 text-[var(--color-text-secondary)] active:bg-white/20'
+                    }`}
+                  >
+                    {ep.number}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Desktop / landscape fullscreen layout
   return (
-    <div className="fixed inset-0 bg-black z-50">
-      {/* Player Container */}
+    <div className="fixed inset-0 bg-black z-50" style={{ padding: 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)' }}>
       <div className="w-full h-full">
-        {/* Video Player */}
         <div className="w-full h-full">
           {loading && (
             <div className="w-full h-full flex items-center justify-center bg-black">

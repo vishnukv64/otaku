@@ -1,29 +1,26 @@
 /**
  * Manga Route - Manga Browser Page
  *
- * Browse, search, and discover manga with genre filtering
+ * Browse, search, and discover manga with Jikan API-powered carousels.
+ * Uses SWR caching via useJikanQuery for instant page loads.
  */
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Loader2, AlertCircle, X, BookOpen, Sparkles } from 'lucide-react'
+import { Search, Loader2, X, BookOpen } from 'lucide-react'
 import {
   loadExtension,
-  discoverManga,
-  searchManga,
-  getContinueReadingWithDetails,
-  streamDiscoverManga,
-  onMangaDiscoverResults,
-  getDiscoverCache,
-  saveDiscoverCache,
-  type DiscoverResultsEvent,
+  jikanTopManga,
+  jikanSearchManga,
 } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
+import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
@@ -40,281 +37,78 @@ function MangaScreen() {
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const loadMoreRef = useRef<HTMLDivElement>(null)
-  const [extensionId, setExtensionId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+
+  const [allanimeExtensionId, setAllanimeExtensionId] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [selectedManga, setSelectedManga] = useState<SearchResult | null>(null)
-  const [recommendations, setRecommendations] = useState<SearchResult[]>([])
-  const [recommendationsLoading, setRecommendationsLoading] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [hasNextPage, setHasNextPage] = useState(true)
-  const [userReadingGenres, setUserReadingGenres] = useState<string[]>([])
-  const [hasReadingHistory, setHasReadingHistory] = useState(false)
 
-  // Grid density class mapping (extended for 4K displays)
-  // Added p-4 -m-4 to allow cards to scale on hover without being clipped
+  // Grid density class mapping for search results grid
   const gridClasses = {
     compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-x-2 gap-y-6 p-4 -m-4',
     comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-x-4 gap-y-8 p-4 -m-4',
     spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-x-6 gap-y-10 p-4 -m-4',
   }[gridDensity]
 
-  // Load manga extension on mount
+  // Load AllAnime extension lazily (for ContinueReadingSection + MangaDetailModal)
   useEffect(() => {
-    const initExtension = async () => {
-      try {
-        const metadata = await loadExtension(ALLANIME_MANGA_EXTENSION)
-        setExtensionId(metadata.id)
-        setLoading(false)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load manga extension')
-        setLoading(false)
-      }
-    }
-
-    initExtension()
+    loadExtension(ALLANIME_MANGA_EXTENSION)
+      .then(metadata => setAllanimeExtensionId(metadata.id))
+      .catch(() => {})
   }, [])
 
-  // Load user's reading genres for personalized recommendations
+  // SWR-cached data for each section (nsfwFilter in key for filter isolation)
+  const trending = useJikanQuery({
+    cacheKey: `manga:trending:sfw=${nsfwFilter}`,
+    fetcher: () => jikanTopManga(1, undefined, undefined, nsfwFilter),
+    ttlSeconds: CACHE_TTL.TOP_RATED,
+    mediaType: 'manga',
+  })
+
+  const popular = useJikanQuery({
+    cacheKey: `manga:popular:sfw=${nsfwFilter}`,
+    fetcher: () => jikanTopManga(1, undefined, 'bypopularity', nsfwFilter),
+    ttlSeconds: CACHE_TTL.POPULAR,
+    mediaType: 'manga',
+  })
+
+  const favorite = useJikanQuery({
+    cacheKey: `manga:favorite:sfw=${nsfwFilter}`,
+    fetcher: () => jikanTopManga(1, undefined, 'favorite', nsfwFilter),
+    ttlSeconds: CACHE_TTL.POPULAR,
+    mediaType: 'manga',
+  })
+
+  const publishing = useJikanQuery({
+    cacheKey: `manga:publishing:sfw=${nsfwFilter}`,
+    fetcher: () => jikanTopManga(1, undefined, 'publishing', nsfwFilter),
+    ttlSeconds: CACHE_TTL.AIRING,
+    mediaType: 'manga',
+  })
+
+  // Debounced instant search via Jikan API
   useEffect(() => {
-    const loadUserGenres = async () => {
-      try {
-        const continueReading = await getContinueReadingWithDetails(20)
-        console.log('[Manga] Continue reading entries:', continueReading.length)
-
-        if (continueReading.length > 0) {
-          setHasReadingHistory(true)
-
-          // Count genre occurrences from all reading history
-          const genreCounts = new Map<string, number>()
-          continueReading.forEach(entry => {
-            console.log('[Manga] Entry genres for', entry.media.title, ':', entry.media.genres)
-            if (entry.media.genres) {
-              try {
-                const genres = JSON.parse(entry.media.genres)
-                if (Array.isArray(genres)) {
-                  // Count each genre occurrence (use original case from API)
-                  genres.forEach((g: string) => {
-                    genreCounts.set(g, (genreCounts.get(g) || 0) + 1)
-                  })
-                }
-              } catch {
-                // Genres might be a comma-separated string
-                entry.media.genres.split(',').forEach(g => {
-                  const genre = g.trim()
-                  genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1)
-                })
-              }
-            }
-          })
-
-          // Sort by count (descending) and get top 4 genres
-          const sortedGenres = Array.from(genreCounts.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 4)
-            .map(([genre]) => genre)
-
-          console.log('[Manga] Top genres from reading history:', sortedGenres, 'counts:', Object.fromEntries(genreCounts))
-          setUserReadingGenres(sortedGenres)
-        }
-      } catch (err) {
-        console.error('Failed to load user reading genres:', err)
-      }
-    }
-
-    loadUserGenres()
-  }, [])
-
-  // Track seen IDs to avoid duplicates across SSE events
-  const seenIdsRef = useRef<Set<string>>(new Set())
-
-  // Cache key ref for browse results (updated when genres/filters change)
-  const browseCacheKeyRef = useRef('')
-
-  // Handle SSE discover results
-  const handleDiscoverResults = useCallback((event: DiscoverResultsEvent) => {
-    // Deduplicate results using ref to track seen IDs
-    const newUniqueResults = event.results.filter(item => {
-      if (seenIdsRef.current.has(item.id)) return false
-      seenIdsRef.current.add(item.id)
-      return true
-    })
-
-    if (newUniqueResults.length > 0) {
-      setRecommendations(prev => [...prev, ...newUniqueResults])
-    }
-
-    // Update pagination state
-    setCurrentPage(event.page)
-    setHasNextPage(event.has_next_page)
-
-    // Save to cache when last page is received
-    if (event.is_last) {
-      setRecommendationsLoading(false)
-      // Save all accumulated results to cache
-      setRecommendations(current => {
-        if (browseCacheKeyRef.current && current.length > 0) {
-          saveDiscoverCache(browseCacheKeyRef.current, JSON.stringify(current), 'manga').catch(() => {})
-        }
-        return current
-      })
-    }
-  }, [])
-
-  // Load recommendations via SSE (streams 3 pages progressively, API first with cache fallback)
-  useEffect(() => {
-    if (!extensionId) return
-
-    const cacheKey = `manga:browse:score:${userReadingGenres.join(',')}`
-    browseCacheKeyRef.current = cacheKey
-
-    // Reset state for new stream
-    setRecommendationsLoading(true)
-    setRecommendations([])
-    seenIdsRef.current.clear()
-    setCurrentPage(1)
-    setHasNextPage(true)
-
-    // Track mounted state to handle async cleanup properly
-    let isMounted = true
-    let unsubscribe: (() => void) | null = null
-
-    const startStreaming = async () => {
-      try {
-        // Try API first - set up listener
-        const unsub = await onMangaDiscoverResults((event) => {
-          // Only process events if still mounted
-          if (isMounted) {
-            handleDiscoverResults(event)
-          }
-        })
-
-        // Store unsubscribe if still mounted, otherwise cleanup immediately
-        if (isMounted) {
-          unsubscribe = unsub
-        } else {
-          unsub()
-          return
-        }
-
-        // Start streaming (fetches 3 pages progressively)
-        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
-        console.log('[Manga] Starting SSE streaming with genres:', userReadingGenres)
-        await streamDiscoverManga(extensionId, 'score', userReadingGenres, !nsfwFilter, 3)
-      } catch (err) {
-        console.error('Failed to stream manga, trying cache:', err)
-
-        // SSE failed - try cache fallback
-        if (isMounted) {
-          try {
-            const cached = await getDiscoverCache(cacheKey)
-            if (cached) {
-              const cachedResults: SearchResult[] = JSON.parse(cached.data)
-              const uniqueCached = cachedResults.filter(item => {
-                if (seenIdsRef.current.has(item.id)) return false
-                seenIdsRef.current.add(item.id)
-                return true
-              })
-              if (uniqueCached.length > 0) {
-                setRecommendations(uniqueCached)
-              }
-            }
-          } catch {
-            // Cache also failed
-          }
-          setRecommendationsLoading(false)
-        }
-      }
-    }
-
-    startStreaming()
-
-    return () => {
-      isMounted = false
-      unsubscribe?.()
-    }
-    // Note: handleDiscoverResults is stable (empty deps) and used inside closure, so not needed in deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensionId, userReadingGenres, nsfwFilter])
-
-  // Load more recommendations when scrolling to bottom
-  // SSE loads pages 1-3 initially, so infinite scroll starts from page 4
-  const loadMoreRecommendations = useCallback(async () => {
-    if (!extensionId || loadingMore || !hasNextPage || searchInput) return
-
-    setLoadingMore(true)
-    try {
-      // Start from page after SSE (which loads pages 1-3)
-      const nextPage = Math.max(currentPage + 1, 4)
-      const results = await discoverManga(extensionId, nextPage, 'score', userReadingGenres, !nsfwFilter)
-
-      // Deduplicate using the seenIds ref
-      const newResults = results.results.filter(item => {
-        if (seenIdsRef.current.has(item.id)) return false
-        seenIdsRef.current.add(item.id)
-        return true
-      })
-
-      setRecommendations(prev => [...prev, ...newResults])
-      setCurrentPage(nextPage)
-      setHasNextPage(results.has_next_page)
-    } catch (err) {
-      console.error('Failed to load more manga:', err)
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [extensionId, currentPage, hasNextPage, loadingMore, searchInput, userReadingGenres, nsfwFilter])
-
-  // Intersection observer for infinite scroll
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasNextPage && !loadingMore && !recommendationsLoading) {
-          loadMoreRecommendations()
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current)
-    }
-
-    return () => observer.disconnect()
-  }, [hasNextPage, loadingMore, recommendationsLoading, loadMoreRecommendations])
-
-  // Debounced instant search
-  useEffect(() => {
-    if (!extensionId) return
-
     if (!searchInput.trim()) {
       setSearchResults([])
       return
     }
 
     setSearchLoading(true)
-    // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
     const timer = setTimeout(async () => {
       try {
-        const results = await searchManga(extensionId, searchInput, 1, !nsfwFilter)
-        // Also filter on frontend in case API doesn't filter properly
-        // Filter NSFW using both genres and title keywords
+        const results = await jikanSearchManga(searchInput, 1, nsfwFilter)
         const filtered = filterNsfwContent(results.results, (item) => item.genres, nsfwFilter, (item) => item.title)
         setSearchResults(filtered)
       } catch (err) {
-        console.error('Search failed:', err)
+        console.error('Manga search failed:', err)
       } finally {
         setSearchLoading(false)
       }
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [searchInput, extensionId, nsfwFilter])
+  }, [searchInput, nsfwFilter])
 
   // Clear search
   const handleClearSearch = useCallback(() => {
@@ -322,6 +116,10 @@ function MangaScreen() {
     setSearchResults([])
     searchInputRef.current?.focus()
   }, [])
+
+  const handleMediaClick = (item: SearchResult) => {
+    setSelectedManga(item)
+  }
 
   // Keyboard shortcuts
   useKeyboardShortcut(
@@ -334,173 +132,143 @@ function MangaScreen() {
     []
   )
 
-  if (loading) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-[var(--color-accent-primary)] mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Extension Error</h2>
-          <p className="text-[var(--color-text-secondary)]">{error}</p>
-        </div>
-      </div>
-    )
-  }
+  // Carousel sections config
+  const carousels = [
+    { title: 'Most Popular', hook: popular },
+    { title: 'Recommended', hook: favorite },
+    { title: 'Publishing Now', hook: publishing },
+  ]
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
-      {/* Search Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-6">
-          <BookOpen className="w-8 h-8 text-[var(--color-accent-primary)]" />
-          <h1 className="text-3xl font-bold">Manga Browser</h1>
-        </div>
+    <div className="min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
+      <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto overflow-visible">
+        {/* Search Header */}
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-6">
+            <BookOpen className="w-8 h-8 text-[var(--color-accent-primary)]" />
+            <h1 className="text-3xl font-bold">Manga</h1>
+          </div>
 
-        {/* Instant Search */}
-        <div className="max-w-2xl">
-          <div className="relative">
-            {searchLoading ? (
-              <Loader2
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-accent-primary)] animate-spin"
-                size={20}
+          {/* Instant Search */}
+          <div className="max-w-2xl">
+            <div className="relative">
+              {searchLoading ? (
+                <Loader2
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-accent-primary)] animate-spin"
+                  size={20}
+                />
+              ) : (
+                <Search
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
+                  size={20}
+                />
+              )}
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search for manga..."
+                className="w-full pl-12 pr-12 py-3 bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg text-white placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:border-transparent"
               />
-            ) : (
-              <Search
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
-                size={20}
-              />
-            )}
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search for manga..."
-              className="w-full pl-12 pr-12 py-3 bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg text-white placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:border-transparent"
-            />
-            {searchInput && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-                aria-label="Clear search"
-              >
-                <X size={20} />
-              </button>
+              {searchInput && (
+                <button
+                  onClick={handleClearSearch}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                  aria-label="Clear search"
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+            {searchInput && !searchLoading && (
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Showing results as you type
+              </p>
             )}
           </div>
-          {searchInput && !searchLoading && (
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Showing results as you type
-            </p>
-          )}
         </div>
 
+        {/* Search Results (hides carousels when active) */}
+        {searchInput ? (
+          <div>
+            {searchResults.length > 0 && (
+              <div className="overflow-visible">
+                <h2 className="text-xl font-semibold mb-4">
+                  Search Results ({searchResults.length} results)
+                </h2>
+                <div className={`grid ${gridClasses} overflow-visible`}>
+                  {searchResults.map((item) => (
+                    <MediaCard
+                      key={item.id}
+                      media={item}
+                      onClick={() => handleMediaClick(item)}
+                      status={getStatus(item.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!searchLoading && searchInput && searchResults.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-[var(--color-text-secondary)]">
+                  No manga found for "{searchInput}"
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Continue Reading Section */}
+            {allanimeExtensionId && (
+              <ContinueReadingSection extensionId={allanimeExtensionId} />
+            )}
+
+            {/* Top 10 Manga */}
+            {trending.data.length >= 10 && (
+              <MediaCarousel
+                title="Top 10 Manga"
+                items={trending.data.slice(0, 10)}
+                loading={false}
+                onItemClick={handleMediaClick}
+                showRank
+              />
+            )}
+            {/* Show loading state for Top 10 if still loading */}
+            {trending.loading && (
+              <MediaCarousel
+                title="Top 10 Manga"
+                items={[]}
+                loading={true}
+                onItemClick={handleMediaClick}
+                showRank
+              />
+            )}
+
+            {/* Content Carousels */}
+            <div className="space-y-8 overflow-visible">
+              {carousels.map(({ title, hook }) => (
+                <MediaCarousel
+                  key={title}
+                  title={title}
+                  items={hook.data}
+                  loading={hook.loading}
+                  onItemClick={handleMediaClick}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Continue Reading Section - Below filters */}
-      {extensionId && !searchInput && (
-        <ContinueReadingSection extensionId={extensionId} />
-      )}
-
-      {/* Search Results */}
-      {searchInput && (
-        <div>
-          {searchResults.length > 0 && (
-            <div className="overflow-visible">
-              <h2 className="text-xl font-semibold mb-4">
-                Search Results ({searchResults.length} results)
-              </h2>
-              <div className={`grid ${gridClasses} overflow-visible`}>
-                {searchResults.map((item) => (
-                  <MediaCard
-                    key={item.id}
-                    media={item}
-                    onClick={() => setSelectedManga(item)}
-                    status={getStatus(item.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {!searchLoading && searchInput && searchResults.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-[var(--color-text-secondary)]">
-                No manga found for "{searchInput}"
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Recommendations / Browse */}
-      {!searchInput && (
-        <div>
-          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-            {hasReadingHistory && userReadingGenres.length > 0 ? (
-              <>
-                <Sparkles className="w-5 h-5 text-[var(--color-accent-primary)]" />
-                Recommended for You
-              </>
-            ) : (
-              'Popular Manga'
-            )}
-          </h2>
-
-          {recommendationsLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-            </div>
-          ) : recommendations.length > 0 ? (
-            <div className="overflow-visible">
-              <div className={`grid ${gridClasses} overflow-visible`}>
-                {recommendations.map((item) => (
-                  <MediaCard
-                    key={item.id}
-                    media={item}
-                    onClick={() => setSelectedManga(item)}
-                    status={getStatus(item.id)}
-                  />
-                ))}
-              </div>
-
-              {/* Infinite scroll sentinel */}
-              <div ref={loadMoreRef} className="py-8 flex items-center justify-center">
-                {loadingMore && (
-                  <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
-                )}
-                {!hasNextPage && recommendations.length > 0 && (
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    You've reached the end
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <p className="text-[var(--color-text-secondary)]">
-                No manga found
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Manga Detail Modal */}
-      {selectedManga && extensionId && (
+      {selectedManga && (
         <MangaDetailModal
           manga={selectedManga}
-          extensionId={extensionId}
+          extensionId={allanimeExtensionId || ''}
           onClose={() => {
             setSelectedManga(null)
-            // Refresh status to update badges if user changed library/favorite status
             refreshStatus()
           }}
         />

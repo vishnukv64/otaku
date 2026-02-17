@@ -1,7 +1,11 @@
 /**
  * DownloadManager Component
  *
- * Modal displaying all active and completed downloads with progress tracking
+ * Modal displaying all active and completed downloads with progress tracking.
+ *
+ * Exports:
+ * - DownloadPageContent: Standalone content (used by /downloads route on mobile)
+ * - DownloadManager: Modal shell wrapping DownloadPageContent (used by TopNav on desktop)
  */
 
 import { useEffect, useState } from 'react'
@@ -12,6 +16,7 @@ import { ask } from '@tauri-apps/plugin-dialog'
 import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, clearCancelledDownloads, getDownloadsDirectory, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { useSettingsStore } from '@/store/settingsStore'
+import { isMobile } from '@/utils/platform'
 
 // Extension ID for AllAnime - used for navigation to watch page
 
@@ -21,6 +26,10 @@ const CHAPTER_DOWNLOAD_PROGRESS_EVENT = 'chapter-download-progress'
 interface DownloadManagerProps {
   isOpen: boolean
   onClose: () => void
+}
+
+interface DownloadPageContentProps {
+  onNavigateAway?: () => void
 }
 
 interface GroupedDownloads {
@@ -37,7 +46,11 @@ interface GroupedChapterDownloads {
 
 type MediaType = 'anime' | 'manga'
 
-export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
+/**
+ * Standalone download content — no modal wrapper, no backdrop, no fixed positioning.
+ * Used directly by the /downloads route and mounted inside DownloadManager's modal shell.
+ */
+export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps) {
   const [downloads, setDownloads] = useState<DownloadProgress[]>([])
   const [chapterDownloads, setChapterDownloads] = useState<ChapterDownloadWithTitle[]>([])
   const [loading, setLoading] = useState(false)
@@ -52,8 +65,6 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
 
   // Load static data once on mount
   useEffect(() => {
-    if (!isOpen) return
-
     const loadStaticData = async () => {
       try {
         const [storage, defaultPath] = await Promise.all([
@@ -69,29 +80,10 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     }
 
     loadStaticData()
-  }, [isOpen, customDownloadLocation])
-
-  // Handle Escape key to close modal
-  useEffect(() => {
-    if (!isOpen) return
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        onClose()
-      }
-    }
-
-    // Use capture phase to intercept before other handlers
-    document.addEventListener('keydown', handleEscape, true)
-    return () => document.removeEventListener('keydown', handleEscape, true)
-  }, [isOpen, onClose])
+  }, [customDownloadLocation])
 
   // Load downloads and listen for real-time events
   useEffect(() => {
-    if (!isOpen) return
-
     let isMounted = true
     let unlisten: UnlistenFn | null = null
     const downloadsMap = new Map<string, DownloadProgress>()
@@ -183,7 +175,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
         unlistenChapters()
       }
     }
-  }, [isOpen])
+  }, [])
 
   const handleCancel = async (downloadId: string) => {
     const download = downloads.find(d => d.id === downloadId)
@@ -430,7 +422,6 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
   }
 
   const handlePlayEpisode = (mediaId: string, episodeId: string) => {
-    // Close the download manager and navigate to watch page with specific episode
     navigate({
       to: '/watch',
       search: {
@@ -438,7 +429,7 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
         episodeId: episodeId,
       },
     })
-    onClose()
+    onNavigateAway?.()
   }
 
   // Group downloads by anime
@@ -501,6 +492,306 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }
 
+  return (
+    <>
+      {/* Header */}
+      <div className="p-3 sm:p-6 border-b border-white/10">
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <Download className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--color-accent-primary)]" />
+            <h2 className="text-lg sm:text-2xl font-bold">Downloads</h2>
+          </div>
+        </div>
+
+        {/* Media Type Toggle */}
+        <div className="flex items-center gap-1 sm:gap-2 mb-3 sm:mb-4 bg-white/5 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => { setMediaType('anime'); setActiveTab('all') }}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${
+              mediaType === 'anime'
+                ? 'bg-[var(--color-accent-primary)] text-white'
+                : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            <Tv size={14} className="sm:w-4 sm:h-4" />
+            Anime ({downloads.length})
+          </button>
+          <button
+            onClick={() => { setMediaType('manga'); setActiveTab('all') }}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${
+              mediaType === 'manga'
+                ? 'bg-[var(--color-accent-primary)] text-white'
+                : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            <BookOpen size={14} className="sm:w-4 sm:h-4" />
+            Manga ({chapterDownloads.length})
+          </button>
+        </div>
+
+        {/* Storage info and path */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+              <HardDrive size={16} />
+              <span>Storage: {formatBytes(totalStorage)}</span>
+            </div>
+            <span className="text-[var(--color-text-muted)]">•</span>
+            <span className="text-[var(--color-text-secondary)]">
+              {mediaType === 'anime' ? downloads.length : chapterDownloads.length} {mediaType === 'anime' ? 'episode' : 'chapter'}(s)
+            </span>
+          </div>
+
+          {/* Downloads path (desktop only — no accessible file path on Android) */}
+          {!isMobile() && downloadsPath && (
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] bg-white/5 rounded px-3 py-2">
+              <Folder size={14} />
+              <span className="flex-1 truncate" title={downloadsPath}>
+                {downloadsPath}
+              </span>
+              <button
+                onClick={handleCopyPath}
+                className="flex-shrink-0 hover:text-[var(--color-text-secondary)] transition-colors"
+                title="Copy path"
+              >
+                <Copy size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="mt-4 flex items-center justify-end gap-2">
+          {!isMobile() && (
+            <button
+              onClick={handleOpenFolder}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
+            >
+              <Folder size={14} />
+              Open Folder
+            </button>
+          )}
+
+            {downloads.filter(d => d.status === 'completed').length > 0 && (
+            <button
+              onClick={handleClearCompleted}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
+            >
+              Clear Completed
+            </button>
+          )}
+
+          {downloads.filter(d => d.status === 'failed').length > 0 && (
+            <button
+              onClick={handleClearFailed}
+              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
+            >
+              Clear Failed
+            </button>
+          )}
+
+          {downloads.filter(d => d.status === 'cancelled').length > 0 && (
+            <button
+              onClick={handleClearCancelled}
+              className="flex items-center gap-2 px-3 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 rounded-lg transition-colors text-sm font-medium"
+            >
+              Clear Cancelled
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      {currentGrouped.length > 0 && (
+        <div className="border-b border-white/10 px-3 sm:px-6">
+          <div className="flex gap-1 overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${
+                activeTab === 'all'
+                  ? 'text-[var(--color-accent-primary)] border-b-2 border-[var(--color-accent-primary)]'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              All ({currentDownloads.length})
+            </button>
+            {currentGrouped.map((group) => (
+              <button
+                key={group.mediaId}
+                onClick={() => setActiveTab(group.mediaId)}
+                className={`px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === group.mediaId
+                    ? 'text-[var(--color-accent-primary)] border-b-2 border-[var(--color-accent-primary)]'
+                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                }`}
+              >
+                {group.mediaTitle} ({group.downloads.length})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Download List */}
+      <div className="p-3 sm:p-6">
+        {loading && currentDownloads.length === 0 ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+          </div>
+        ) : currentDownloads.length === 0 ? (
+          <div className="text-center py-12">
+            {mediaType === 'anime' ? (
+              <Tv className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-muted)]" />
+            ) : (
+              <BookOpen className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-muted)]" />
+            )}
+            <p className="text-lg font-semibold mb-2">No Downloads Yet</p>
+            <p className="text-[var(--color-text-secondary)]">
+              Downloaded {mediaType === 'anime' ? 'episodes' : 'chapters'} will appear here
+            </p>
+          </div>
+        ) : mediaType === 'anime' ? (
+          // Anime Downloads
+          activeTab !== 'all' ? (
+            <div className="space-y-4">
+              {groupedDownloads
+                .filter(g => g.mediaId === activeTab)
+                .map((group) => (
+                  <div key={group.mediaId}>
+                    <div className="flex items-center justify-between gap-4 mb-3">
+                      <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
+                      {group.downloads.some(d => d.status === 'completed') && (
+                        <button
+                          onClick={() => handleDeleteAnime(group.mediaId, group.mediaTitle)}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
+                        >
+                          <Trash2 size={14} />
+                          Delete All
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      {group.downloads
+                        .sort((a, b) => a.episode_number - b.episode_number)
+                        .map((download) => (
+                          <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} onPlay={handlePlayEpisode} />
+                        ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {groupedDownloads.map((group) => (
+                <div key={group.mediaId}>
+                  <div className="flex items-center justify-between gap-4 mb-3">
+                    <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
+                    {group.downloads.some(d => d.status === 'completed') && (
+                      <button
+                        onClick={() => handleDeleteAnime(group.mediaId, group.mediaTitle)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
+                      >
+                        <Trash2 size={14} />
+                        Delete All
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    {group.downloads
+                      .sort((a, b) => a.episode_number - b.episode_number)
+                      .map((download) => (
+                        <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} onPlay={handlePlayEpisode} />
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          // Manga Downloads
+          activeTab !== 'all' ? (
+            <div className="space-y-4">
+              {groupedChapterDownloads
+                .filter(g => g.mediaId === activeTab)
+                .map((group) => (
+                  <div key={group.mediaId}>
+                    <div className="flex items-center justify-between gap-4 mb-3">
+                      <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
+                      {group.downloads.some(d => d.status === 'completed') && (
+                        <button
+                          onClick={() => handleDeleteManga(group.mediaId, group.mediaTitle)}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
+                        >
+                          <Trash2 size={14} />
+                          Delete All
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      {group.downloads
+                        .sort((a, b) => a.chapter_number - b.chapter_number)
+                        .map((download) => (
+                          <ChapterDownloadItem key={download.id} download={download} onCancel={handleCancelChapter} onDelete={handleDeleteChapter} />
+                        ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {groupedChapterDownloads.map((group) => (
+                <div key={group.mediaId}>
+                  <div className="flex items-center justify-between gap-4 mb-3">
+                    <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
+                    {group.downloads.some(d => d.status === 'completed') && (
+                      <button
+                        onClick={() => handleDeleteManga(group.mediaId, group.mediaTitle)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
+                      >
+                        <Trash2 size={14} />
+                        Delete All
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    {group.downloads
+                      .sort((a, b) => a.chapter_number - b.chapter_number)
+                      .map((download) => (
+                        <ChapterDownloadItem key={download.id} download={download} onCancel={handleCancelChapter} onDelete={handleDeleteChapter} />
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </>
+  )
+}
+
+/**
+ * Modal shell for desktop — wraps DownloadPageContent with backdrop, fixed positioning,
+ * close button, and Escape key handler. Not rendered on mobile (TopNav navigates to /downloads instead).
+ */
+export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
+  // Handle Escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }
+    }
+
+    // Use capture phase to intercept before other handlers
+    document.addEventListener('keydown', handleEscape, true)
+    return () => document.removeEventListener('keydown', handleEscape, true)
+  }, [isOpen, onClose])
+
   if (!isOpen) return null
 
   return (
@@ -513,287 +804,19 @@ export function DownloadManager({ isOpen, onClose }: DownloadManagerProps) {
 
       {/* Modal Content */}
       <div
-        className="relative bg-[var(--color-bg-primary)] rounded-xl max-w-4xl w-full shadow-2xl animate-in slide-in-from-bottom-4 duration-500 border border-white/5"
+        className="relative bg-[var(--color-bg-primary)] rounded-xl max-w-4xl w-full shadow-2xl animate-in slide-in-from-bottom-4 duration-500 border border-white/5 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-          {/* Header */}
-          <div className="p-6 border-b border-white/10">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Download className="w-6 h-6 text-[var(--color-accent-primary)]" />
-                <h2 className="text-2xl font-bold">Downloads</h2>
-              </div>
+        {/* Close button (modal only) */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 sm:top-6 sm:right-6 z-10 w-8 h-8 sm:w-10 sm:h-10 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors"
+        >
+          <X size={20} className="sm:w-6 sm:h-6" />
+        </button>
 
-              <button
-                onClick={onClose}
-                className="w-10 h-10 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            {/* Media Type Toggle */}
-            <div className="flex items-center gap-2 mb-4 bg-white/5 rounded-lg p-1 w-fit">
-              <button
-                onClick={() => { setMediaType('anime'); setActiveTab('all') }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  mediaType === 'anime'
-                    ? 'bg-[var(--color-accent-primary)] text-white'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                <Tv size={16} />
-                Anime ({downloads.length})
-              </button>
-              <button
-                onClick={() => { setMediaType('manga'); setActiveTab('all') }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  mediaType === 'manga'
-                    ? 'bg-[var(--color-accent-primary)] text-white'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                <BookOpen size={16} />
-                Manga ({chapterDownloads.length})
-              </button>
-            </div>
-
-            {/* Storage info and path */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-4 text-sm">
-                <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
-                  <HardDrive size={16} />
-                  <span>Storage: {formatBytes(totalStorage)}</span>
-                </div>
-                <span className="text-[var(--color-text-muted)]">•</span>
-                <span className="text-[var(--color-text-secondary)]">
-                  {mediaType === 'anime' ? downloads.length : chapterDownloads.length} {mediaType === 'anime' ? 'episode' : 'chapter'}(s)
-                </span>
-              </div>
-
-              {/* Downloads path */}
-              {downloadsPath && (
-                <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] bg-white/5 rounded px-3 py-2">
-                  <Folder size={14} />
-                  <span className="flex-1 truncate" title={downloadsPath}>
-                    {downloadsPath}
-                  </span>
-                  <button
-                    onClick={handleCopyPath}
-                    className="flex-shrink-0 hover:text-[var(--color-text-secondary)] transition-colors"
-                    title="Copy path"
-                  >
-                    <Copy size={14} />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                onClick={handleOpenFolder}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
-              >
-                <Folder size={14} />
-                Open Folder
-              </button>
-
-                {downloads.filter(d => d.status === 'completed').length > 0 && (
-                <button
-                  onClick={handleClearCompleted}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
-                >
-                  Clear Completed
-                </button>
-              )}
-
-              {downloads.filter(d => d.status === 'failed').length > 0 && (
-                <button
-                  onClick={handleClearFailed}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium"
-                >
-                  Clear Failed
-                </button>
-              )}
-
-              {downloads.filter(d => d.status === 'cancelled').length > 0 && (
-                <button
-                  onClick={handleClearCancelled}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 rounded-lg transition-colors text-sm font-medium"
-                >
-                  Clear Cancelled
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Tabs */}
-          {currentGrouped.length > 0 && (
-            <div className="border-b border-white/10 px-6">
-              <div className="flex gap-1 overflow-x-auto">
-                <button
-                  onClick={() => setActiveTab('all')}
-                  className={`px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
-                    activeTab === 'all'
-                      ? 'text-[var(--color-accent-primary)] border-b-2 border-[var(--color-accent-primary)]'
-                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                  }`}
-                >
-                  All ({currentDownloads.length})
-                </button>
-                {currentGrouped.map((group) => (
-                  <button
-                    key={group.mediaId}
-                    onClick={() => setActiveTab(group.mediaId)}
-                    className={`px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
-                      activeTab === group.mediaId
-                        ? 'text-[var(--color-accent-primary)] border-b-2 border-[var(--color-accent-primary)]'
-                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                    }`}
-                  >
-                    {group.mediaTitle} ({group.downloads.length})
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Download List */}
-          <div className="p-6 max-h-[600px] overflow-y-auto">
-            {loading && currentDownloads.length === 0 ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-              </div>
-            ) : currentDownloads.length === 0 ? (
-              <div className="text-center py-12">
-                {mediaType === 'anime' ? (
-                  <Tv className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-muted)]" />
-                ) : (
-                  <BookOpen className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-muted)]" />
-                )}
-                <p className="text-lg font-semibold mb-2">No Downloads Yet</p>
-                <p className="text-[var(--color-text-secondary)]">
-                  Downloaded {mediaType === 'anime' ? 'episodes' : 'chapters'} will appear here
-                </p>
-              </div>
-            ) : mediaType === 'anime' ? (
-              // Anime Downloads
-              activeTab !== 'all' ? (
-                <div className="space-y-4">
-                  {groupedDownloads
-                    .filter(g => g.mediaId === activeTab)
-                    .map((group) => (
-                      <div key={group.mediaId}>
-                        <div className="flex items-center justify-between gap-4 mb-3">
-                          <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
-                          {group.downloads.some(d => d.status === 'completed') && (
-                            <button
-                              onClick={() => handleDeleteAnime(group.mediaId, group.mediaTitle)}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
-                            >
-                              <Trash2 size={14} />
-                              Delete All
-                            </button>
-                          )}
-                        </div>
-                        <div className="space-y-3">
-                          {group.downloads
-                            .sort((a, b) => a.episode_number - b.episode_number)
-                            .map((download) => (
-                              <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} onPlay={handlePlayEpisode} />
-                            ))}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {groupedDownloads.map((group) => (
-                    <div key={group.mediaId}>
-                      <div className="flex items-center justify-between gap-4 mb-3">
-                        <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
-                        {group.downloads.some(d => d.status === 'completed') && (
-                          <button
-                            onClick={() => handleDeleteAnime(group.mediaId, group.mediaTitle)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
-                          >
-                            <Trash2 size={14} />
-                            Delete All
-                          </button>
-                        )}
-                      </div>
-                      <div className="space-y-3">
-                        {group.downloads
-                          .sort((a, b) => a.episode_number - b.episode_number)
-                          .map((download) => (
-                            <DownloadItem key={download.id} download={download} onCancel={handleCancel} onDelete={handleDelete} onPause={handlePause} onResume={handleResume} onPlay={handlePlayEpisode} />
-                          ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
-            ) : (
-              // Manga Downloads
-              activeTab !== 'all' ? (
-                <div className="space-y-4">
-                  {groupedChapterDownloads
-                    .filter(g => g.mediaId === activeTab)
-                    .map((group) => (
-                      <div key={group.mediaId}>
-                        <div className="flex items-center justify-between gap-4 mb-3">
-                          <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
-                          {group.downloads.some(d => d.status === 'completed') && (
-                            <button
-                              onClick={() => handleDeleteManga(group.mediaId, group.mediaTitle)}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
-                            >
-                              <Trash2 size={14} />
-                              Delete All
-                            </button>
-                          )}
-                        </div>
-                        <div className="space-y-3">
-                          {group.downloads
-                            .sort((a, b) => a.chapter_number - b.chapter_number)
-                            .map((download) => (
-                              <ChapterDownloadItem key={download.id} download={download} onCancel={handleCancelChapter} onDelete={handleDeleteChapter} />
-                            ))}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {groupedChapterDownloads.map((group) => (
-                    <div key={group.mediaId}>
-                      <div className="flex items-center justify-between gap-4 mb-3">
-                        <h3 className="text-lg font-semibold min-w-0 truncate">{group.mediaTitle}</h3>
-                        {group.downloads.some(d => d.status === 'completed') && (
-                          <button
-                            onClick={() => handleDeleteManga(group.mediaId, group.mediaTitle)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
-                          >
-                            <Trash2 size={14} />
-                            Delete All
-                          </button>
-                        )}
-                      </div>
-                      <div className="space-y-3">
-                        {group.downloads
-                          .sort((a, b) => a.chapter_number - b.chapter_number)
-                          .map((download) => (
-                            <ChapterDownloadItem key={download.id} download={download} onCancel={handleCancelChapter} onDelete={handleDeleteChapter} />
-                          ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
-            )}
-          </div>
-        </div>
+        <DownloadPageContent onNavigateAway={onClose} />
+      </div>
     </div>
   )
 }
@@ -839,8 +862,8 @@ function DownloadItem({
   }
 
   return (
-    <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 hover:bg-[var(--color-bg-hover)] transition-colors">
-      <div className="flex items-start gap-4">
+    <div className="bg-[var(--color-bg-secondary)] rounded-lg p-3 sm:p-4 hover:bg-[var(--color-bg-hover)] transition-colors">
+      <div className="flex items-start gap-2 sm:gap-4">
         {/* Status Icon */}
         <div className="flex-shrink-0 pt-1">
           {getStatusIcon(download.status)}
@@ -848,14 +871,14 @@ function DownloadItem({
 
         {/* Download Info */}
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold mb-1 truncate">
+          <h3 className="font-semibold mb-1 truncate text-sm sm:text-base">
             Episode {download.episode_number}
           </h3>
 
           {/* Progress Bar - show for downloading and paused */}
           {(download.status === 'downloading' || download.status === 'paused') && (
-            <div className="mb-2">
-              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+            <div className="mb-1.5 sm:mb-2">
+              <div className="w-full h-1.5 sm:h-2 bg-white/10 rounded-full overflow-hidden">
                 <div
                   className={`h-full transition-all duration-300 ${
                     download.status === 'paused' ? 'bg-yellow-500' : 'bg-[var(--color-accent-primary)]'
@@ -867,15 +890,15 @@ function DownloadItem({
           )}
 
           {/* Status Info */}
-          <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
+          <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm text-[var(--color-text-secondary)] flex-wrap">
             {download.status === 'downloading' && (
               <>
                 <span>{download.percentage.toFixed(1)}%</span>
-                <span>
-                  {formatBytes(download.downloaded_bytes)} / {formatBytes(download.total_bytes)}
+                <span className="whitespace-nowrap">
+                  {formatBytes(download.downloaded_bytes)}/{formatBytes(download.total_bytes)}
                 </span>
                 {download.speed > 0 && (
-                  <span className="text-blue-400">
+                  <span className="text-blue-400 whitespace-nowrap">
                     {formatBytes(download.speed)}/s
                   </span>
                 )}
@@ -886,8 +909,8 @@ function DownloadItem({
               <>
                 <span className="text-yellow-400 font-medium">Paused</span>
                 <span>{download.percentage.toFixed(1)}%</span>
-                <span>
-                  {formatBytes(download.downloaded_bytes)} / {formatBytes(download.total_bytes)}
+                <span className="whitespace-nowrap">
+                  {formatBytes(download.downloaded_bytes)}/{formatBytes(download.total_bytes)}
                 </span>
               </>
             )}

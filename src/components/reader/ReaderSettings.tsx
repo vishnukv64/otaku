@@ -6,6 +6,7 @@
 import { X, Book, BookOpen, AlignJustify, Rows3, ArrowLeft, ArrowRight, Maximize, Square, RectangleVertical, Settings, RotateCcw } from 'lucide-react'
 import { useReaderStore, ReadingMode, FitMode } from '@/store/readerStore'
 import { cn } from '@/lib/utils'
+import { isMobile } from '@/utils/platform'
 
 interface ReaderSettingsProps {
   isOpen: boolean
@@ -36,6 +37,12 @@ const backgroundColors = [
 
 export function ReaderSettings({ isOpen, onClose }: ReaderSettingsProps) {
   const { settings, updateSettings, setReadingMode, setReadingDirection, setFitMode, resetSettings } = useReaderStore()
+  const mobile = isMobile()
+
+  // On mobile, only show single and webtoon modes (double/vertical don't work well on narrow screens)
+  const availableReadingModes = mobile
+    ? readingModes.filter(m => m.value === 'single' || m.value === 'webtoon')
+    : readingModes
 
   if (!isOpen) return null
 
@@ -70,7 +77,7 @@ export function ReaderSettings({ isOpen, onClose }: ReaderSettingsProps) {
               Reading Mode
             </h3>
             <div className="grid grid-cols-2 gap-2">
-              {readingModes.map((mode) => (
+              {availableReadingModes.map((mode) => (
                 <button
                   key={mode.value}
                   onClick={() => setReadingMode(mode.value)}

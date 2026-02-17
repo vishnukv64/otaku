@@ -1,40 +1,26 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular, loadExtension, getDiscoverCache, saveDiscoverCache } from '@/utils/tauri-commands'
+import { loadExtension, jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
+import { MobileHeroSection } from '@/components/media/MobileHeroSection'
 import { HeroSectionSkeleton } from '@/components/media/HeroSectionSkeleton'
+import { isMobile } from '@/utils/platform'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
 
 export const Route = createFileRoute('/')({
   component: HomeScreen,
 })
 
-// Content categories for the home page using Jikan API
-// Note: 'trending' is fetched separately (used by hero + Top 10, not rendered as its own carousel)
-const CATEGORIES = [
-  { id: 'most-popular', title: 'Most Popular', fetch: () => jikanWatchEpisodesPopular() },
-  { id: 'this-season', title: 'This Season', fetch: () => jikanSeasonNow(1, true) },
-  { id: 'top-rated', title: 'Top Rated', fetch: () => jikanTopAnime(1, undefined, undefined, true) },
-  { id: 'upcoming', title: 'Upcoming', fetch: () => jikanSeasonUpcoming(1, true) },
-]
-
-interface CategoryContent {
-  id: string
-  items: SearchResult[]
-  loading: boolean
-  error: string | null
-}
-
 function HomeScreen() {
   const [allanimeExtensionId, setAllanimeExtensionId] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
   const [featuredIndex, setFeaturedIndex] = useState(0)
-  const [categories, setCategories] = useState<Record<string, CategoryContent>>({})
   const trailerPlayingRef = useRef(false)
 
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
@@ -47,129 +33,74 @@ function HomeScreen() {
       .catch(() => {})
   }, [])
 
-  // Load trending (for hero + Top 10) and categories concurrently
+  // SWR-cached data for each section
+  const trending = useJikanQuery({
+    cacheKey: 'home:trending',
+    fetcher: () => jikanTopAnime(1, undefined, 'airing', true),
+    ttlSeconds: CACHE_TTL.TRENDING,
+    mediaType: 'anime',
+  })
+
+  const mostPopular = useJikanQuery({
+    cacheKey: 'home:most-popular',
+    fetcher: () => jikanWatchEpisodesPopular(),
+    ttlSeconds: CACHE_TTL.POPULAR,
+    mediaType: 'anime',
+  })
+
+  const thisSeason = useJikanQuery({
+    cacheKey: 'home:this-season',
+    fetcher: () => jikanSeasonNow(1, true),
+    ttlSeconds: CACHE_TTL.AIRING,
+    mediaType: 'anime',
+  })
+
+  const topRated = useJikanQuery({
+    cacheKey: 'home:top-rated',
+    fetcher: () => jikanTopAnime(1, undefined, undefined, true),
+    ttlSeconds: CACHE_TTL.TOP_RATED,
+    mediaType: 'anime',
+  })
+
+  const upcoming = useJikanQuery({
+    cacheKey: 'home:upcoming',
+    fetcher: () => jikanSeasonUpcoming(1, true),
+    ttlSeconds: CACHE_TTL.UPCOMING,
+    mediaType: 'anime',
+  })
+
+  // Set initial featured anime when trending data arrives
   useEffect(() => {
-    const loadAll = async () => {
-      // Initialize categories state
-      const initialState: Record<string, CategoryContent> = {}
-      CATEGORIES.forEach(cat => {
-        initialState[cat.id] = { id: cat.id, items: [], loading: true, error: null }
-      })
-      // Also init trending (not rendered as carousel, but needed for hero + Top 10)
-      initialState['trending'] = { id: 'trending', items: [], loading: true, error: null }
-      setCategories(initialState)
-
-      // Load trending + all categories concurrently
-      await Promise.allSettled([
-        // Trending (hero section + Top 10)
-        (async () => {
-          const cacheKey = 'home:trending'
-          try {
-            const results = await jikanTopAnime(1, undefined, 'airing', true)
-            const uniqueResults = results.results.reduce((acc, item) => {
-              if (!acc.find(existing => existing.id === item.id)) acc.push(item)
-              return acc
-            }, [] as SearchResult[])
-
-            setCategories(prev => ({
-              ...prev,
-              trending: { id: 'trending', items: uniqueResults, loading: false, error: null },
-            }))
-            setFeaturedAnime(prev => prev || uniqueResults[0] || null)
-            saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
-          } catch (err) {
-            console.error('Trending API failed, trying cache:', err)
-            try {
-              const cached = await getDiscoverCache(cacheKey)
-              if (cached) {
-                const cachedResults: SearchResult[] = JSON.parse(cached.data)
-                if (cachedResults.length > 0) {
-                  setCategories(prev => ({
-                    ...prev,
-                    trending: { id: 'trending', items: cachedResults, loading: false, error: null },
-                  }))
-                  setFeaturedAnime(prev => prev || cachedResults[0])
-                  return
-                }
-              }
-            } catch { /* cache failed too */ }
-            setCategories(prev => ({
-              ...prev,
-              trending: { id: 'trending', items: [], loading: false, error: 'Failed to load' },
-            }))
-          }
-        })(),
-
-        // Other categories
-        ...CATEGORIES.map(async (category) => {
-          const cacheKey = `home:${category.id}`
-          try {
-            const results = await category.fetch()
-            const uniqueResults = results.results.reduce((acc, item) => {
-              if (!acc.find(existing => existing.id === item.id)) acc.push(item)
-              return acc
-            }, [] as SearchResult[])
-
-            setCategories(prev => ({
-              ...prev,
-              [category.id]: { id: category.id, items: uniqueResults, loading: false, error: null },
-            }))
-            saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
-          } catch (err) {
-            console.error(`Category ${category.id} API failed, trying cache:`, err)
-            try {
-              const cached = await getDiscoverCache(cacheKey)
-              if (cached) {
-                const cachedResults: SearchResult[] = JSON.parse(cached.data)
-                if (cachedResults.length > 0) {
-                  setCategories(prev => ({
-                    ...prev,
-                    [category.id]: { id: category.id, items: cachedResults, loading: false, error: null },
-                  }))
-                  return
-                }
-              }
-            } catch { /* cache failed too */ }
-            setCategories(prev => ({
-              ...prev,
-              [category.id]: { id: category.id, items: [], loading: false, error: err instanceof Error ? err.message : 'Failed to load' },
-            }))
-          }
-        }),
-      ])
+    if (trending.data.length > 0 && !featuredAnime) {
+      setFeaturedAnime(trending.data[0])
     }
-
-    loadAll()
-  }, [])
+  }, [trending.data, featuredAnime])
 
   // Auto-rotate hero section every 10 seconds
   useEffect(() => {
-    const trendingContent = categories['trending']
-    if (!trendingContent || trendingContent.items.length === 0) return
+    if (trending.data.length === 0) return
 
     const interval = setInterval(() => {
       if (trailerPlayingRef.current) return
       setFeaturedIndex(prevIndex => {
-        const nextIndex = (prevIndex + 1) % trendingContent.items.length
-        setFeaturedAnime(trendingContent.items[nextIndex])
+        const nextIndex = (prevIndex + 1) % trending.data.length
+        setFeaturedAnime(trending.data[nextIndex])
         return nextIndex
       })
-    }, 10000) // 10 seconds
+    }, 10000)
 
     return () => clearInterval(interval)
-  }, [categories])
+  }, [trending.data])
 
   // Update featured anime when index changes
   const handleFeaturedIndexChange = (index: number) => {
-    const trendingContent = categories['trending']
-    if (trendingContent && trendingContent.items[index]) {
+    if (trending.data[index]) {
       setFeaturedIndex(index)
-      setFeaturedAnime(trendingContent.items[index])
+      setFeaturedAnime(trending.data[index])
     }
   }
 
   const handleWatch = () => {
-    // TODO: Navigate to watch screen with first episode
     if (featuredAnime) {
       handleMediaClick(featuredAnime)
     }
@@ -192,21 +123,41 @@ function HomeScreen() {
     setSelectedMedia(null)
   }
 
+  // Carousel sections config — maps hook results to titles
+  const carousels = [
+    { title: 'Most Popular', hook: mostPopular },
+    { title: 'This Season', hook: thisSeason },
+    { title: 'Top Rated', hook: topRated },
+    { title: 'Upcoming', hook: upcoming },
+  ]
+
   return (
     <div className="min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
       <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto overflow-visible">
         {/* Hero Section */}
         {featuredAnime ? (
-          <HeroSection
-            key={featuredAnime.id}
-            media={featuredAnime}
-            onWatch={handleWatch}
-            onMoreInfo={handleMoreInfo}
-            totalItems={categories['trending']?.items.length || 1}
-            currentIndex={featuredIndex}
-            onIndexChange={handleFeaturedIndexChange}
-            onTrailerStateChange={(playing) => { trailerPlayingRef.current = playing }}
-          />
+          isMobile() ? (
+            <MobileHeroSection
+              key={featuredAnime.id}
+              media={featuredAnime}
+              onWatch={handleWatch}
+              onMoreInfo={handleMoreInfo}
+              totalItems={trending.data.length || 1}
+              currentIndex={featuredIndex}
+              onIndexChange={handleFeaturedIndexChange}
+            />
+          ) : (
+            <HeroSection
+              key={featuredAnime.id}
+              media={featuredAnime}
+              onWatch={handleWatch}
+              onMoreInfo={handleMoreInfo}
+              totalItems={trending.data.length || 1}
+              currentIndex={featuredIndex}
+              onIndexChange={handleFeaturedIndexChange}
+              onTrailerStateChange={(playing) => { trailerPlayingRef.current = playing }}
+            />
+          )
         ) : (
           <HeroSectionSkeleton />
         )}
@@ -215,11 +166,11 @@ function HomeScreen() {
         <ContinueWatchingSection extensionId={allanimeExtensionId || undefined} />
 
         {/* Top 10 Anime */}
-        {categories['trending']?.items.length >= 10 && (
+        {trending.data.length >= 10 && (
           <MediaCarousel
             title="Top 10 Anime"
-            items={categories['trending'].items.slice(0, 10)}
-            loading={categories['trending']?.loading}
+            items={trending.data.slice(0, 10)}
+            loading={false}
             onItemClick={handleMediaClick}
             showRank
           />
@@ -227,20 +178,15 @@ function HomeScreen() {
 
         {/* Content Carousels */}
         <div className="space-y-8 overflow-visible">
-          {CATEGORIES.map(category => {
-            const content = categories[category.id]
-            if (!content) return null
-
-            return (
-              <MediaCarousel
-                key={category.id}
-                title={category.title}
-                items={content.items}
-                loading={content.loading}
-                onItemClick={handleMediaClick}
-              />
-            )
-          })}
+          {carousels.map(({ title, hook }) => (
+            <MediaCarousel
+              key={title}
+              title={title}
+              items={hook.data}
+              loading={hook.loading}
+              onItemClick={handleMediaClick}
+            />
+          ))}
 
         </div>
       </div>

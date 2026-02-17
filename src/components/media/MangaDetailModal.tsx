@@ -12,14 +12,10 @@ import { useNavigate } from '@tanstack/react-router'
 import {
   X,
   BookOpen,
-  Star,
-  Calendar,
   Info,
   Heart,
   Plus,
   Check,
-  ChevronDown,
-  ChevronUp,
   Loader2,
   Library,
   BookMarked,
@@ -29,7 +25,8 @@ import {
   Bell,
   Tags,
 } from 'lucide-react'
-import { getMangaDetails, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { getMangaDetails, jikanMangaDetails, resolveAllanimeId, loadExtension, searchManga, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { TagSelector, TagChips } from '@/components/library'
 import { Description } from '@/components/ui/Description'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -38,6 +35,15 @@ import { useChapterDownloadEvents } from '@/hooks/useChapterDownloadEvents'
 import { hasNsfwGenres } from '@/utils/nsfw-filter'
 import type { SearchResult, MangaDetails, Chapter } from '@/types/extension'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
+import { BottomSheet } from '@/components/ui/BottomSheet'
+import { isMobile } from '@/utils/platform'
+
+/** MAL IDs are purely numeric; AllAnime IDs contain letters/hyphens */
+function isMalId(id: string): boolean {
+  return /^\d+$/.test(id)
+}
+
+const CHAPTERS_PER_PAGE = 50
 
 interface MangaDetailModalProps {
   manga: SearchResult | null
@@ -58,11 +64,21 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const [libraryStatus, setLibraryStatus] = useState<LibraryStatus | null>(null)
   const [isFavorite, setIsFavorite] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
-  const [showAllChapters, setShowAllChapters] = useState(false)
+  const [chapterPage, setChapterPage] = useState(0)
   const [readingProgress, setReadingProgress] = useState<{ chapterId: string; chapterNumber: number; page: number } | null>(null)
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
+  const [showLibraryMenu, setShowLibraryMenu] = useState(false)
+
+  // Hybrid Jikan + AllAnime state
+  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
+  const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
+  const [allanimeChapters, setAllanimeChapters] = useState<Chapter[]>([])
+  const [chaptersLoading, setChaptersLoading] = useState(false)
+
+  // Determine if this manga was sourced from Jikan (MAL ID) vs AllAnime
+  const malIdMode = manga ? isMalId(manga.id) : false
 
   // Tag state
   const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
@@ -88,7 +104,14 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  // Load manga details
+  // Lazy-load AllAnime extension (needed for chapter fetching in MAL ID flow)
+  useEffect(() => {
+    loadExtension(ALLANIME_MANGA_EXTENSION)
+      .then(meta => setAllanimeExtId(meta.id))
+      .catch(() => {})
+  }, [])
+
+  // Load manga details — branches on MAL ID vs AllAnime ID
   useEffect(() => {
     if (!manga) return
 
@@ -97,7 +120,16 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       setError(null)
 
       try {
-        const result = await getMangaDetails(extensionId, manga.id, !nsfwFilter)
+        let result: MangaDetails
+
+        if (isMalId(manga.id)) {
+          // MAL ID flow: use Jikan for metadata
+          result = await jikanMangaDetails(parseInt(manga.id))
+        } else {
+          // AllAnime ID flow: existing behavior
+          result = await getMangaDetails(extensionId, manga.id, !nsfwFilter)
+        }
+
         setDetails(result)
 
         // Check if content is NSFW and should be blocked
@@ -107,11 +139,11 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
           setIsNsfwBlocked(false)
         }
 
-        // Save to database for library
+        // Save to database for library (use manga.id as tracking ID)
         try {
           const mediaEntry: MediaEntry = {
-            id: result.id,
-            extension_id: extensionId,
+            id: manga.id,
+            extension_id: isMalId(manga.id) ? 'jikan' : extensionId,
             title: result.title,
             english_name: result.english_name,
             native_name: result.native_name,
@@ -142,19 +174,17 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
 
         // Check library status and media status
         try {
-          const inLib = await isInLibrary(result.id)
+          const inLib = await isInLibrary(manga.id)
           setInLibrary(inLib)
 
-          // Get favorite and tracking status from context
-          const mediaStatus = getStatus(result.id)
+          const mediaStatus = getStatus(manga.id)
           setIsFavorite(mediaStatus.isFavorite)
           setIsTracked(mediaStatus.isTracked)
           setLibraryStatus(mediaStatus.libraryStatus || null)
 
-          // Load tags if in library
           if (inLib) {
             try {
-              const tags = await getMediaTags(result.id)
+              const tags = await getMediaTags(manga.id)
               setMediaTags(tags)
             } catch {
               // Ignore tag loading errors
@@ -166,7 +196,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
 
         // Check reading progress
         try {
-          const progress = await getLatestReadingProgressForMedia(result.id)
+          const progress = await getLatestReadingProgressForMedia(manga.id)
           if (progress) {
             setReadingProgress({
               chapterId: progress.chapter_id,
@@ -187,16 +217,103 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     loadDetails()
   }, [manga, extensionId, nsfwFilter, getStatus])
 
+  // For MAL-sourced manga: resolve AllAnime ID with 2-step fallback
+  useEffect(() => {
+    if (!details || !manga || !isMalId(manga.id) || !allanimeExtId) return
+
+    const resolveId = async () => {
+      setChaptersLoading(true)
+      try {
+        // Step 1: Try bridge resolution (cached mappings)
+        const bridgeId = await resolveAllanimeId(
+          details.title, 'manga', manga.id, details.english_name, details.year, details.title_synonyms
+        )
+        if (bridgeId) {
+          setAllanimeShowId(bridgeId)
+          return
+        }
+
+        // Step 2: Fallback — search AllAnime directly by title
+        const searchResults = await searchManga(allanimeExtId, details.title, 1, true)
+        if (searchResults.results.length > 0) {
+          setAllanimeShowId(searchResults.results[0].id)
+          return
+        }
+      } catch {
+        // Both methods failed — chapters won't be available
+      } finally {
+        setChaptersLoading(false)
+      }
+    }
+    resolveId()
+  }, [details, manga, allanimeExtId])
+
+  // Fetch AllAnime chapters after ID resolution (MAL flow only)
+  useEffect(() => {
+    if (!allanimeShowId || !allanimeExtId || !manga || !isMalId(manga.id)) return
+
+    const fetchChapters = async () => {
+      setChaptersLoading(true)
+      try {
+        const allanimeDetails = await getMangaDetails(allanimeExtId, allanimeShowId, true)
+        if (allanimeDetails.chapters) {
+          allanimeDetails.chapters.sort((a, b) => a.number - b.number)
+          setAllanimeChapters(allanimeDetails.chapters)
+        }
+      } catch (err) {
+        console.error('[MangaDetailModal] Failed to fetch AllAnime chapters:', err)
+      } finally {
+        setChaptersLoading(false)
+      }
+    }
+    fetchChapters()
+  }, [allanimeShowId, allanimeExtId, manga])
+
+  // Backward compat: check reading progress under AllAnime ID if not found under MAL ID
+  useEffect(() => {
+    if (!allanimeShowId || !manga || !isMalId(manga.id) || readingProgress) return
+
+    const checkLegacyProgress = async () => {
+      try {
+        const progress = await getLatestReadingProgressForMedia(allanimeShowId)
+        if (progress) {
+          setReadingProgress({
+            chapterId: progress.chapter_id,
+            chapterNumber: progress.chapter_number,
+            page: progress.current_page,
+          })
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    checkLegacyProgress()
+  }, [allanimeShowId, manga, readingProgress])
+
+  // Effective chapters: AllAnime chapters for MAL flow, details.chapters for AllAnime flow
+  const effectiveChapters = malIdMode ? allanimeChapters : (details?.chapters || [])
+  // Effective extension ID for content operations (reading, downloads)
+  const effectiveExtId = malIdMode ? (allanimeExtId || extensionId) : extensionId
+
+  // Auto-navigate to page containing latest read chapter
+  useEffect(() => {
+    if (!readingProgress || effectiveChapters.length === 0) return
+    const chapterIndex = effectiveChapters.findIndex(ch => ch.id === readingProgress.chapterId)
+    if (chapterIndex >= 0) {
+      setChapterPage(Math.floor(chapterIndex / CHAPTERS_PER_PAGE))
+    }
+  }, [readingProgress, effectiveChapters])
+
   // Check which chapters are downloaded
   useEffect(() => {
-    if (!details) return
+    if (!manga || effectiveChapters.length === 0) return
 
     const checkDownloads = async () => {
       const downloaded = new Set<string>()
-      for (const chapter of details.chapters) {
+      for (const chapter of effectiveChapters) {
         try {
-          const isDownloaded = await isChapterDownloaded(details.id, chapter.id)
-          if (isDownloaded) {
+          const isDl = await isChapterDownloaded(manga.id, chapter.id)
+          if (isDl) {
             downloaded.add(chapter.id)
           }
         } catch {
@@ -207,15 +324,15 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     }
 
     checkDownloads()
-  }, [details])
+  }, [manga, effectiveChapters])
 
   if (!manga) return null
 
   // Tag functions
   const loadMediaTags = async () => {
-    if (!details) return
+    if (!manga) return
     try {
-      const tags = await getMediaTags(details.id)
+      const tags = await getMediaTags(manga.id)
       setMediaTags(tags)
     } catch (error) {
       console.error('Failed to load media tags:', error)
@@ -223,9 +340,9 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   }
 
   const handleRemoveTag = async (tagId: number) => {
-    if (!details) return
+    if (!manga) return
     try {
-      await unassignLibraryTag(details.id, tagId)
+      await unassignLibraryTag(manga.id, tagId)
       setMediaTags(prev => prev.filter(t => t.id !== tagId))
     } catch (error) {
       console.error('Failed to remove tag:', error)
@@ -236,14 +353,28 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const handleReadNow = (chapterId?: string) => {
     if (!details) return
 
-    navigate({
-      to: '/read',
-      search: {
-        extensionId,
-        mangaId: details.id,
-        chapterId: chapterId || (details.chapters[0]?.id),
-      },
-    })
+    if (malIdMode && allanimeShowId) {
+      // MAL flow: AllAnime IDs for content, MAL ID for tracking
+      navigate({
+        to: '/read',
+        search: {
+          extensionId: effectiveExtId,
+          mangaId: allanimeShowId,
+          chapterId: chapterId || (effectiveChapters[0]?.id),
+          malId: manga!.id,
+        },
+      })
+    } else {
+      // AllAnime flow: existing behavior
+      navigate({
+        to: '/read',
+        search: {
+          extensionId,
+          mangaId: manga!.id,
+          chapterId: chapterId || (details.chapters[0]?.id),
+        },
+      })
+    }
     onClose()
   }
 
@@ -254,12 +385,12 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
 
   // Helper to ensure media is saved before library operations
   const ensureMediaSaved = async () => {
-    if (!details) return false
+    if (!details || !manga) return false
 
     try {
       const mediaEntry: MediaEntry = {
-        id: details.id,
-        extension_id: extensionId,
+        id: manga.id,
+        extension_id: malIdMode ? 'jikan' : extensionId,
         title: details.title,
         english_name: details.english_name,
         native_name: details.native_name,
@@ -272,7 +403,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
         status: details.status,
         year: details.year,
         rating: details.rating,
-        episode_count: details.chapters.length,
+        episode_count: effectiveChapters.length || details.chapters.length,
         episode_duration: undefined,
         season_quarter: undefined,
         season_year: undefined,
@@ -292,7 +423,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   }
 
   const handleAddToLibrary = async (status: LibraryStatus) => {
-    if (!details) return
+    if (!details || !manga) return
 
     const statusLabels: Record<LibraryStatus, string> = {
       watching: 'Watching',
@@ -305,21 +436,19 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     }
 
     try {
-      // Ensure media is saved first (required for foreign key constraint)
       await ensureMediaSaved()
-      await addToLibrary(details.id, status)
+      await addToLibrary(manga.id, status)
       setInLibrary(true)
       setLibraryStatus(status)
       notifySuccess(details.title, `Added to "${statusLabels[status]}" list`)
-      // Initialize release tracking for ongoing manga
-      if (details.chapters.length > 0) {
+      const chapterCount = effectiveChapters.length || details.chapters.length
+      if (chapterCount > 0) {
         try {
-          await initializeReleaseTracking(details.id, extensionId, 'manga', details.chapters.length)
+          await initializeReleaseTracking(manga.id, malIdMode ? 'jikan' : extensionId, 'manga', chapterCount)
         } catch (trackingError) {
           console.error('Failed to initialize release tracking:', trackingError)
         }
       }
-      // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
       notifyError('Library Error', `Failed to add "${details.title}" to library`)
@@ -328,15 +457,14 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   }
 
   const handleRemoveFromLibrary = async () => {
-    if (!details) return
+    if (!details || !manga) return
 
     try {
-      await removeFromLibrary(details.id)
+      await removeFromLibrary(manga.id)
       setInLibrary(false)
       setLibraryStatus(null)
       setIsFavorite(false)
       notifySuccess(details.title, 'Removed from your library')
-      // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
       notifyError('Library Error', `Failed to remove "${details.title}" from library`)
@@ -345,28 +473,26 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   }
 
   const handleToggleFavorite = async () => {
-    if (!details) return
+    if (!details || !manga) return
 
     try {
-      // Ensure media is saved first (required for foreign key constraint)
       await ensureMediaSaved()
 
       if (!inLibrary) {
-        await addToLibrary(details.id, 'plan_to_read')
+        await addToLibrary(manga.id, 'plan_to_read')
         setInLibrary(true)
-        // Initialize release tracking for ongoing manga
-        if (details.chapters.length > 0) {
+        const chapterCount = effectiveChapters.length || details.chapters.length
+        if (chapterCount > 0) {
           try {
-            await initializeReleaseTracking(details.id, extensionId, 'manga', details.chapters.length)
+            await initializeReleaseTracking(manga.id, malIdMode ? 'jikan' : extensionId, 'manga', chapterCount)
           } catch (trackingError) {
             console.error('Failed to initialize release tracking:', trackingError)
           }
         }
       }
-      const newFavorite = await toggleFavorite(details.id)
+      const newFavorite = await toggleFavorite(manga.id)
       setIsFavorite(newFavorite)
       notifySuccess(details.title, newFavorite ? 'Added to your favorites' : 'Removed from your favorites')
-      // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (err) {
       notifyError('Favorites Error', `Failed to update favorites for "${details.title}"`)
@@ -376,28 +502,24 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
 
   // Handle chapter download
   const handleDownloadChapter = async (e: React.MouseEvent, chapter: { id: string; number: number }) => {
-    e.stopPropagation() // Prevent triggering the read action
-    if (!details) return
+    e.stopPropagation()
+    if (!details || !manga) return
 
     try {
-      // Get chapter images first
-      const chapterImages = await getChapterImages(extensionId, chapter.id)
+      const chapterImages = await getChapterImages(effectiveExtId, chapter.id)
       if (!chapterImages.images || chapterImages.images.length === 0) {
         throw new Error('No images found for this chapter')
       }
 
-      // Start download with image URLs
-      // Progress tracking is handled by useChapterDownloadEvents hook via SSE
       const imageUrls = chapterImages.images.map(img => img.url)
       await startChapterDownload(
-        details.id,
+        manga.id,
         details.title,
         chapter.id,
         chapter.number,
         imageUrls,
         customDownloadLocation || undefined
       )
-      // Download completion is tracked via events (onComplete callback updates downloadedChapters)
     } catch (err) {
       console.error('Download failed:', err)
       notifyError('Download Failed', `Failed to download "${details.title}" Chapter ${chapter.number}`)
@@ -406,11 +528,11 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
 
   // Handle chapter download deletion
   const handleDeleteChapterDownload = async (e: React.MouseEvent, chapter: { id: string; number: number }) => {
-    e.stopPropagation() // Prevent triggering the read action
-    if (!details) return
+    e.stopPropagation()
+    if (!details || !manga) return
 
     try {
-      await deleteChapterDownload(details.id, chapter.id)
+      await deleteChapterDownload(manga.id, chapter.id)
       setDownloadedChapters(prev => {
         const next = new Set(prev)
         next.delete(chapter.id)
@@ -425,26 +547,23 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
 
   // Download a single chapter - helper for concurrent downloads
   const downloadSingleChapter = async (chapter: Chapter): Promise<boolean> => {
-    if (!details) return false
+    if (!details || !manga) return false
 
     try {
-      // Get chapter images
-      const chapterImages = await getChapterImages(extensionId, chapter.id)
+      const chapterImages = await getChapterImages(effectiveExtId, chapter.id)
       if (!chapterImages.images || chapterImages.images.length === 0) {
         throw new Error('No images found')
       }
 
-      // Start download - progress tracking is handled by useChapterDownloadEvents hook via SSE
       const imageUrls = chapterImages.images.map(img => img.url)
       await startChapterDownload(
-        details.id,
+        manga.id,
         details.title,
         chapter.id,
         chapter.number,
         imageUrls,
         customDownloadLocation || undefined
       )
-      // Download completion is tracked via events (onComplete callback updates downloadedChapters)
       return true
     } catch (err) {
       console.error(`Failed to download chapter ${chapter.number}:`, err)
@@ -456,8 +575,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
   const handleDownloadAllChapters = async () => {
     if (!details || isDownloadingAll) return
 
-    // Filter out already downloaded chapters
-    const chaptersToDownload = details.chapters.filter(ch => !downloadedChapters.has(ch.id))
+    const chaptersToDownload = effectiveChapters.filter(ch => !downloadedChapters.has(ch.id))
 
     if (chaptersToDownload.length === 0) {
       notifyInfo(details.title, 'All chapters are already downloaded')
@@ -468,17 +586,14 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     let successCount = 0
     let failCount = 0
 
-    // Process chapters in batches of maxConcurrentDownloads
     const concurrency = maxConcurrentDownloads || 3
     for (let i = 0; i < chaptersToDownload.length; i += concurrency) {
       const batch = chaptersToDownload.slice(i, i + concurrency)
 
-      // Download batch concurrently
       const results = await Promise.all(
         batch.map(chapter => downloadSingleChapter(chapter))
       )
 
-      // Count successes and failures
       results.forEach(success => {
         if (success) {
           successCount++
@@ -497,273 +612,375 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
     }
   }
 
-  const displayedChapters = showAllChapters
-    ? details?.chapters || []
-    : (details?.chapters || []).slice(0, 20)
+  const totalChapterPages = Math.ceil(effectiveChapters.length / CHAPTERS_PER_PAGE)
+  const paginatedChapters = effectiveChapters.slice(
+    chapterPage * CHAPTERS_PER_PAGE,
+    (chapterPage + 1) * CHAPTERS_PER_PAGE
+  )
 
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-[var(--color-bg-primary)] rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header with cover */}
-        <div className="relative h-64">
-          {/* Background blur */}
-          <div
-            className="absolute inset-0 bg-cover bg-center blur-lg scale-110 opacity-50"
-            style={{ backgroundImage: `url(${manga.cover_url})` }}
-          />
+  const mobile = isMobile()
 
-          {/* Gradient overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent" />
+  const modalContent = (
+    <>
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+        </div>
+      )}
 
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-colors z-10"
-          >
-            <X className="w-5 h-5 text-white" />
-          </button>
+      {/* Error state */}
+      {error && !loading && (
+        <div className="text-center py-12">
+          {!mobile && (
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-colors z-10"
+            >
+              <X className="w-5 h-5 text-white" />
+            </button>
+          )}
+          <Info className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-[var(--color-text-secondary)]">{error}</p>
+        </div>
+      )}
 
-          {/* Cover and title */}
-          <div className="absolute bottom-0 left-0 right-0 flex gap-6 p-6">
-            <img
-              src={manga.cover_url || '/placeholder-manga.png'}
-              alt={manga.title}
-              className="w-32 h-48 object-cover rounded-lg shadow-lg flex-shrink-0"
-            />
-            <div className="flex-1 min-w-0 self-end">
-              <h1 className="text-2xl font-bold text-white truncate mb-2">{manga.title}</h1>
-              <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
-                {manga.rating && (
-                  <span className="flex items-center gap-1">
-                    <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                    {manga.rating.toFixed(1)}
-                  </span>
+      {/* NSFW Content Blocked */}
+      {!loading && !error && isNsfwBlocked && (
+        <div className="text-center py-12">
+          {!mobile && (
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-colors z-10"
+            >
+              <X className="w-5 h-5 text-white" />
+            </button>
+          )}
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
+            <X className="w-8 h-8 text-red-500" />
+          </div>
+          <h3 className="text-xl font-bold text-white mb-2">Content Blocked</h3>
+          <p className="text-[var(--color-text-secondary)] max-w-md mx-auto mb-4">
+            This manga contains adult content and has been blocked by your NSFW filter settings.
+          </p>
+          <p className="text-sm text-[var(--color-text-muted)]">
+            You can disable the NSFW filter in Settings to view this content.
+          </p>
+        </div>
+      )}
+
+      {/* Main content */}
+      {!loading && !error && details && !isNsfwBlocked && (
+        <>
+          {/* Hero Banner */}
+          <div className="relative rounded-t-xl overflow-hidden">
+            {/* Background Image (blurred) */}
+            {(details.cover_url || manga.cover_url) && (
+              <>
+                <img
+                  src={details.cover_url || manga.cover_url}
+                  alt={details.title}
+                  className="absolute inset-0 w-full h-full object-cover blur-3xl scale-110 opacity-40"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-black/80 to-black/40" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent" />
+              </>
+            )}
+
+            {/* Close button (desktop only) */}
+            {!mobile && (
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-colors z-10"
+              >
+                <X className="w-5 h-5 text-white" />
+              </button>
+            )}
+
+            {/* Content */}
+            <div className={`relative ${mobile ? 'p-5' : 'p-10'}`}>
+              <div className={`${mobile ? 'flex flex-col items-center text-center gap-4' : 'flex gap-8 w-full items-start'}`}>
+                {/* Poster */}
+                {(details.cover_url || manga.cover_url) && (
+                  <div className="relative flex-shrink-0 group">
+                    <img
+                      src={details.cover_url || manga.cover_url}
+                      alt={details.title}
+                      className={`object-cover rounded-xl shadow-2xl ring-1 ring-white/10 ${mobile ? 'w-full h-48' : 'w-48 sm:w-56 h-72 sm:h-80 transform group-hover:scale-105 transition-transform duration-300'}`}
+                    />
+                    <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-black/20 to-transparent" />
+                  </div>
                 )}
-                {manga.year && (
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-4 h-4" />
-                    {manga.year}
-                  </span>
-                )}
-                {details?.chapters && (
-                  <span className="flex items-center gap-1">
-                    <BookOpen className="w-4 h-4" />
-                    {details.chapters.length} chapters
-                  </span>
-                )}
+
+                {/* Info */}
+                <div className="flex-1 min-w-0 pt-4">
+                  <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black mb-3 drop-shadow-2xl leading-tight tracking-tight">
+                    {details.english_name || details.title}
+                  </h1>
+                  {details.english_name && details.title !== details.english_name && (
+                    <h2 className="text-base sm:text-lg text-[var(--color-text-secondary)] mb-2 font-medium">
+                      {details.title}
+                    </h2>
+                  )}
+                  {details.native_name && (
+                    <h3 className="text-sm text-[var(--color-text-muted)] mb-3">
+                      {details.native_name}
+                    </h3>
+                  )}
+
+                  {/* Metadata Row */}
+                  <div className="flex items-center gap-3 text-base mb-4 flex-wrap">
+                    {details.rating && (
+                      <span className="flex items-center gap-1 text-yellow-400 font-bold text-lg">
+                        ★ {details.rating.toFixed(2)}
+                      </span>
+                    )}
+                    {details.year && (
+                      <>
+                        <span className="text-[var(--color-text-muted)]">•</span>
+                        <span className="text-white font-medium">{details.year}</span>
+                      </>
+                    )}
+                    {details.status && details.status.toLowerCase() !== 'unknown' && (
+                      <>
+                        <span className="text-[var(--color-text-muted)]">•</span>
+                        <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium capitalize">
+                          {details.status.toLowerCase()}
+                        </span>
+                      </>
+                    )}
+                    {(effectiveChapters.length > 0 || details.totalChapters) && (
+                      <>
+                        <span className="text-[var(--color-text-muted)]">•</span>
+                        <span className="text-white font-medium">
+                          {effectiveChapters.length > 0 ? effectiveChapters.length : details.totalChapters} Chapters
+                        </span>
+                      </>
+                    )}
+                    {details.type && (
+                      <>
+                        <span className="text-[var(--color-text-muted)]">•</span>
+                        <span className="text-white font-medium capitalize">{details.type}</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Genres */}
+                  {details.genres && details.genres.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-6">
+                      {details.genres.map((genre) => (
+                        <span
+                          key={genre}
+                          className="px-4 py-1.5 bg-white/10 hover:bg-white/20 rounded-full text-sm font-medium transition-colors cursor-pointer"
+                        >
+                          {genre}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                    {/* Read / Continue Reading button */}
+                    {readingProgress ? (
+                      <button
+                        onClick={handleContinueReading}
+                        className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-8 py-2.5 sm:py-3.5 bg-[var(--color-accent-primary)] text-white font-bold rounded-lg hover:opacity-90 transition-all transform hover:scale-105 shadow-lg whitespace-nowrap text-sm sm:text-base"
+                      >
+                        <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
+                        Continue Ch. {readingProgress.chapterNumber} (p.{readingProgress.page})
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleReadNow()}
+                        disabled={malIdMode && effectiveChapters.length === 0}
+                        className={`flex items-center gap-1.5 sm:gap-2 px-4 sm:px-8 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all shadow-lg whitespace-nowrap text-sm sm:text-base ${
+                          malIdMode && effectiveChapters.length === 0
+                            ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] cursor-not-allowed'
+                            : 'bg-[var(--color-accent-primary)] text-white hover:opacity-90 transform hover:scale-105 shadow-[var(--color-accent-primary)]/50'
+                        }`}
+                      >
+                        <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
+                        {chaptersLoading ? 'Loading...' : 'Start Reading'}
+                      </button>
+                    )}
+
+                    {/* Library button */}
+                    {inLibrary ? (() => {
+                      let displayStatus = libraryStatus
+                      if (details && libraryStatus && readingProgress && effectiveChapters.length > 0) {
+                        const maxChapter = Math.max(...effectiveChapters.map(ch => ch.number))
+                        if (readingProgress.chapterNumber < maxChapter && libraryStatus !== 'dropped') {
+                          displayStatus = 'reading'
+                        }
+                      }
+                      return (
+                        <button
+                          key="in-library-btn"
+                          onClick={handleRemoveFromLibrary}
+                          className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all border bg-green-600 text-white border-green-500 hover:bg-green-700 whitespace-nowrap text-sm sm:text-base"
+                        >
+                          <Check className="w-5 h-5" />
+                          {displayStatus ? getStatusLabel(displayStatus) : 'In Library'}
+                        </button>
+                      )
+                    })() : (
+                      <div key="add-library-btn" className="relative">
+                        <button
+                          onClick={() => setShowLibraryMenu(!showLibraryMenu)}
+                          className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all border bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20 whitespace-nowrap text-sm sm:text-base"
+                        >
+                          <Plus className="w-5 h-5" />
+                          My List
+                        </button>
+                        {showLibraryMenu && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setShowLibraryMenu(false)} />
+                            <div className="absolute bottom-full left-0 mb-1 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl z-20 min-w-[180px] border border-white/10">
+                              <button
+                                onClick={() => { handleAddToLibrary('reading'); setShowLibraryMenu(false) }}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-t-lg"
+                              >
+                                <BookMarked className="w-4 h-4" />
+                                Reading
+                              </button>
+                              <button
+                                onClick={() => { handleAddToLibrary('plan_to_read'); setShowLibraryMenu(false) }}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                              >
+                                <Library className="w-4 h-4" />
+                                Plan to Read
+                              </button>
+                              <button
+                                onClick={() => { handleAddToLibrary('completed'); setShowLibraryMenu(false) }}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-b-lg"
+                              >
+                                <Check className="w-4 h-4" />
+                                Completed
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Favorite button */}
+                    <button
+                      onClick={handleToggleFavorite}
+                      className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all border ${
+                        isFavorite
+                          ? 'bg-red-500 text-white border-red-500 hover:bg-red-600'
+                          : 'bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20'
+                      }`}
+                      aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      <Heart className={`w-5 h-5 sm:w-6 sm:h-6 ${isFavorite ? 'fill-current' : ''}`} />
+                    </button>
+
+                    {/* Release tracking indicator */}
+                    {isTracked && (
+                      <div
+                        className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-indigo-500 text-white rounded-lg transition-all border border-indigo-400"
+                        title="Tracking new chapter releases"
+                      >
+                        <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tags Section */}
+                  {inLibrary && (
+                    <div className="mt-4 flex items-center gap-3 flex-wrap">
+                      <TagChips
+                        tags={mediaTags}
+                        onRemove={handleRemoveTag}
+                      />
+                      <div className="relative">
+                        <button
+                          ref={tagButtonRef}
+                          onClick={() => setShowTagSelector(!showTagSelector)}
+                          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20"
+                        >
+                          <Tags className="w-4 h-4" />
+                          <span>{mediaTags.length > 0 ? 'Edit Tags' : 'Add Tags'}</span>
+                        </button>
+                        <TagSelector
+                          mediaId={manga.id}
+                          isOpen={showTagSelector}
+                          onClose={() => setShowTagSelector(false)}
+                          onTagsChange={loadMediaTags}
+                          anchorRef={tagButtonRef}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[calc(90vh-16rem)]">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-            </div>
-          )}
-
-          {error && (
-            <div className="text-center py-12">
-              <Info className="w-12 h-12 text-red-500 mx-auto mb-4" />
-              <p className="text-[var(--color-text-secondary)]">{error}</p>
-            </div>
-          )}
-
-          {/* NSFW Content Blocked */}
-          {!loading && !error && isNsfwBlocked && (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
-                <X className="w-8 h-8 text-red-500" />
+          {/* Description & Chapters */}
+          <div className="p-4 sm:p-8">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                <div className="text-[var(--color-text-muted)] text-sm mb-1">Score</div>
+                <div className="text-2xl font-bold text-yellow-400">
+                  {details.rating ? details.rating.toFixed(2) : 'N/A'}
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Content Blocked</h3>
-              <p className="text-[var(--color-text-secondary)] max-w-md mx-auto mb-4">
-                This manga contains adult content and has been blocked by your NSFW filter settings.
-              </p>
-              <p className="text-sm text-[var(--color-text-muted)]">
-                You can disable the NSFW filter in Settings to view this content.
-              </p>
-            </div>
-          )}
-
-          {!loading && !error && details && !isNsfwBlocked && (
-            <div className="space-y-6">
-              {/* Action buttons */}
-              <div className="flex flex-wrap gap-3">
-                {/* Read / Continue Reading button */}
-                {readingProgress ? (
-                  <button
-                    onClick={handleContinueReading}
-                    className="flex items-center gap-2 px-6 py-3 bg-[var(--color-accent-primary)] text-white font-semibold rounded-lg hover:opacity-90 transition-opacity"
-                  >
-                    <BookOpen className="w-5 h-5" />
-                    Continue Ch. {readingProgress.chapterNumber} (p.{readingProgress.page})
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleReadNow()}
-                    className="flex items-center gap-2 px-6 py-3 bg-[var(--color-accent-primary)] text-white font-semibold rounded-lg hover:opacity-90 transition-opacity"
-                  >
-                    <BookOpen className="w-5 h-5" />
-                    Start Reading
-                  </button>
-                )}
-
-                {/* Library button - key forces re-render to prevent visual artifacts */}
-                {inLibrary ? (() => {
-                  // Smart status display: Show "Reading" if user hasn't read all chapters
-                  let displayStatus = libraryStatus
-
-                  if (details && libraryStatus && readingProgress) {
-                    // Get the highest chapter number available
-                    const maxChapter = Math.max(...details.chapters.map(ch => ch.number))
-
-                    // If not all chapters are read, override display to "Reading"
-                    if (readingProgress.chapterNumber < maxChapter && libraryStatus !== 'dropped') {
-                      displayStatus = 'reading'
-                    }
-                  }
-
-                  return (
-                    <button
-                      key="in-library-btn"
-                      onClick={handleRemoveFromLibrary}
-                      className="flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                    >
-                      <Check className="w-5 h-5" />
-                      {displayStatus ? getStatusLabel(displayStatus) : 'In Library'}
-                    </button>
-                  )
-                })() : (
-                  <div key="add-library-btn" className="relative group">
-                    <button
-                      onClick={() => handleAddToLibrary('plan_to_read')}
-                      className="flex items-center gap-2 px-4 py-3 bg-[var(--color-bg-secondary)] text-white rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Add to Library
-                    </button>
-                    {/* Dropdown menu */}
-                    <div className="absolute top-full left-0 mt-1 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 min-w-[180px]">
-                      <button
-                        onClick={() => handleAddToLibrary('reading')}
-                        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                      >
-                        <BookMarked className="w-4 h-4" />
-                        Reading
-                      </button>
-                      <button
-                        onClick={() => handleAddToLibrary('plan_to_read')}
-                        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                      >
-                        <Library className="w-4 h-4" />
-                        Plan to Read
-                      </button>
-                      <button
-                        onClick={() => handleAddToLibrary('completed')}
-                        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                      >
-                        <Check className="w-4 h-4" />
-                        Completed
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Favorite button */}
-                <button
-                  onClick={handleToggleFavorite}
-                  className={`p-3 rounded-lg transition-colors ${
-                    isFavorite
-                      ? 'bg-red-500 text-white'
-                      : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
-                  }`}
-                >
-                  <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
-                </button>
-
-                {/* Release tracking indicator */}
-                {isTracked && (
-                  <div
-                    className="p-3 rounded-lg bg-indigo-500 text-white"
-                    title="Tracking new chapter releases"
-                  >
-                    <Bell className="w-5 h-5" />
-                  </div>
-                )}
+              <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                <div className="text-[var(--color-text-muted)] text-sm mb-1">Chapters</div>
+                <div className="text-2xl font-bold">
+                  {effectiveChapters.length > 0 ? effectiveChapters.length : (details.totalChapters || 'N/A')}
+                  {details.totalChapters && effectiveChapters.length > 0 && effectiveChapters.length !== details.totalChapters && (
+                    <span className="text-sm text-[var(--color-text-muted)] ml-1">/ {details.totalChapters}</span>
+                  )}
+                </div>
               </div>
-
-              {/* Tags Section */}
-              {inLibrary && (
-                <div className="flex items-center gap-3 flex-wrap">
-                  <TagChips
-                    tags={mediaTags}
-                    onRemove={handleRemoveTag}
-                  />
-                  <div className="relative">
-                    <button
-                      ref={tagButtonRef}
-                      onClick={() => setShowTagSelector(!showTagSelector)}
-                      className="flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] rounded-full transition-colors"
-                    >
-                      <Tags className="w-4 h-4" />
-                      <span>{mediaTags.length > 0 ? 'Edit Tags' : 'Add Tags'}</span>
-                    </button>
-                    <TagSelector
-                      mediaId={details.id}
-                      isOpen={showTagSelector}
-                      onClose={() => setShowTagSelector(false)}
-                      onTagsChange={loadMediaTags}
-                      anchorRef={tagButtonRef}
-                    />
-                  </div>
+              {details.status && details.status.toLowerCase() !== 'unknown' && (
+                <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                  <div className="text-[var(--color-text-muted)] text-sm mb-1">Status</div>
+                  <div className="text-2xl font-bold capitalize">{details.status.toLowerCase()}</div>
                 </div>
               )}
+              <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                <div className="text-[var(--color-text-muted)] text-sm mb-1">Year</div>
+                <div className="text-2xl font-bold">{details.year || 'N/A'}</div>
+              </div>
+            </div>
 
-              {/* Genres */}
-              {details.genres && details.genres.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {details.genres.map((genre) => (
-                    <span
-                      key={genre}
-                      className="px-3 py-1 bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] text-sm rounded-full"
-                    >
-                      {genre}
-                    </span>
-                  ))}
-                </div>
-              )}
+            {/* Description */}
+            {details.description && (
+              <div className="mb-8">
+                <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                  <BookOpen className="w-6 h-6 text-[var(--color-accent-primary)]" />
+                  Synopsis
+                </h2>
+                <Description content={details.description} className="text-lg" />
+              </div>
+            )}
 
-              {/* Description */}
-              {details.description && (
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Synopsis</h3>
-                  <Description content={details.description} />
-                </div>
-              )}
-
-              {/* Chapters */}
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">
-                    Chapters ({details.chapters.length})
-                  </h3>
+            {/* Chapters */}
+            <div>
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+                <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
+                  <BookMarked className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--color-accent-primary)]" />
+                  Chapters {effectiveChapters.length > 0 ? `(${effectiveChapters.length})` : ''}
+                  {chaptersLoading && (
+                    <Loader2 className="w-4 h-4 animate-spin inline ml-2" />
+                  )}
+                </h2>
+                {effectiveChapters.length > 0 && (
                   <button
                     onClick={handleDownloadAllChapters}
-                    disabled={isDownloadingAll || downloadedChapters.size === details.chapters.length}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      downloadedChapters.size === details.chapters.length
+                    disabled={isDownloadingAll || downloadedChapters.size === effectiveChapters.length}
+                    className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                      downloadedChapters.size === effectiveChapters.length
                         ? 'bg-green-600 text-white cursor-default'
                         : isDownloadingAll
                           ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] cursor-wait'
-                          : 'bg-[var(--color-bg-secondary)] hover:bg-[var(--color-accent-primary)] text-[var(--color-text-secondary)] hover:text-white'
+                          : 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] text-white'
                     }`}
                   >
                     {isDownloadingAll ? (
@@ -771,7 +988,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Downloading...
                       </>
-                    ) : downloadedChapters.size === details.chapters.length ? (
+                    ) : downloadedChapters.size === effectiveChapters.length ? (
                       <>
                         <CheckCircle className="w-4 h-4" />
                         All Downloaded
@@ -779,89 +996,138 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
                     ) : (
                       <>
                         <Download className="w-4 h-4" />
-                        Download All ({details.chapters.length - downloadedChapters.size})
-                      </>
-                    )}
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                  {displayedChapters.map((chapter: Chapter) => {
-                    const isDownloaded = downloadedChapters.has(chapter.id)
-                    const isDownloading = downloadingChapters.has(chapter.id)
-
-                    return (
-                      <div
-                        key={chapter.id}
-                        className="relative p-3 bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors group"
-                      >
-                        <button
-                          onClick={() => handleReadNow(chapter.id)}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium group-hover:text-[var(--color-accent-primary)]">
-                              Ch. {chapter.number}
-                            </span>
-                            {isDownloaded && (
-                              <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                            )}
-                          </div>
-                          {chapter.title && (
-                            <p className="text-xs text-[var(--color-text-muted)] truncate mt-1">
-                              {chapter.title}
-                            </p>
-                          )}
-                        </button>
-
-                        {/* Download button */}
-                        <button
-                          onClick={(e) => isDownloaded
-                            ? handleDeleteChapterDownload(e, chapter)
-                            : handleDownloadChapter(e, chapter)
-                          }
-                          disabled={isDownloading}
-                          className={`absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all ${
-                            isDownloaded
-                              ? 'bg-green-600 hover:bg-red-600 text-white'
-                              : 'bg-[var(--color-bg-hover)] hover:bg-[var(--color-accent-primary)] text-[var(--color-text-secondary)] hover:text-white'
-                          }`}
-                          title={isDownloaded ? 'Delete download' : 'Download chapter'}
-                        >
-                          {isDownloading ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : isDownloaded ? (
-                            <Trash2 className="w-4 h-4" />
-                          ) : (
-                            <Download className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {/* Show more/less button */}
-                {details.chapters.length > 20 && (
-                  <button
-                    onClick={() => setShowAllChapters(!showAllChapters)}
-                    className="flex items-center gap-1 mt-4 text-[var(--color-accent-primary)] hover:underline"
-                  >
-                    {showAllChapters ? (
-                      <>
-                        <ChevronUp className="w-4 h-4" />
-                        Show Less
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="w-4 h-4" />
-                        Show All {details.chapters.length} Chapters
+                        Download All ({effectiveChapters.length - downloadedChapters.size})
                       </>
                     )}
                   </button>
                 )}
               </div>
+
+              {/* Chapters unavailable message (MAL flow, AllAnime resolution failed) */}
+              {malIdMode && !chaptersLoading && effectiveChapters.length === 0 && !allanimeShowId && (
+                <div className="text-center py-6 text-[var(--color-text-secondary)]">
+                  <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">This manga is not available for reading yet.</p>
+                  {details.totalChapters && (
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">{details.totalChapters} chapters on MyAnimeList</p>
+                  )}
+                </div>
+              )}
+
+              {effectiveChapters.length > 0 && (
+                <>
+                  {/* Pagination controls */}
+                  {effectiveChapters.length > CHAPTERS_PER_PAGE && (
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm text-[var(--color-text-muted)]">
+                        {chapterPage * CHAPTERS_PER_PAGE + 1}–{Math.min((chapterPage + 1) * CHAPTERS_PER_PAGE, effectiveChapters.length)} of {effectiveChapters.length}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setChapterPage(p => Math.max(0, p - 1))}
+                          disabled={chapterPage === 0}
+                          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
+                        >
+                          Prev
+                        </button>
+                        <span className="text-sm text-[var(--color-text-secondary)] tabular-nums">
+                          {chapterPage + 1} / {totalChapterPages}
+                        </span>
+                        <button
+                          onClick={() => setChapterPage(p => Math.min(totalChapterPages - 1, p + 1))}
+                          disabled={chapterPage >= totalChapterPages - 1}
+                          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                    {paginatedChapters.map((chapter: Chapter) => {
+                      const isDownloaded = downloadedChapters.has(chapter.id)
+                      const isDownloading = downloadingChapters.has(chapter.id)
+
+                      return (
+                        <div
+                          key={chapter.id}
+                          className="relative p-3 bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors group"
+                        >
+                          <button
+                            onClick={() => handleReadNow(chapter.id)}
+                            className="w-full text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium group-hover:text-[var(--color-accent-primary)]">
+                                Ch. {chapter.number}
+                              </span>
+                              {isDownloaded && (
+                                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                              )}
+                            </div>
+                            {chapter.title && (
+                              <p className="text-xs text-[var(--color-text-muted)] truncate mt-1">
+                                {chapter.title}
+                              </p>
+                            )}
+                          </button>
+
+                          {/* Download button */}
+                          <button
+                            onClick={(e) => isDownloaded
+                              ? handleDeleteChapterDownload(e, chapter)
+                              : handleDownloadChapter(e, chapter)
+                            }
+                            disabled={isDownloading}
+                            className={`absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all ${
+                              isDownloaded
+                                ? 'bg-green-600 hover:bg-red-600 text-white'
+                                : 'bg-[var(--color-bg-hover)] hover:bg-[var(--color-accent-primary)] text-[var(--color-text-secondary)] hover:text-white'
+                            }`}
+                            title={isDownloaded ? 'Delete download' : 'Download chapter'}
+                          >
+                            {isDownloading ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : isDownloaded ? (
+                              <Trash2 className="w-4 h-4" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </div>
-          )}
+          </div>
+        </>
+      )}
+    </>
+  )
+
+  if (mobile) {
+    return (
+      <BottomSheet isOpen={!!manga} onClose={onClose}>
+        {modalContent}
+      </BottomSheet>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-300">
+      <div
+        className="fixed inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
+        onClick={onClose}
+      />
+      <div className="relative min-h-screen flex items-start justify-center p-4 sm:p-6 lg:p-8">
+        <div
+          className="relative bg-[var(--color-bg-primary)] rounded-xl max-w-6xl w-full my-8 shadow-2xl animate-in slide-in-from-bottom-4 duration-500 border border-white/5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {modalContent}
         </div>
       </div>
     </div>

@@ -12,6 +12,7 @@
 
 import { create } from 'zustand'
 import { getAppSetting, setAppSetting } from '@/utils/tauri-commands'
+import { isMobile } from '@/utils/platform'
 
 // Database key for all settings
 const DB_KEY_SETTINGS = 'app_settings'
@@ -34,6 +35,9 @@ interface SettingsData {
   defaultVolume: number
   defaultPlaybackSpeed: number
   markWatchedThreshold: number
+
+  // Onboarding
+  onboardingCompleted: boolean
 }
 
 interface SettingsState extends SettingsData {
@@ -49,7 +53,7 @@ interface SettingsState extends SettingsData {
 
 const defaultSettings: SettingsData = {
   // Appearance
-  gridDensity: 'comfortable',
+  gridDensity: isMobile() ? 'compact' : 'comfortable',
   showContinueWatching: true,
 
   // Content
@@ -65,6 +69,9 @@ const defaultSettings: SettingsData = {
   defaultVolume: 1.0,
   defaultPlaybackSpeed: 1.0,
   markWatchedThreshold: 90,
+
+  // Onboarding
+  onboardingCompleted: false,
 }
 
 // Helper to save settings to database
@@ -91,6 +98,7 @@ const extractSettingsData = (state: SettingsState): SettingsData => ({
   defaultVolume: state.defaultVolume,
   defaultPlaybackSpeed: state.defaultPlaybackSpeed,
   markWatchedThreshold: state.markWatchedThreshold,
+  onboardingCompleted: state.onboardingCompleted,
 })
 
 export const useSettingsStore = create<SettingsState>()((set, get) => ({
@@ -124,7 +132,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<SettingsData>
         // Merge with defaults to handle new settings added in updates
-        const mergedSettings = { ...defaultSettings, ...parsed }
+        const mergedSettings = {
+          ...defaultSettings,
+          ...parsed,
+          // Existing users upgrading won't have this field — skip onboarding for them
+          onboardingCompleted: parsed.onboardingCompleted ?? true,
+        }
         set({ ...mergedSettings, _initialized: true })
         // Sync NSFW filter key for the release checker
         await setAppSetting('nsfw_filter', mergedSettings.nsfwFilter ? '1' : '0')

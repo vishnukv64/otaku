@@ -52,12 +52,28 @@ impl VideoServerInfo {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   // Database and DownloadManager will be initialized in setup
-  tauri::Builder::default()
+  #[allow(unused_mut)] // mut needed on desktop for conditional plugin registration
+  let mut builder = tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_dialog::init())
-    .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
     .plugin(tauri_plugin_fs::init())
+    .plugin(tauri_plugin_notification::init());
+
+  // Updater plugin is desktop-only (Android updates via Play Store / sideload)
+  #[cfg(not(target_os = "android"))]
+  {
+    builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+  }
+
+  // Edge-to-edge plugin for iOS — makes WKWebView extend behind safe areas
+  // (fixes the bottom gap where the webview doesn't reach the screen edge)
+  #[cfg(target_os = "ios")]
+  {
+    builder = builder.plugin(tauri_plugin_edge_to_edge::init());
+  }
+
+  builder
     .register_asynchronous_uri_scheme_protocol("stream", |_app, request, responder| {
       // Custom protocol to stream videos through Rust backend with Range support
       use std::io::Read;
@@ -184,10 +200,17 @@ pub fn run() {
         Ok(dir) => dir,
         Err(e) => {
           log::error!("Failed to get app data directory: {}", e);
-          // Fallback to home directory
-          dirs::home_dir()
-            .map(|h| h.join(".otaku"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".otaku"))
+          // Fallback: use home dir on desktop, internal storage on Android
+          #[cfg(not(target_os = "android"))]
+          {
+            dirs::home_dir()
+              .map(|h| h.join(".otaku"))
+              .unwrap_or_else(|| std::path::PathBuf::from(".otaku"))
+          }
+          #[cfg(target_os = "android")]
+          {
+            std::path::PathBuf::from("/data/local/tmp/otaku")
+          }
         }
       };
 
@@ -250,27 +273,29 @@ pub fn run() {
             }
         });
 
-        // Start release checker if enabled (with delay to let app fully initialize)
-        let checker_app_handle = app_handle.clone();
-        tokio::spawn(async move {
-            // Wait for app to fully initialize
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        // Start release checker if enabled
+        {
+            let checker_app_handle = app_handle.clone();
+            tokio::spawn(async move {
+                // Wait for app to fully initialize
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
-            // Check settings and start if enabled
-            match release_checker::get_release_settings(&checker_db_pool).await {
-                Ok(settings) => {
-                    if settings.enabled {
-                        log::info!("Starting background release checker");
-                        release_checker::start_release_checker(checker_app_handle).await;
-                    } else {
-                        log::debug!("Release checker is disabled");
+                // Check settings and start if enabled
+                match release_checker::get_release_settings(&checker_db_pool).await {
+                    Ok(settings) => {
+                        if settings.enabled {
+                            log::info!("Starting background release checker");
+                            release_checker::start_release_checker(checker_app_handle).await;
+                        } else {
+                            log::debug!("Release checker is disabled");
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to get release settings on startup: {}", e);
                     }
                 }
-                Err(e) => {
-                    log::error!("Failed to get release settings on startup: {}", e);
-                }
-            }
-        });
+            });
+        }
 
         // Start auto-backup task
         let backup_app_handle = app_handle.clone();
@@ -336,6 +361,7 @@ pub fn run() {
       // Watch History
       commands::save_watch_progress,
       commands::get_watch_progress,
+      commands::get_batch_watch_progress,
       commands::get_latest_watch_progress_for_media,
       commands::get_continue_watching,
       commands::remove_from_continue_watching,
@@ -378,6 +404,8 @@ pub fn run() {
       // Discover Cache
       commands::save_discover_cache,
       commands::get_discover_cache,
+      commands::get_discover_cache_with_freshness,
+      commands::save_discover_cache_with_ttl,
       // Data Management
       commands::clear_all_watch_history,
       commands::clear_library,

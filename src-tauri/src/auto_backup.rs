@@ -95,7 +95,12 @@ pub fn get_default_backup_dir(app_handle: &AppHandle) -> PathBuf {
     app_handle
         .path()
         .app_data_dir()
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".otaku"))
+        .unwrap_or_else(|_| {
+            #[cfg(not(target_os = "android"))]
+            { dirs::home_dir().unwrap_or_default().join(".otaku") }
+            #[cfg(target_os = "android")]
+            { PathBuf::from("/data/local/tmp/otaku") }
+        })
         .join("backups")
 }
 

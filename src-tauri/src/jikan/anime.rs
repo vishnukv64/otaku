@@ -126,6 +126,43 @@ fn compute_broadcast_interval(anime: &JikanAnime, last_aired: &Option<String>) -
     Some(604_800_000) // 7 days in milliseconds (weekly schedule)
 }
 
+/// Collect all title synonyms from a Jikan anime entry.
+/// Gathers from title_synonyms, title_japanese, and titles[] (skipping Default/English
+/// which are already passed as title/english_name).
+fn collect_anime_synonyms(anime: &JikanAnime) -> Option<Vec<String>> {
+    let mut synonyms = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. Add title_synonyms array entries
+    if let Some(ref syns) = anime.title_synonyms {
+        for s in syns {
+            if !s.is_empty() && seen.insert(s.to_lowercase()) {
+                synonyms.push(s.clone());
+            }
+        }
+    }
+
+    // 2. Add title_japanese (if not empty and not already in synonyms)
+    if let Some(ref jp) = anime.title_japanese {
+        if !jp.is_empty() && seen.insert(jp.to_lowercase()) {
+            synonyms.push(jp.clone());
+        }
+    }
+
+    // 3. Add titles[] entries where type != "Default" and type != "English"
+    if let Some(ref titles) = anime.titles {
+        for t in titles {
+            if t.title_type != "Default" && t.title_type != "English" && !t.title.is_empty() {
+                if seen.insert(t.title.to_lowercase()) {
+                    synonyms.push(t.title.clone());
+                }
+            }
+        }
+    }
+
+    if synonyms.is_empty() { None } else { Some(synonyms) }
+}
+
 fn jikan_anime_to_media_details(anime: &JikanAnime, episodes: Vec<Episode>, last_aired: Option<String>) -> MediaDetails {
     let aired_start = anime
         .aired
@@ -145,6 +182,7 @@ fn jikan_anime_to_media_details(anime: &JikanAnime, episodes: Vec<Episode>, last
         title: anime.title.clone(),
         english_name: anime.title_english.clone(),
         native_name: anime.title_japanese.clone(),
+        title_synonyms: collect_anime_synonyms(anime),
         cover_url: extract_image_url(&anime.images),
         trailer_url: build_trailer_url(&anime.trailer),
         description: anime.synopsis.clone(),
@@ -369,7 +407,7 @@ fn fetch_all_episodes(mal_id: i64) -> Result<(Vec<Episode>, Option<String>), Str
         }
         page += 1;
 
-        if page > 10 {
+        if page > 30 {
             break;
         }
     }
@@ -451,7 +489,7 @@ pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResult
         Some(d) => format!("/schedules?filter={}", d),
         None => "/schedules".to_string(),
     };
-    let mut params = vec![("page", page_str.as_str()), ("limit", "25")];
+    let mut params = vec![("page", page_str.as_str()), ("limit", "30")];
     if sfw {
         params.push(("sfw", "true"));
     }

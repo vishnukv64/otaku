@@ -17,6 +17,7 @@ import { saveReadingProgress } from '@/utils/tauri-commands'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { ChapterImage, Chapter } from '@/types/extension'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
+import { useMobileLayout } from '@/hooks/useMobileLayout'
 
 import { PageView } from './PageView'
 import { VerticalScrollView } from './VerticalScrollView'
@@ -108,6 +109,7 @@ export function MangaReader({
   const containerRef = useRef<HTMLDivElement>(null)
   const hideControlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const { refresh: refreshMediaStatus } = useMediaStatusContext()
+  const { isMobile: mobile } = useMobileLayout()
 
   // Refs for unmount save (to avoid stale closures)
   const mangaIdRef = useRef(mangaId)
@@ -265,8 +267,13 @@ export function MangaReader({
     }
   }, [refreshMediaStatus]) // Include refreshMediaStatus in deps
 
+  // On mobile, only allow single and webtoon modes
+  const effectiveReadingMode = mobile
+    ? (settings.readingMode === 'double' || settings.readingMode === 'vertical' ? 'single' : settings.readingMode)
+    : settings.readingMode
+
   // Check if current mode is vertical scroll (webtoon or vertical)
-  const isVerticalScrollMode = settings.readingMode === 'vertical' || settings.readingMode === 'webtoon'
+  const isVerticalScrollMode = effectiveReadingMode === 'vertical' || effectiveReadingMode === 'webtoon'
 
   // Note: Image preloading for single/double page modes is handled by the
   // useProxiedImage hook in each component. The hook proxies remote images
@@ -384,6 +391,32 @@ export function MangaReader({
     isVerticalScrollMode,
   ])
 
+  // Swipe gesture navigation for mobile (horizontal swipe = page turn)
+  useEffect(() => {
+    if (!mobile || isVerticalScrollMode) return
+    const container = containerRef.current
+    if (!container) return
+
+    let startX = 0
+    const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX }
+    const onTouchEnd = (e: TouchEvent) => {
+      const deltaX = e.changedTouches[0].clientX - startX
+      if (Math.abs(deltaX) < 50) return // ignore small swipes
+      if (settings.readingDirection === 'rtl') {
+        deltaX > 0 ? handleNextPage() : handlePreviousPage()
+      } else {
+        deltaX < 0 ? handleNextPage() : handlePreviousPage()
+      }
+    }
+
+    container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchend', onTouchEnd, { passive: true })
+    return () => {
+      container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [mobile, isVerticalScrollMode, settings.readingDirection, handleNextPage, handlePreviousPage])
+
   // Auto-hide controls
   const resetControlsTimer = useCallback(() => {
     if (hideControlsTimeoutRef.current) {
@@ -471,7 +504,7 @@ export function MangaReader({
 
     const currentImage = images.find(img => img.page === currentPage) || images[currentPage - 1]
 
-    switch (settings.readingMode) {
+    switch (effectiveReadingMode) {
       case 'vertical':
       case 'webtoon':
         return (

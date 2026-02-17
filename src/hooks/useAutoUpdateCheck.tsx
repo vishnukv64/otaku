@@ -12,6 +12,7 @@ import { getVersion } from '@tauri-apps/api/app'
 import { useUpdateStore } from '@/store/updateStore'
 import { useNotificationStore } from '@/store/notificationStore'
 import { getUpdateCheckInfo, setUpdateCheckInfo } from '@/utils/tauri-commands'
+import { isMobile } from '@/utils/platform'
 
 // Check interval: 24 hours in milliseconds
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000
@@ -21,6 +22,8 @@ export function useAutoUpdateCheck() {
   const checkInProgressRef = useRef(false)
 
   useEffect(() => {
+    // Updater plugin is not registered on Android — skip entirely
+    if (isMobile()) return
     let intervalId: ReturnType<typeof setInterval> | null = null
 
     const checkForUpdates = async (isInitialCheck = false) => {

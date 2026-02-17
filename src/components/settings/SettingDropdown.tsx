@@ -58,7 +58,7 @@ export function SettingDropdown({ value, options, onChange }: SettingDropdownPro
           rounded-lg
           px-3
           py-1.5
-          min-w-[150px]
+          min-w-[120px] sm:min-w-[150px]
           cursor-pointer
           hover:bg-[var(--color-surface-hover)]
           focus:outline-none

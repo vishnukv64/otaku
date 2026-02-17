@@ -160,6 +160,7 @@ pub async fn resolve_allanime_id(
     media_type: String,
     year: Option<i32>,
     mal_id: String,
+    synonyms: Option<Vec<String>>,
 ) -> Result<Option<String>, String> {
     // Check cache first
     let pool = state.database.pool();
@@ -171,6 +172,7 @@ pub async fn resolve_allanime_id(
     let mal_clone = mal_id.clone();
     let media_for_search = media_type.clone();
     let media_for_cache = media_type.clone();
+    let synonyms_vec = synonyms.unwrap_or_default();
 
     // Search AllAnime directly using inline GraphQL (no extension needed)
     let result = tokio::task::spawn_blocking(move || {
@@ -179,6 +181,7 @@ pub async fn resolve_allanime_id(
             english_title.as_deref(),
             year,
             &media_for_search,
+            &synonyms_vec,
         )
     })
     .await

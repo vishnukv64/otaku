@@ -46,6 +46,40 @@ fn jikan_manga_to_search_result(manga: &JikanManga) -> SearchResult {
     }
 }
 
+/// Collect all title synonyms from a Jikan manga entry.
+/// Gathers from title_synonyms, title_japanese, and titles[] (skipping Default/English
+/// which are already passed as title/english_name).
+fn collect_manga_synonyms(manga: &JikanManga) -> Option<Vec<String>> {
+    let mut synonyms = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    if let Some(ref syns) = manga.title_synonyms {
+        for s in syns {
+            if !s.is_empty() && seen.insert(s.to_lowercase()) {
+                synonyms.push(s.clone());
+            }
+        }
+    }
+
+    if let Some(ref jp) = manga.title_japanese {
+        if !jp.is_empty() && seen.insert(jp.to_lowercase()) {
+            synonyms.push(jp.clone());
+        }
+    }
+
+    if let Some(ref titles) = manga.titles {
+        for t in titles {
+            if t.title_type != "Default" && t.title_type != "English" && !t.title.is_empty() {
+                if seen.insert(t.title.to_lowercase()) {
+                    synonyms.push(t.title.clone());
+                }
+            }
+        }
+    }
+
+    if synonyms.is_empty() { None } else { Some(synonyms) }
+}
+
 fn jikan_manga_to_manga_details(manga: &JikanManga) -> MangaDetails {
     let total_chapters = manga.chapters.unwrap_or(0);
     let chapters: Vec<Chapter> = (1..=total_chapters)
@@ -63,6 +97,7 @@ fn jikan_manga_to_manga_details(manga: &JikanManga) -> MangaDetails {
         title: manga.title.clone(),
         english_name: manga.title_english.clone(),
         native_name: manga.title_japanese.clone(),
+        title_synonyms: collect_manga_synonyms(manga),
         cover_url: extract_image_url(&manga.images),
         trailer_url: None,
         description: manga.synopsis.clone(),

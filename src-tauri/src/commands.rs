@@ -1201,39 +1201,49 @@ pub async fn open_downloads_folder(
     download_manager: State<'_, DownloadManager>,
     custom_path: Option<String>,
 ) -> Result<(), String> {
-    // Use custom path if provided, otherwise use default
-    let path = custom_path.unwrap_or_else(|| download_manager.get_downloads_directory());
-
-    // Ensure the directory exists
-    std::fs::create_dir_all(&path)
-        .map_err(|e| format!("Failed to create directory: {}", e))?;
-
-    // Open the directory based on the platform
-    #[cfg(target_os = "windows")]
+    // No-op on Android (no file explorer to open)
+    #[cfg(target_os = "android")]
     {
-        std::process::Command::new("explorer")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
+        let _ = (download_manager, custom_path);
+        return Ok(());
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "android"))]
     {
-        std::process::Command::new("open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
+        // Use custom path if provided, otherwise use default
+        let path = custom_path.unwrap_or_else(|| download_manager.get_downloads_directory());
 
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
+        // Ensure the directory exists
+        std::fs::create_dir_all(&path)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
 
-    Ok(())
+        // Open the directory based on the platform
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Remove a download from the list
@@ -1347,6 +1357,19 @@ pub async fn get_watch_progress(
     get_progress(state.database.pool(), &episode_id)
         .await
         .map_err(|e| format!("Failed to get watch progress: {}", e))
+}
+
+/// Get watch progress for all episodes of a media (batch)
+#[tauri::command]
+pub async fn get_batch_watch_progress(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Vec<crate::database::watch_history::WatchHistory>, String> {
+    use crate::database::watch_history::get_media_watch_history;
+
+    get_media_watch_history(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get batch watch progress: {}", e))
 }
 
 /// Get the most recent watch progress for a media (for Resume Watching feature)
@@ -1884,6 +1907,35 @@ pub async fn get_discover_cache(
         .map_err(|e| format!("Failed to get discover cache: {}", e))
 }
 
+/// Get cached discover results with freshness metadata (for SWR pattern)
+#[tauri::command]
+pub async fn get_discover_cache_with_freshness(
+    state: State<'_, AppState>,
+    cache_key: String,
+) -> Result<Option<crate::database::discover_cache::CachedDataWithMeta>, String> {
+    use crate::database::discover_cache::get_discover_cache_with_freshness as get_cache;
+
+    get_cache(state.database.pool(), &cache_key)
+        .await
+        .map_err(|e| format!("Failed to get discover cache with freshness: {}", e))
+}
+
+/// Save discover results to cache with explicit TTL
+#[tauri::command]
+pub async fn save_discover_cache_with_ttl(
+    state: State<'_, AppState>,
+    cache_key: String,
+    data: String,
+    media_type: String,
+    ttl_seconds: i64,
+) -> Result<(), String> {
+    use crate::database::discover_cache::save_discover_cache_with_ttl as save_cache;
+
+    save_cache(state.database.pool(), &cache_key, &data, &media_type, ttl_seconds)
+        .await
+        .map_err(|e| format!("Failed to save discover cache with TTL: {}", e))
+}
+
 // ==================== Data Management Commands ====================
 
 /// Clear all watch history
@@ -2010,10 +2062,12 @@ pub async fn get_proxy_video_url(
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Event names for streaming
+#[cfg(not(target_os = "android"))]
 pub const SYSTEM_STATS_EVENT: &str = "system-stats";
 pub const APP_LOGS_EVENT: &str = "app-logs";
 
 /// Global flags for streaming control
+#[cfg(not(target_os = "android"))]
 static STATS_STREAMING: AtomicBool = AtomicBool::new(false);
 static LOGS_STREAMING: AtomicBool = AtomicBool::new(false);
 
@@ -2043,173 +2097,198 @@ pub struct SystemStats {
 /// Get real-time system statistics for developer debugging
 #[tauri::command]
 pub async fn get_system_stats() -> Result<SystemStats, String> {
-    use sysinfo::{System, Pid, Disks};
+    // sysinfo is not available on Android
+    #[cfg(target_os = "android")]
+    {
+        return Ok(SystemStats {
+            memory_used: 0, memory_total: 0, memory_percent: 0.0,
+            cpu_usage: 0.0, cpu_count: 0,
+            process_memory: 0, process_cpu: 0.0, thread_count: 0,
+            disk_used: 0, disk_total: 0, disk_percent: 0.0,
+        });
+    }
 
-    // Create system info instance and refresh relevant data
-    let mut sys = System::new();
-    sys.refresh_cpu_usage();
-    sys.refresh_memory();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+    #[cfg(not(target_os = "android"))]
+    {
+        use sysinfo::{System, Pid, Disks};
 
-    // Get CPU usage (average across all cores)
-    // Note: First call returns 0, subsequent calls show actual usage
-    let cpu_usage = sys.cpus().iter()
-        .map(|cpu| cpu.cpu_usage())
-        .sum::<f32>() / sys.cpus().len().max(1) as f32;
+        // Create system info instance and refresh relevant data
+        let mut sys = System::new();
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
 
-    let cpu_count = sys.cpus().len();
+        // Get CPU usage (average across all cores)
+        let cpu_usage = sys.cpus().iter()
+            .map(|cpu| cpu.cpu_usage())
+            .sum::<f32>() / sys.cpus().len().max(1) as f32;
 
-    // Get memory stats
-    let memory_total = sys.total_memory();
-    let memory_used = sys.used_memory();
-    let memory_percent = if memory_total > 0 {
-        (memory_used as f32 / memory_total as f32) * 100.0
-    } else {
-        0.0
-    };
+        let cpu_count = sys.cpus().len();
 
-    // Get current process stats
-    let current_pid = Pid::from_u32(std::process::id());
-    let (process_memory, process_cpu, thread_count) = if let Some(process) = sys.process(current_pid) {
-        (
-            process.memory(),
-            process.cpu_usage(),
-            // Thread count from /proc/self/stat or platform equivalent
-            std::thread::available_parallelism()
-                .map(|p| p.get())
-                .unwrap_or(1)
-        )
-    } else {
-        (0, 0.0, 1)
-    };
+        // Get memory stats
+        let memory_total = sys.total_memory();
+        let memory_used = sys.used_memory();
+        let memory_percent = if memory_total > 0 {
+            (memory_used as f32 / memory_total as f32) * 100.0
+        } else {
+            0.0
+        };
 
-    // Get disk stats (primary disk)
-    let disks = Disks::new_with_refreshed_list();
-    let (disk_used, disk_total) = disks.iter()
-        .find(|d| d.mount_point() == std::path::Path::new("/"))
-        .or_else(|| disks.first())
-        .map(|d| {
-            let total = d.total_space();
-            let available = d.available_space();
-            let used = total.saturating_sub(available);
-            (used, total)
+        // Get current process stats
+        let current_pid = Pid::from_u32(std::process::id());
+        let (process_memory, process_cpu, thread_count) = if let Some(process) = sys.process(current_pid) {
+            (
+                process.memory(),
+                process.cpu_usage(),
+                std::thread::available_parallelism()
+                    .map(|p| p.get())
+                    .unwrap_or(1)
+            )
+        } else {
+            (0, 0.0, 1)
+        };
+
+        // Get disk stats (primary disk)
+        let disks = Disks::new_with_refreshed_list();
+        let (disk_used, disk_total) = disks.iter()
+            .find(|d| d.mount_point() == std::path::Path::new("/"))
+            .or_else(|| disks.first())
+            .map(|d| {
+                let total = d.total_space();
+                let available = d.available_space();
+                let used = total.saturating_sub(available);
+                (used, total)
+            })
+            .unwrap_or((0, 0));
+
+        let disk_percent = if disk_total > 0 {
+            (disk_used as f32 / disk_total as f32) * 100.0
+        } else {
+            0.0
+        };
+
+        Ok(SystemStats {
+            memory_used,
+            memory_total,
+            memory_percent,
+            cpu_usage,
+            cpu_count,
+            process_memory,
+            process_cpu,
+            thread_count,
+            disk_used,
+            disk_total,
+            disk_percent,
         })
-        .unwrap_or((0, 0));
-
-    let disk_percent = if disk_total > 0 {
-        (disk_used as f32 / disk_total as f32) * 100.0
-    } else {
-        0.0
-    };
-
-    Ok(SystemStats {
-        memory_used,
-        memory_total,
-        memory_percent,
-        cpu_usage,
-        cpu_count,
-        process_memory,
-        process_cpu,
-        thread_count,
-        disk_used,
-        disk_total,
-        disk_percent,
-    })
+    }
 }
 
 /// Start streaming system stats via events (emits every second)
 #[tauri::command]
 pub async fn start_stats_stream(app: tauri::AppHandle) -> Result<(), String> {
-    // Check if already streaming
-    if STATS_STREAMING.swap(true, Ordering::SeqCst) {
-        return Ok(()); // Already streaming
+    // No-op on Android (sysinfo not available)
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return Ok(());
     }
 
-    tokio::spawn(async move {
-        use sysinfo::{System, Pid, Disks};
-
-        while STATS_STREAMING.load(Ordering::SeqCst) {
-            // Collect stats
-            let mut sys = System::new();
-            sys.refresh_cpu_usage();
-            sys.refresh_memory();
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
-
-            let cpu_usage = sys.cpus().iter()
-                .map(|cpu| cpu.cpu_usage())
-                .sum::<f32>() / sys.cpus().len().max(1) as f32;
-
-            let cpu_count = sys.cpus().len();
-            let memory_total = sys.total_memory();
-            let memory_used = sys.used_memory();
-            let memory_percent = if memory_total > 0 {
-                (memory_used as f32 / memory_total as f32) * 100.0
-            } else {
-                0.0
-            };
-
-            let current_pid = Pid::from_u32(std::process::id());
-            let (process_memory, process_cpu, thread_count) = if let Some(process) = sys.process(current_pid) {
-                (
-                    process.memory(),
-                    process.cpu_usage(),
-                    std::thread::available_parallelism()
-                        .map(|p| p.get())
-                        .unwrap_or(1)
-                )
-            } else {
-                (0, 0.0, 1)
-            };
-
-            let disks = Disks::new_with_refreshed_list();
-            let (disk_used, disk_total) = disks.iter()
-                .find(|d| d.mount_point() == std::path::Path::new("/"))
-                .or_else(|| disks.first())
-                .map(|d| {
-                    let total = d.total_space();
-                    let available = d.available_space();
-                    let used = total.saturating_sub(available);
-                    (used, total)
-                })
-                .unwrap_or((0, 0));
-
-            let disk_percent = if disk_total > 0 {
-                (disk_used as f32 / disk_total as f32) * 100.0
-            } else {
-                0.0
-            };
-
-            let stats = SystemStats {
-                memory_used,
-                memory_total,
-                memory_percent,
-                cpu_usage,
-                cpu_count,
-                process_memory,
-                process_cpu,
-                thread_count,
-                disk_used,
-                disk_total,
-                disk_percent,
-            };
-
-            // Emit event
-            if let Err(e) = app.emit(SYSTEM_STATS_EVENT, &stats) {
-                log::error!("Failed to emit stats event: {}", e);
-            }
-
-            // Wait 1 second before next update
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    #[cfg(not(target_os = "android"))]
+    {
+        // Check if already streaming
+        if STATS_STREAMING.swap(true, Ordering::SeqCst) {
+            return Ok(()); // Already streaming
         }
-    });
 
-    Ok(())
+        tokio::spawn(async move {
+            use sysinfo::{System, Pid, Disks};
+
+            while STATS_STREAMING.load(Ordering::SeqCst) {
+                // Collect stats
+                let mut sys = System::new();
+                sys.refresh_cpu_usage();
+                sys.refresh_memory();
+                sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+                let cpu_usage = sys.cpus().iter()
+                    .map(|cpu| cpu.cpu_usage())
+                    .sum::<f32>() / sys.cpus().len().max(1) as f32;
+
+                let cpu_count = sys.cpus().len();
+                let memory_total = sys.total_memory();
+                let memory_used = sys.used_memory();
+                let memory_percent = if memory_total > 0 {
+                    (memory_used as f32 / memory_total as f32) * 100.0
+                } else {
+                    0.0
+                };
+
+                let current_pid = Pid::from_u32(std::process::id());
+                let (process_memory, process_cpu, thread_count) = if let Some(process) = sys.process(current_pid) {
+                    (
+                        process.memory(),
+                        process.cpu_usage(),
+                        std::thread::available_parallelism()
+                            .map(|p| p.get())
+                            .unwrap_or(1)
+                    )
+                } else {
+                    (0, 0.0, 1)
+                };
+
+                let disks = Disks::new_with_refreshed_list();
+                let (disk_used, disk_total) = disks.iter()
+                    .find(|d| d.mount_point() == std::path::Path::new("/"))
+                    .or_else(|| disks.first())
+                    .map(|d| {
+                        let total = d.total_space();
+                        let available = d.available_space();
+                        let used = total.saturating_sub(available);
+                        (used, total)
+                    })
+                    .unwrap_or((0, 0));
+
+                let disk_percent = if disk_total > 0 {
+                    (disk_used as f32 / disk_total as f32) * 100.0
+                } else {
+                    0.0
+                };
+
+                let stats = SystemStats {
+                    memory_used,
+                    memory_total,
+                    memory_percent,
+                    cpu_usage,
+                    cpu_count,
+                    process_memory,
+                    process_cpu,
+                    thread_count,
+                    disk_used,
+                    disk_total,
+                    disk_percent,
+                };
+
+                // Emit event
+                if let Err(e) = app.emit(SYSTEM_STATS_EVENT, &stats) {
+                    log::error!("Failed to emit stats event: {}", e);
+                }
+
+                // Wait 1 second before next update
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        });
+
+        Ok(())
+    }
 }
 
 /// Stop streaming system stats
 #[tauri::command]
 pub async fn stop_stats_stream() -> Result<(), String> {
-    STATS_STREAMING.store(false, Ordering::SeqCst);
+    #[cfg(not(target_os = "android"))]
+    {
+        STATS_STREAMING.store(false, Ordering::SeqCst);
+    }
     Ok(())
 }
 

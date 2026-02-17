@@ -26,6 +26,7 @@ import { DownloadButton } from './DownloadButton'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { notifySuccess } from '@/utils/notify'
+import { isMobile, isAndroid } from '@/utils/platform'
 
 // Helper to create proxy URL for HLS streaming via embedded video server
 function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
@@ -127,6 +128,18 @@ export function VideoPlayer({
 
   // Auto-hide controls timer for fullscreen mode
   const hideControlsTimerRef = useRef<number | null>(null)
+
+  // Video fit mode: contain (letterbox), cover (crop to fill), fill (stretch)
+  const [videoFitMode, setVideoFitMode] = useState<'contain' | 'cover' | 'fill'>(playerSettings.videoFitMode ?? 'contain')
+
+  const cycleVideoFit = () => {
+    const modes: Array<'contain' | 'cover' | 'fill'> = ['contain', 'cover', 'fill']
+    const next = modes[(modes.indexOf(videoFitMode) + 1) % modes.length]
+    setVideoFitMode(next)
+    updatePlayerSettings({ videoFitMode: next })
+  }
+
+  const fitModeLabel = videoFitMode === 'contain' ? 'FIT' : videoFitMode === 'cover' ? 'FILL' : 'STRETCH'
 
   const [selectedServer, setSelectedServer] = useState(0)
   const [selectedQuality, setSelectedQuality] = useState('Auto')
@@ -599,17 +612,29 @@ export function VideoPlayer({
       setIsFullscreen(isFullscreen)
     }
 
-    // Listen to all fullscreen change events
+    // Listen to all fullscreen change events (for web/desktop)
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
     document.addEventListener('mozfullscreenchange', handleFullscreenChange)
     document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+
+    // On iOS, listen for Tauri window resize to detect system-gesture fullscreen exits
+    // Skip on Android: we manage fullscreen state manually via OtakuBridge
+    let unlistenTauri: (() => void) | undefined
+    if (isMobile() && !isAndroid()) {
+      import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+        getCurrentWindow().onResized(() => {
+          getCurrentWindow().isFullscreen().then(setIsFullscreen)
+        }).then(unlisten => { unlistenTauri = unlisten })
+      }).catch(() => {})
+    }
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+      unlistenTauri?.()
     }
   }, [])
 
@@ -685,13 +710,13 @@ export function VideoPlayer({
     msExitFullscreen?: () => void
   }
 
-  const toggleFullscreen = () => {
+  // Web Fullscreen API (used on desktop, fallback on mobile)
+  const webToggleFullscreen = () => {
     if (!containerRef.current) return
 
     const elem = containerRef.current as FullscreenElement
     const doc = document as FullscreenDocument
 
-    // Check if already in fullscreen
     const isFullscreenNow = !!(
       doc.fullscreenElement ||
       doc.webkitFullscreenElement ||
@@ -700,20 +725,31 @@ export function VideoPlayer({
     )
 
     if (!isFullscreenNow) {
-      // Enter fullscreen - try all APIs
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch((err: Error) => console.error('Fullscreen error:', err))
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen()
-      } else if (elem.webkitEnterFullscreen) {
-        elem.webkitEnterFullscreen()
-      } else if (elem.mozRequestFullScreen) {
-        elem.mozRequestFullScreen()
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen()
+      const enterFs = () => {
+        if (elem.requestFullscreen) {
+          return elem.requestFullscreen()
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen(); return Promise.resolve()
+        } else if (elem.webkitEnterFullscreen) {
+          elem.webkitEnterFullscreen(); return Promise.resolve()
+        } else if (elem.mozRequestFullScreen) {
+          elem.mozRequestFullScreen(); return Promise.resolve()
+        } else if (elem.msRequestFullscreen) {
+          elem.msRequestFullscreen(); return Promise.resolve()
+        }
+        return Promise.resolve()
       }
+      enterFs()
+        .then(() => {
+          if (isMobile()) {
+            const orient = screen.orientation as any
+            orient?.lock?.('landscape')
+              ?.then?.(() => console.log('[VideoPlayer] Orientation locked to landscape'))
+              ?.catch?.((err: Error) => console.warn('[VideoPlayer] Orientation lock failed:', err))
+          }
+        })
+        .catch((err: Error) => console.error('Fullscreen error:', err))
     } else {
-      // Exit fullscreen - try all APIs
       if (doc.exitFullscreen) {
         doc.exitFullscreen().catch((err: Error) => console.error('Exit fullscreen error:', err))
       } else if (doc.webkitExitFullscreen) {
@@ -723,6 +759,61 @@ export function VideoPlayer({
       } else if (doc.msExitFullscreen) {
         doc.msExitFullscreen()
       }
+      if (isMobile()) {
+        const orient = screen.orientation as any
+        orient?.unlock?.()
+      }
+    }
+  }
+
+  // Android native bridge fullscreen via @JavascriptInterface in MainActivity.kt
+  // Hides system bars (status + navigation) and locks to landscape
+  const androidToggleFullscreen = () => {
+    const bridge = (window as any).OtakuBridge
+    if (!bridge) {
+      console.warn('[VideoPlayer] OtakuBridge not available, falling back to web fullscreen')
+      webToggleFullscreen()
+      return
+    }
+
+    if (isFullscreen) {
+      bridge.exitFullscreen()
+      setIsFullscreen(false)
+    } else {
+      bridge.enterFullscreen()
+      setIsFullscreen(true)
+    }
+  }
+
+  // Dual-path fullscreen: Native bridge on Android (for proper immersive mode),
+  // Tauri Window API on iOS, web API on desktop
+  const toggleFullscreen = async () => {
+    if (isAndroid()) {
+      // Android: Use native bridge for immersive mode + orientation lock
+      // Web Fullscreen API is broken by RustWebChromeClient.onShowCustomView()
+      androidToggleFullscreen()
+    } else if (isMobile()) {
+      // iOS: Use Tauri API (better iOS integration)
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        const win = getCurrentWindow()
+        const newFullscreen = !isFullscreen
+        await win.setFullscreen(newFullscreen)
+        setIsFullscreen(newFullscreen)
+        if (newFullscreen) {
+          const orient = screen.orientation as any
+          orient?.lock?.('landscape')?.catch?.(() => {})
+        } else {
+          const orient = screen.orientation as any
+          orient?.unlock?.()
+        }
+      } catch (err) {
+        console.error('Tauri fullscreen error:', err)
+        webToggleFullscreen()
+      }
+    } else {
+      // Desktop: Web Fullscreen API
+      webToggleFullscreen()
     }
   }
 
@@ -1010,17 +1101,27 @@ export function VideoPlayer({
     // Add document-level listener to catch mouse movement anywhere
     document.addEventListener('mousemove', handleDocumentMouseMove)
 
+    // On mobile: tap to toggle controls
+    const handleTouchStart = () => {
+      setShowControls(true)
+      startHideTimer()
+    }
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
+
     // Start the initial hide timer
     startHideTimer()
 
     return () => {
       document.removeEventListener('mousemove', handleDocumentMouseMove)
+      document.removeEventListener('touchstart', handleTouchStart)
       if (hideControlsTimerRef.current) {
         clearTimeout(hideControlsTimerRef.current)
         hideControlsTimerRef.current = null
       }
     }
   }, [isPlaying, isPiP])
+
+  const mobile = isMobile()
 
   return (
     <div
@@ -1029,6 +1130,15 @@ export function VideoPlayer({
       style={{
         // Hide cursor when controls are hidden (immersive mode)
         cursor: !showControls && !isPiP ? 'none' : 'default',
+        // Android: CSS fullscreen since we bypass the browser Fullscreen API
+        // Native bridge hides system bars, but we still need to fill the viewport
+        ...(isAndroid() && isFullscreen ? {
+          position: 'fixed' as const,
+          inset: 0,
+          zIndex: 9999,
+          width: '100vw',
+          height: '100vh',
+        } : {}),
       }}
     >
       {/* Video Element */}
@@ -1039,6 +1149,7 @@ export function VideoPlayer({
         preload="auto"
         playsInline
         style={{
+          objectFit: videoFitMode,
           willChange: 'transform',
           contain: 'layout style paint',
           transform: 'translateZ(0)',
@@ -1203,7 +1314,9 @@ export function VideoPlayer({
 
       {/* Title Overlay - Shows when paused or controls visible */}
       <div
-        className={`absolute top-0 left-0 right-0 bg-gradient-to-b from-black/90 via-black/60 to-transparent p-6 transition-opacity duration-300 ${
+        className={`absolute top-0 left-0 right-0 bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${
+          mobile ? 'p-3 px-[max(12px,env(safe-area-inset-left))]' : 'p-6'
+        } ${
           showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -1211,11 +1324,10 @@ export function VideoPlayer({
           <div className="flex-1 min-w-0 pr-4">
             {animeTitle && (
               <>
-                <h1 className="text-2xl font-bold mb-2 truncate">{animeTitle}</h1>
+                <h1 className={`font-bold truncate ${mobile ? 'text-base mb-1' : 'text-2xl mb-2'}`}>{animeTitle}</h1>
                 {currentEpisode && (
-                  <p className="text-base text-white/80">
+                  <p className={`text-white/80 ${mobile ? 'text-xs' : 'text-base'}`}>
                     Episode {currentEpisode}
-                    {/* Only show episode title if it's not just "Episode X" */}
                     {episodeTitle && !episodeTitle.toLowerCase().startsWith('episode') && ` - ${episodeTitle}`}
                   </p>
                 )}
@@ -1226,12 +1338,14 @@ export function VideoPlayer({
           {onGoBack && (
             <button
               onClick={onGoBack}
-              className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors backdrop-blur-sm"
+              className={`flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors backdrop-blur-sm ${
+                mobile ? 'px-2.5 py-1.5' : 'px-4 py-2 gap-2'
+              }`}
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
-              <span className="text-sm font-medium">Back</span>
+              <span className={`font-medium ${mobile ? 'text-xs' : 'text-sm'}`}>Back</span>
             </button>
           )}
         </div>
@@ -1239,12 +1353,14 @@ export function VideoPlayer({
 
       {/* Controls */}
       <div
-        className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/80 to-transparent p-6 transition-opacity duration-300 ${
+        className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/80 to-transparent transition-opacity duration-300 ${
+          mobile ? 'p-3 px-[max(12px,env(safe-area-inset-left))] pb-[max(8px,env(safe-area-inset-bottom))]' : 'p-6'
+        } ${
           showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
         }`}
       >
         {/* Progress Bar with Hover Preview */}
-        <div className="relative mb-4">
+        <div className={`relative ${mobile ? 'mb-2' : 'mb-4'}`}>
           {/* Hover Time Preview Tooltip */}
           {hoverPreview.visible && (
             <div
@@ -1295,14 +1411,14 @@ export function VideoPlayer({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center ${mobile ? 'gap-1' : 'gap-2'}`}>
           {/* Rewind 10s */}
           <button
             onClick={() => handleSkip('backward')}
-            className="w-9 h-9 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+            className={`${mobile ? 'w-7 h-7' : 'w-9 h-9'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
             title="Rewind 10 seconds"
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
               <path d="M12.5 3C17.15 3 21.08 6.03 22.47 10.22L20.1 11C19.05 7.81 16.04 5.5 12.5 5.5C10.54 5.5 8.77 6.22 7.38 7.38L10 10H3V3L5.6 5.6C7.45 4 9.85 3 12.5 3M10 12V22H8V14H6V12H10M18 14V20C18 21.11 17.11 22 16 22H14C12.9 22 12 21.1 12 20V14C12 12.9 12.9 12 14 12H16C17.11 12 18 12.9 18 14M14 14V20H16V14H14Z" />
             </svg>
           </button>
@@ -1310,27 +1426,27 @@ export function VideoPlayer({
           {/* Play/Pause */}
           <button
             onClick={togglePlay}
-            className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+            className={`${mobile ? 'w-8 h-8' : 'w-10 h-10'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
           >
-            {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
+            {isPlaying ? <Pause size={mobile ? 18 : 24} fill="white" /> : <Play size={mobile ? 18 : 24} fill="white" />}
           </button>
 
           {/* Forward 10s */}
           <button
             onClick={() => handleSkip('forward')}
-            className="w-9 h-9 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+            className={`${mobile ? 'w-7 h-7' : 'w-9 h-9'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
             title="Forward 10 seconds"
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
               <path d="M10 3V5.5C5.86 5.5 2.5 8.86 2.5 13S5.86 20.5 10 20.5C12.93 20.5 15.5 18.84 16.77 16.39L14.57 15.27C13.67 16.91 11.96 18 10 18C7.24 18 5 15.76 5 13S7.24 8 10 8V10.5L14 6.5L10 3M18 14V20C18 21.11 17.11 22 16 22H14C12.9 22 12 21.1 12 20V14C12 12.9 12.9 12 14 12H16C17.11 12 18 12.9 18 14M14 14V20H16V14H14Z" />
             </svg>
           </button>
 
           {/* Spacer */}
-          <div className="w-2" />
+          <div className={mobile ? 'w-1' : 'w-2'} />
 
           {/* Time */}
-          <span className="text-sm font-medium">
+          <span className={`font-medium ${mobile ? 'text-xs' : 'text-sm'}`}>
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
 
@@ -1342,11 +1458,13 @@ export function VideoPlayer({
             <div className="relative">
               <button
                 onClick={() => setShowEpisodes(!showEpisodes)}
-                className="px-3 py-2 flex items-center gap-2 hover:bg-white/20 rounded transition-colors text-sm font-medium"
+                className={`flex items-center gap-1 hover:bg-white/20 rounded transition-colors font-medium ${
+                  mobile ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm gap-2'
+                }`}
                 title="Select Episode"
               >
-                <span>Episode {currentEpisode || 1}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <span>{mobile ? `EP ${currentEpisode || 1}` : `Episode ${currentEpisode || 1}`}</span>
+                <svg className={mobile ? 'w-3 h-3' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
@@ -1360,10 +1478,10 @@ export function VideoPlayer({
                   />
 
                   {/* Episodes Dropdown */}
-                  <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl max-h-[400px] overflow-y-auto z-50 min-w-[250px]">
-                    <div className="p-2">
-                      <h4 className="text-sm font-semibold mb-2 px-2 text-[var(--color-text-muted)]">Episodes</h4>
-                      <div className="space-y-1">
+                  <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl max-h-[min(50vh,300px)] overflow-y-auto z-50 min-w-[180px] sm:min-w-[250px] max-w-[70vw] sm:max-w-[80vw]">
+                    <div className="p-1.5 sm:p-2">
+                      <h4 className="text-xs sm:text-sm font-semibold mb-1.5 sm:mb-2 px-2 text-[var(--color-text-muted)]">Episodes</h4>
+                      <div className="space-y-0.5 sm:space-y-1">
                         {episodes.map((episode) => (
                           <button
                             key={episode.id}
@@ -1372,7 +1490,7 @@ export function VideoPlayer({
                               onEpisodeSelect?.(episode.id)
                               setShowEpisodes(false)
                             }}
-                            className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between ${
+                            className={`w-full text-left px-2 sm:px-3 py-1.5 sm:py-2 rounded hover:bg-white/10 transition-colors text-xs sm:text-sm flex items-center justify-between ${
                               currentEpisode === episode.number
                                 ? 'bg-[var(--color-accent-primary)] font-semibold'
                                 : ''
@@ -1396,24 +1514,26 @@ export function VideoPlayer({
             </div>
           )}
 
-          {/* Volume */}
-          <div className="flex items-center gap-2 group/volume">
-            <button
-              onClick={toggleMute}
-              className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
-            >
-              {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-            </button>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={isMuted ? 0 : volume}
-              onChange={handleVolumeChange}
-              className="w-0 group-hover/volume:w-20 transition-all opacity-0 group-hover/volume:opacity-100"
-            />
-          </div>
+          {/* Volume (desktop only — mobile uses hardware buttons) */}
+          {!isMobile() && (
+            <div className="flex items-center gap-2 group/volume">
+              <button
+                onClick={toggleMute}
+                className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+              >
+                {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                className="w-0 group-hover/volume:w-20 transition-all opacity-0 group-hover/volume:opacity-100"
+              />
+            </div>
+          )}
 
           {/* Download */}
           {animeTitle && currentEpisode && mediaId && episodeId && (
@@ -1430,9 +1550,9 @@ export function VideoPlayer({
           <div className="relative">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+              className={`${mobile ? 'w-8 h-8' : 'w-10 h-10'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
             >
-              <Settings size={20} />
+              <Settings size={mobile ? 16 : 20} />
             </button>
 
             {showSettings && (
@@ -1478,12 +1598,23 @@ export function VideoPlayer({
             )}
           </div>
 
+          {/* Video Fit Mode */}
+          <button
+            onClick={cycleVideoFit}
+            className={`flex items-center justify-center hover:bg-white/20 rounded-full transition-colors font-bold tracking-wide ${
+              mobile ? 'px-2 h-8 text-[10px]' : 'px-2.5 h-10 text-xs'
+            }`}
+            title={`Video fit: ${fitModeLabel}`}
+          >
+            {fitModeLabel}
+          </button>
+
           {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
-            className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+            className={`${mobile ? 'w-8 h-8' : 'w-10 h-10'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
           >
-            {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+            {isFullscreen ? <Minimize size={mobile ? 16 : 20} /> : <Maximize size={mobile ? 16 : 20} />}
           </button>
         </div>
       </div>

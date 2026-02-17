@@ -52,6 +52,7 @@ pub struct ContinueReadingEntry {
     pub chapter_number: f64,
     pub current_page: i32,
     pub total_pages: Option<i32>,
+    pub completed: bool,
     pub last_read: String,
 }
 
@@ -269,13 +270,32 @@ pub async fn get_continue_watching_with_media(
 }
 
 /// Get continue reading with media details
-/// Excludes manga where the final chapter is >= 90% read
+/// Includes:
+/// - Incomplete chapters (partially read)
+/// - Completed chapters if there are more chapters to read
+/// Excludes:
+/// - Manga where the final chapter is completed or >= 90% read
 pub async fn get_continue_reading_with_media(
     pool: &SqlitePool,
     limit: i32,
 ) -> Result<Vec<ContinueReadingEntry>> {
+    // Use a CTE to get the most recent read entry per media, then filter
     let entries = sqlx::query(
         r#"
+        WITH latest_read AS (
+            SELECT
+                r.*,
+                ROW_NUMBER() OVER (PARTITION BY r.media_id ORDER BY r.last_read DESC) as rn
+            FROM reading_history r
+            WHERE r.current_page > 0
+        ),
+        max_completed_chapter AS (
+            SELECT
+                media_id,
+                MAX(CASE WHEN completed = 1 THEN chapter_number ELSE 0 END) as max_completed_ch
+            FROM reading_history
+            GROUP BY media_id
+        )
         SELECT DISTINCT
             m.id, m.extension_id, m.title, m.english_name, m.native_name, m.description,
             m.cover_url, m.banner_url, m.trailer_url, m.media_type, m.content_type, m.status,
@@ -283,22 +303,32 @@ pub async fn get_continue_reading_with_media(
             m.season_quarter, m.season_year,
             m.aired_start_year, m.aired_start_month, m.aired_start_date,
             m.genres, m.created_at, m.updated_at,
-            r.chapter_id, r.chapter_number, r.current_page, r.total_pages, r.last_read
-        FROM reading_history r
-        INNER JOIN media m ON r.media_id = m.id
-        WHERE r.completed = 0
-          AND r.current_page > 0
-          -- Exclude if this is the final chapter AND progress >= 90%
+            lr.chapter_id, lr.chapter_number, lr.current_page, lr.total_pages, lr.completed, lr.last_read,
+            mc.max_completed_ch
+        FROM latest_read lr
+        INNER JOIN media m ON lr.media_id = m.id
+        LEFT JOIN max_completed_chapter mc ON lr.media_id = mc.media_id
+        WHERE lr.rn = 1
+          AND (
+            -- Case 1: Chapter is not completed (partially read)
+            lr.completed = 0
+            -- Case 2: Chapter is completed but there are more chapters to read
+            OR (
+                lr.completed = 1
+                AND m.episode_count IS NOT NULL
+                AND COALESCE(mc.max_completed_ch, 0) < m.episode_count
+            )
+          )
+          -- Exclude if final chapter is 90%+ read (nearly complete)
           AND NOT (
             m.episode_count IS NOT NULL
-            AND r.chapter_number >= m.episode_count
-            AND r.total_pages IS NOT NULL
-            AND r.total_pages > 0
-            AND (CAST(r.current_page AS REAL) / CAST(r.total_pages AS REAL)) >= 0.9
+            AND lr.chapter_number >= m.episode_count
+            AND lr.completed = 0
+            AND lr.total_pages IS NOT NULL
+            AND lr.total_pages > 0
+            AND (CAST(lr.current_page AS REAL) / CAST(lr.total_pages AS REAL)) >= 0.9
           )
-        GROUP BY r.media_id
-        HAVING MAX(r.last_read)
-        ORDER BY r.last_read DESC
+        ORDER BY lr.last_read DESC
         LIMIT ?
         "#
     )
@@ -340,9 +370,11 @@ pub async fn get_continue_reading_with_media(
         result.push(ContinueReadingEntry {
             media,
             chapter_id: row.try_get("chapter_id")?,
-            chapter_number: row.try_get("chapter_number")?,
+            chapter_number: row.try_get::<f64, _>("chapter_number")
+                .or_else(|_| row.try_get::<i64, _>("chapter_number").map(|n| n as f64))?,
             current_page: row.try_get("current_page")?,
             total_pages: row.try_get("total_pages")?,
+            completed: row.try_get("completed")?,
             last_read: row.try_get("last_read")?,
         });
     }
@@ -520,7 +552,10 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for EpisodeEntry {
             id: row.try_get("id")?,
             media_id: row.try_get("media_id")?,
             extension_id: row.try_get("extension_id")?,
-            number: row.try_get("number")?,
+            // SQLite stores whole numbers as INTEGER even in REAL columns.
+            // Try f64 first, fall back to i64→f64 to handle both storage types.
+            number: row.try_get::<f64, _>("number")
+                .or_else(|_| row.try_get::<i64, _>("number").map(|n| n as f64))?,
             title: row.try_get("title")?,
             description: row.try_get("description")?,
             thumbnail_url: row.try_get("thumbnail_url")?,

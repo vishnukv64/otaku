@@ -31,6 +31,7 @@ interface PlayerSettings {
   preferredQuality: string
   preferredServer: number
   playbackSpeed: number
+  videoFitMode: 'contain' | 'cover' | 'fill'
 }
 
 interface PlayerState {
@@ -66,6 +67,7 @@ const defaultSettings: PlayerSettings = {
   preferredQuality: 'Auto',
   preferredServer: 0,
   playbackSpeed: 1.0,
+  videoFitMode: 'contain',
 }
 
 // Helper to save settings to database

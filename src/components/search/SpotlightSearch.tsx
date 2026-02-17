@@ -205,7 +205,7 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
           {/* Spotlight Modal */}
           <div className="fixed inset-0 z-[101] flex items-start justify-center pt-[15vh] px-4">
             <div
-              className="w-full max-w-2xl bg-[var(--color-bg-secondary)] rounded-xl shadow-2xl border border-[var(--color-bg-hover)] overflow-hidden animate-in zoom-in-95 fade-in duration-150"
+              className="w-full max-w-full sm:max-w-2xl bg-[var(--color-bg-secondary)] rounded-xl shadow-2xl border border-[var(--color-bg-hover)] overflow-hidden animate-in zoom-in-95 fade-in duration-150"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Search Input */}

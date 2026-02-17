@@ -1,11 +1,13 @@
 /**
  * Downloads Route - Download Manager Page
  *
- * Displays all video downloads with progress tracking
+ * Renders DownloadPageContent directly as a page (no modal chrome).
+ * On mobile, TopNav navigates here instead of opening a modal overlay.
+ * On desktop, this route also works as a standalone page.
  */
 
 import { createFileRoute } from '@tanstack/react-router'
-import { DownloadManager } from '@/components/player/DownloadManager'
+import { DownloadPageContent } from '@/components/player/DownloadManager'
 
 export const Route = createFileRoute('/downloads')({
   component: DownloadsPage,
@@ -14,7 +16,7 @@ export const Route = createFileRoute('/downloads')({
 function DownloadsPage() {
   return (
     <div className="min-h-screen bg-[var(--color-bg-primary)]">
-      <DownloadManager isOpen={true} onClose={() => {}} />
+      <DownloadPageContent />
     </div>
   )
 }

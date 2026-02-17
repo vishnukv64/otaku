@@ -19,7 +19,7 @@ export function SettingSlider({
   const percentage = ((value - min) / (max - min)) * 100
 
   return (
-    <div className="flex items-center gap-4 min-w-[220px]">
+    <div className="flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[220px]">
       <div className="relative flex-1 h-6 flex items-center">
         {/* Track background */}
         <div className="absolute w-full h-2 bg-[var(--color-bg-tertiary)] rounded-full border border-[var(--color-border-subtle)]" />

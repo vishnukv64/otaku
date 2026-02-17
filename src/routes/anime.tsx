@@ -8,14 +8,13 @@ import {
   jikanSeasonNow,
   jikanSeason,
   getContinueWatchingWithDetails,
-  getDiscoverCache,
-  saveDiscoverCache,
 } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
+import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
@@ -60,18 +59,22 @@ function AnimeScreen() {
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
-  const [recommendations, setRecommendations] = useState<SearchResult[]>([])
-  const [recommendationsLoading, setRecommendationsLoading] = useState(false)
+
+  // Browse tab infinite scroll state (pages 2+)
+  const [browseExtraItems, setBrowseExtraItems] = useState<SearchResult[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
-  const [hasNextPage, setHasNextPage] = useState(true)
+  const [browseHasNextPage, setBrowseHasNextPage] = useState(true)
+  const browseSeenIdsRef = useRef<Set<string>>(new Set())
+
+  // Personalized recommendations state
   const [userWatchingGenres, setUserWatchingGenres] = useState<string[]>([])
   const [hasWatchHistory, setHasWatchHistory] = useState(false)
 
   // Tab state
   const [activeTab, setActiveTab] = useState<TabType>('browse')
 
-  // Current season info (for tab label) - calculated from current date
+  // Current season info (for tab label)
   const [currentSeasonInfo] = useState<{ season: string; year: number }>(getCurrentAnimeSeason)
 
   // Season browser selection state
@@ -81,35 +84,14 @@ function AnimeScreen() {
   const [selectedYear, setSelectedYear] = useState(currentSeasonInfo.year)
   const [selectedSeason, setSelectedSeason] = useState(currentSeasonInfo.season.toLowerCase())
 
-  // Full season state (for Season tab with infinite scroll)
-  const [fullSeasonAnime, setFullSeasonAnime] = useState<SearchResult[]>([])
-  const [fullSeasonLoading, setFullSeasonLoading] = useState(false)
+  // Season tab infinite scroll state (pages 2+)
+  const [seasonExtraItems, setSeasonExtraItems] = useState<SearchResult[]>([])
+  const [fullSeasonLoadingMore, setFullSeasonLoadingMore] = useState(false)
   const [fullSeasonPage, setFullSeasonPage] = useState(1)
   const [fullSeasonHasNextPage, setFullSeasonHasNextPage] = useState(true)
-  const [fullSeasonLoadingMore, setFullSeasonLoadingMore] = useState(false)
   const fullSeasonSeenIdsRef = useRef<Set<string>>(new Set())
-  const fullSeasonLoadedRef = useRef(false) // Track if initial load has happened
-  const prevNsfwFilterRef = useRef(nsfwFilter) // Track previous nsfwFilter
 
-  // Reset season data when nsfwFilter or season/year selection changes
-  useEffect(() => {
-    if (prevNsfwFilterRef.current !== nsfwFilter) {
-      prevNsfwFilterRef.current = nsfwFilter
-      fullSeasonLoadedRef.current = false
-      setFullSeasonAnime([])
-      fullSeasonSeenIdsRef.current.clear()
-    }
-  }, [nsfwFilter])
-
-  // Reset and reload when season/year selection changes
-  useEffect(() => {
-    fullSeasonLoadedRef.current = false
-    setFullSeasonAnime([])
-    fullSeasonSeenIdsRef.current.clear()
-  }, [selectedYear, selectedSeason])
-
-  // Grid density class mapping (extended for 4K displays)
-  // Added p-4 -m-4 to allow cards to scale on hover without being clipped
+  // Grid density class mapping
   const gridClasses = {
     compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-x-2 gap-y-6 p-4 -m-4',
     comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-x-4 gap-y-8 p-4 -m-4',
@@ -125,8 +107,7 @@ function AnimeScreen() {
     clearSearch,
   } = useMediaStore()
 
-  // Filter NSFW content from search results on the frontend
-  // Filter NSFW content from search results using both genres and title keywords
+  // Filter NSFW content from search results
   const searchResults = filterNsfwContent(rawSearchResults, (item) => item.genres, nsfwFilter, (item) => item.title)
 
   // Load AllAnime extension lazily in background (for modal downloads)
@@ -146,7 +127,6 @@ function AnimeScreen() {
         if (continueWatching.length > 0) {
           setHasWatchHistory(true)
 
-          // Count genre occurrences from all watching history
           const genreCounts = new Map<string, number>()
           continueWatching.forEach(entry => {
             console.log('[Anime] Entry genres for', entry.media.title, ':', entry.media.genres)
@@ -154,13 +134,11 @@ function AnimeScreen() {
               try {
                 const genres = JSON.parse(entry.media.genres)
                 if (Array.isArray(genres)) {
-                  // Count each genre occurrence (use original case from API)
                   genres.forEach((g: string) => {
                     genreCounts.set(g, (genreCounts.get(g) || 0) + 1)
                   })
                 }
               } catch {
-                // Genres might be a comma-separated string
                 entry.media.genres.split(',').forEach(g => {
                   const genre = g.trim()
                   genreCounts.set(genre, (genreCounts.get(genre) || 0) + 1)
@@ -169,7 +147,6 @@ function AnimeScreen() {
             }
           })
 
-          // Sort by count (descending) and get top 4 genres
           const sortedGenres = Array.from(genreCounts.entries())
             .sort((a, b) => b[1] - a[1])
             .slice(0, 4)
@@ -186,94 +163,102 @@ function AnimeScreen() {
     loadUserGenres()
   }, [])
 
-  // Load full season anime via Jikan API when Season tab is activated (API first, cache fallback)
+  // === BROWSE TAB: SWR hook for page 1 ===
+  const browseAnime = useJikanQuery({
+    cacheKey: `anime:browse:top:sfw=${nsfwFilter}`,
+    fetcher: () => jikanTopAnime(1, undefined, 'favorite', nsfwFilter),
+    ttlSeconds: CACHE_TTL.POPULAR,
+    mediaType: 'anime',
+    enabled: activeTab === 'browse' && !searchQuery,
+  })
+
+  // Sync browse hook's hasNextPage and reset extra items when hook data changes
   useEffect(() => {
-    if (activeTab !== 'season') return
+    setBrowseHasNextPage(browseAnime.hasNextPage)
+    // Reset pagination when hook data reloads (e.g., filter change)
+    setBrowseExtraItems([])
+    setCurrentPage(1)
+    browseSeenIdsRef.current.clear()
+    // Populate seen IDs from hook data
+    browseAnime.data.forEach(item => browseSeenIdsRef.current.add(item.id))
+  }, [browseAnime.data, browseAnime.hasNextPage])
 
-    // Only load if we haven't loaded yet (use ref to avoid dependency issues)
-    if (fullSeasonLoadedRef.current) return
-    fullSeasonLoadedRef.current = true
+  // Combined browse items: hook page 1 + extra pages
+  const recommendations = [...browseAnime.data, ...browseExtraItems]
+  const recommendationsLoading = browseAnime.loading
+  const hasNextPage = browseHasNextPage
 
-    const isCurrentSeason = selectedYear === currentSeasonInfo.year &&
-      selectedSeason === currentSeasonInfo.season.toLowerCase()
-    const cacheKey = `anime:season:${selectedYear}:${selectedSeason}`
+  // === SEASON TAB: SWR hook for page 1 ===
+  const isCurrentSeason = selectedYear === currentSeasonInfo.year &&
+    selectedSeason === currentSeasonInfo.season.toLowerCase()
 
-    const loadSeasonAnime = async () => {
-      setFullSeasonLoading(true)
-      setFullSeasonAnime([])
-      fullSeasonSeenIdsRef.current.clear()
-      setFullSeasonPage(1)
-      setFullSeasonHasNextPage(true)
+  const seasonAnime = useJikanQuery({
+    cacheKey: `anime:season:${selectedYear}:${selectedSeason}:sfw=${nsfwFilter}`,
+    fetcher: () => isCurrentSeason
+      ? jikanSeasonNow(1, nsfwFilter)
+      : jikanSeason(selectedYear, selectedSeason, 1, nsfwFilter),
+    ttlSeconds: isCurrentSeason ? CACHE_TTL.AIRING : CACHE_TTL.SEASON_ARCHIVE,
+    mediaType: 'anime',
+    enabled: activeTab === 'season',
+  })
 
-      try {
-        const results = isCurrentSeason
-          ? await jikanSeasonNow(1, nsfwFilter)
-          : await jikanSeason(selectedYear, selectedSeason, 1, nsfwFilter)
+  // Sync season hook's hasNextPage and reset extra items when hook data changes
+  useEffect(() => {
+    setFullSeasonHasNextPage(seasonAnime.hasNextPage)
+    setSeasonExtraItems([])
+    setFullSeasonPage(1)
+    fullSeasonSeenIdsRef.current.clear()
+    seasonAnime.data.forEach(item => fullSeasonSeenIdsRef.current.add(item.id))
+  }, [seasonAnime.data, seasonAnime.hasNextPage])
 
-        const uniqueResults = results.results.filter(item => {
-          if (fullSeasonSeenIdsRef.current.has(item.id)) return false
-          fullSeasonSeenIdsRef.current.add(item.id)
-          return true
-        })
+  // Combined season items: hook page 1 + extra pages, sorted by rating
+  const fullSeasonAnime = [...seasonAnime.data, ...seasonExtraItems]
+    .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+  const fullSeasonLoading = seasonAnime.loading
 
-        setFullSeasonAnime(uniqueResults.sort((a, b) => (b.rating || 0) - (a.rating || 0)))
-        setFullSeasonPage(1)
-        setFullSeasonHasNextPage(results.has_next_page)
+  // Load more browse anime (pages 2+)
+  const loadMoreRecommendations = useCallback(async () => {
+    if (loadingMore || !browseHasNextPage || searchInput) return
 
-        // Save to cache
-        saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
-      } catch (err) {
-        console.error('Failed to load season anime, trying cache:', err)
+    setLoadingMore(true)
+    try {
+      const nextPage = currentPage + 1
+      const results = await jikanTopAnime(nextPage, undefined, 'favorite', nsfwFilter)
 
-        try {
-          const cached = await getDiscoverCache(cacheKey)
-          if (cached) {
-            const cachedResults: SearchResult[] = JSON.parse(cached.data)
-            const uniqueCached = cachedResults.filter(item => {
-              if (fullSeasonSeenIdsRef.current.has(item.id)) return false
-              fullSeasonSeenIdsRef.current.add(item.id)
-              return true
-            })
-            if (uniqueCached.length > 0) {
-              setFullSeasonAnime(uniqueCached.sort((a, b) => (b.rating || 0) - (a.rating || 0)))
-            }
-          }
-        } catch {
-          // Cache also failed
-        }
-      } finally {
-        setFullSeasonLoading(false)
-      }
+      const newResults = results.results.filter(item => {
+        if (browseSeenIdsRef.current.has(item.id)) return false
+        browseSeenIdsRef.current.add(item.id)
+        return true
+      })
+
+      setBrowseExtraItems(prev => [...prev, ...newResults])
+      setCurrentPage(nextPage)
+      setBrowseHasNextPage(results.has_next_page)
+    } catch (err) {
+      console.error('Failed to load more anime:', err)
+    } finally {
+      setLoadingMore(false)
     }
+  }, [currentPage, browseHasNextPage, loadingMore, searchInput, nsfwFilter])
 
-    loadSeasonAnime()
-  }, [activeTab, nsfwFilter, currentSeasonInfo, selectedYear, selectedSeason])
-
-  // Load more season anime
+  // Load more season anime (pages 2+)
   const loadMoreSeasonAnime = useCallback(async () => {
     if (fullSeasonLoadingMore || !fullSeasonHasNextPage) return
 
     setFullSeasonLoadingMore(true)
     try {
       const nextPage = fullSeasonPage + 1
-      const isCurrentSeason = selectedYear === currentSeasonInfo.year &&
-        selectedSeason === currentSeasonInfo.season.toLowerCase()
       const result = isCurrentSeason
         ? await jikanSeasonNow(nextPage, nsfwFilter)
         : await jikanSeason(selectedYear, selectedSeason, nextPage, nsfwFilter)
 
-      // Deduplicate
       const newResults = result.results.filter(item => {
         if (fullSeasonSeenIdsRef.current.has(item.id)) return false
         fullSeasonSeenIdsRef.current.add(item.id)
         return true
       })
 
-      // Add new results and re-sort entire list
-      setFullSeasonAnime(prev => {
-        const combined = [...prev, ...newResults]
-        return combined.sort((a, b) => (b.rating || 0) - (a.rating || 0))
-      })
+      setSeasonExtraItems(prev => [...prev, ...newResults])
       setFullSeasonPage(nextPage)
       setFullSeasonHasNextPage(result.has_next_page)
     } catch (err) {
@@ -281,7 +266,27 @@ function AnimeScreen() {
     } finally {
       setFullSeasonLoadingMore(false)
     }
-  }, [fullSeasonPage, fullSeasonHasNextPage, fullSeasonLoadingMore, nsfwFilter, selectedYear, selectedSeason, currentSeasonInfo])
+  }, [fullSeasonPage, fullSeasonHasNextPage, fullSeasonLoadingMore, nsfwFilter, selectedYear, selectedSeason, isCurrentSeason])
+
+  // Intersection observer for infinite scroll (Browse tab)
+  useEffect(() => {
+    if (activeTab !== 'browse') return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && browseHasNextPage && !loadingMore && !recommendationsLoading) {
+          loadMoreRecommendations()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [activeTab, browseHasNextPage, loadingMore, recommendationsLoading, loadMoreRecommendations])
 
   // Intersection observer for season tab infinite scroll
   useEffect(() => {
@@ -303,132 +308,8 @@ function AnimeScreen() {
     return () => observer.disconnect()
   }, [activeTab, fullSeasonHasNextPage, fullSeasonLoadingMore, fullSeasonLoading, loadMoreSeasonAnime])
 
-  // Track seen IDs to avoid duplicates
-  const seenIdsRef = useRef<Set<string>>(new Set())
-
-  // Cache key ref for browse results (updated when genres/filters change)
-  const browseCacheKeyRef = useRef('')
-  const recommendationsLoadedRef = useRef(false)
-  const prevRecNsfwRef = useRef(nsfwFilter)
-
-  // Reset browse data when nsfwFilter changes after initial load
+  // Debounced instant search
   useEffect(() => {
-    if (prevRecNsfwRef.current !== nsfwFilter) {
-      prevRecNsfwRef.current = nsfwFilter
-      recommendationsLoadedRef.current = false
-      setRecommendations([])
-      seenIdsRef.current.clear()
-    }
-  }, [nsfwFilter])
-
-  // Load recommendations via Jikan API (API first with cache fallback)
-  useEffect(() => {
-    if (recommendationsLoadedRef.current) return
-    recommendationsLoadedRef.current = true
-
-    const cacheKey = 'anime:browse:top'
-    browseCacheKeyRef.current = cacheKey
-
-    // Only show loading if we have no existing data
-    setRecommendationsLoading(true)
-    seenIdsRef.current.clear()
-    setCurrentPage(1)
-    setHasNextPage(true)
-
-    const loadRecommendations = async () => {
-      try {
-        const results = await jikanTopAnime(1, undefined, 'favorite', nsfwFilter)
-
-        const uniqueResults = results.results.filter(item => {
-          if (seenIdsRef.current.has(item.id)) return false
-          seenIdsRef.current.add(item.id)
-          return true
-        })
-
-        setRecommendations(uniqueResults)
-        setCurrentPage(1)
-        setHasNextPage(results.has_next_page)
-
-        // Save to cache
-        if (uniqueResults.length > 0) {
-          saveDiscoverCache(cacheKey, JSON.stringify(uniqueResults), 'anime').catch(() => {})
-        }
-      } catch (err) {
-        console.error('Failed to load anime, trying cache:', err)
-
-        try {
-          const cached = await getDiscoverCache(cacheKey)
-          if (cached) {
-            const cachedResults: SearchResult[] = JSON.parse(cached.data)
-            const uniqueCached = cachedResults.filter(item => {
-              if (seenIdsRef.current.has(item.id)) return false
-              seenIdsRef.current.add(item.id)
-              return true
-            })
-            if (uniqueCached.length > 0) {
-              setRecommendations(uniqueCached)
-            }
-          }
-        } catch {
-          // Cache also failed
-        }
-      } finally {
-        setRecommendationsLoading(false)
-      }
-    }
-
-    loadRecommendations()
-  }, [nsfwFilter])
-
-  // Load more recommendations when scrolling to bottom
-  const loadMoreRecommendations = useCallback(async () => {
-    if (loadingMore || !hasNextPage || searchInput) return
-
-    setLoadingMore(true)
-    try {
-      const nextPage = currentPage + 1
-      const results = await jikanTopAnime(nextPage, undefined, 'favorite', nsfwFilter)
-
-      // Deduplicate using the seenIds ref
-      const newResults = results.results.filter(item => {
-        if (seenIdsRef.current.has(item.id)) return false
-        seenIdsRef.current.add(item.id)
-        return true
-      })
-
-      setRecommendations(prev => [...prev, ...newResults])
-      setCurrentPage(nextPage)
-      setHasNextPage(results.has_next_page)
-    } catch (err) {
-      console.error('Failed to load more anime:', err)
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [currentPage, hasNextPage, loadingMore, searchInput, nsfwFilter])
-
-  // Intersection observer for infinite scroll (Browse tab)
-  useEffect(() => {
-    if (activeTab !== 'browse') return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasNextPage && !loadingMore && !recommendationsLoading) {
-          loadMoreRecommendations()
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current)
-    }
-
-    return () => observer.disconnect()
-  }, [activeTab, hasNextPage, loadingMore, recommendationsLoading, loadMoreRecommendations])
-
-  // Debounced instant search - triggers as user types
-  useEffect(() => {
-    // If input is empty, clear search results
     if (!searchInput.trim()) {
       if (searchQuery) {
         clearSearch()
@@ -436,7 +317,6 @@ function AnimeScreen() {
       return
     }
 
-    // Debounce the search
     const timer = setTimeout(() => {
       search(searchInput, 1, nsfwFilter)
     }, SEARCH_DEBOUNCE_MS)
@@ -731,7 +611,6 @@ function AnimeScreen() {
           isOpen={true}
           onClose={() => {
             setSelectedMedia(null)
-            // Refresh status to update badges if user changed library/favorite status
             refreshStatus()
           }}
           onMediaChange={setSelectedMedia}

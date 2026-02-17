@@ -124,6 +124,8 @@ pub struct MediaDetails {
     pub english_name: Option<String>,
     #[serde(alias = "native_name")]
     pub native_name: Option<String>,
+    /// All title synonyms from Jikan (romanizations, native script, etc.)
+    pub title_synonyms: Option<Vec<String>>,
     #[serde(alias = "coverUrl")]
     pub cover_url: Option<String>,
     #[serde(alias = "trailerUrl")]
@@ -248,6 +250,8 @@ pub struct MangaDetails {
     pub english_name: Option<String>,
     #[serde(alias = "native_name")]
     pub native_name: Option<String>,
+    /// All title synonyms from Jikan (romanizations, native script, etc.)
+    pub title_synonyms: Option<Vec<String>>,
     #[serde(alias = "coverUrl")]
     pub cover_url: Option<String>,
     #[serde(alias = "trailerUrl")]

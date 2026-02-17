@@ -64,6 +64,8 @@ export interface MediaDetails {
   title: string
   english_name?: string
   native_name?: string
+  /** All title synonyms from Jikan (romanizations, native script, etc.) */
+  title_synonyms?: string[]
   cover_url?: string
   trailer_url?: string
   description?: string

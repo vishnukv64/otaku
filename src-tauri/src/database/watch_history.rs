@@ -131,7 +131,6 @@ pub async fn get_watch_progress(
 }
 
 /// Get watch progress for all episodes of a media
-#[allow(dead_code)]
 pub async fn get_media_watch_history(
     pool: &SqlitePool,
     media_id: &str,

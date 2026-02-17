@@ -5,6 +5,7 @@
   "windows": [
     "main"
   ],
+  "platforms": ["linux", "macOS", "windows"],
   "permissions": [
     "core:default",
     "updater:default",
@@ -12,6 +13,9 @@
     "dialog:default",
     "fs:default",
     "fs:allow-read-text-file",
-    "fs:allow-write-text-file"
+    "fs:allow-write-text-file",
+    "notification:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
   ]
 }

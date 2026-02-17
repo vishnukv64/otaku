@@ -29,7 +29,7 @@ export function SettingFileInput({
   }
 
   return (
-    <div className="flex items-center gap-2 min-w-[300px]">
+    <div className="flex items-center gap-2 min-w-[160px] sm:min-w-[300px]">
       <input
         type="text"
         value={value || 'Default location'}

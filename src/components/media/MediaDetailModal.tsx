@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -23,6 +23,8 @@ import { useSettingsStore } from '@/store/settingsStore'
 import { MediaCard } from './MediaCard'
 import { Description } from '@/components/ui/Description'
 import { NextEpisodeCountdown } from './NextEpisodeCountdown'
+import { BottomSheet } from '@/components/ui/BottomSheet'
+import { isMobile } from '@/utils/platform'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -67,6 +69,8 @@ function isAiring(status?: string): boolean {
   return s === 'releasing' || s === 'ongoing' || s === 'airing' || s === 'currently airing'
 }
 
+const EPISODES_PER_PAGE = 50
+
 interface MediaDetailModalProps {
   media: SearchResult
   extensionId?: string
@@ -93,12 +97,14 @@ export function MediaDetailModal({
   const [isFavorite, setIsFavorite] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(false)
+  const [showLibraryMenu, setShowLibraryMenu] = useState(false)
   const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
   const [relatedAnime, setRelatedAnime] = useState<SearchResult[]>([])
   const [relatedLoading, setRelatedLoading] = useState(false)
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(new Map())
+  const [episodePage, setEpisodePage] = useState(0)
   const [showNewBadge, setShowNewBadge] = useState(false)
   const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
 
@@ -114,7 +120,7 @@ export function MediaDetailModal({
   // Resolve AllAnime show ID for downloads (maps MAL ID → AllAnime ID)
   useEffect(() => {
     if (!details || allanimeShowId) return
-    resolveAllanimeId(details.title, 'anime', media.id, details.english_name, details.year)
+    resolveAllanimeId(details.title, 'anime', media.id, details.english_name, details.year, details.title_synonyms)
       .then(id => { if (id) setAllanimeShowId(id) })
       .catch(() => {})
   }, [details, allanimeShowId, media.id])
@@ -468,6 +474,11 @@ export function MediaDetailModal({
     }
   }
 
+  // Reset episode page when modal opens for a different anime
+  useEffect(() => {
+    setEpisodePage(0)
+  }, [media.id])
+
   useEffect(() => {
     if (!isOpen) return
 
@@ -689,12 +700,10 @@ export function MediaDetailModal({
 
     const loadEpisodeWatchHistory = async () => {
       try {
+        const allHistory = await getBatchWatchProgress(media.id)
         const historyMap = new Map<string, WatchHistory>()
-        for (const episode of details.episodes) {
-          const progress = await getWatchProgress(episode.id)
-          if (progress) {
-            historyMap.set(episode.id, progress)
-          }
+        for (const h of allHistory) {
+          historyMap.set(h.episode_id, h)
         }
         setEpisodeWatchHistory(historyMap)
       } catch (error) {
@@ -715,6 +724,18 @@ export function MediaDetailModal({
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [isOpen, details])
+
+  // Auto-navigate to the page containing the first unwatched episode
+  useEffect(() => {
+    if (!details || episodeWatchHistory.size === 0) return
+    // Find the first episode that hasn't been completed
+    const firstUnwatchedIndex = details.episodes.findIndex(
+      ep => !episodeWatchHistory.get(ep.id)?.completed
+    )
+    if (firstUnwatchedIndex >= 0) {
+      setEpisodePage(Math.floor(firstUnwatchedIndex / EPISODES_PER_PAGE))
+    }
+  }, [episodeWatchHistory, details])
 
   // Load related anime
   useEffect(() => {
@@ -799,25 +820,20 @@ export function MediaDetailModal({
 
   if (!isOpen) return null
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-300">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
-        onClick={onClose}
-      />
+  const mobile = isMobile()
 
-      {/* Modal Content */}
-      <div className="relative min-h-screen flex items-start justify-center p-4 sm:p-6 lg:p-8">
-        <div className="relative bg-[var(--color-bg-primary)] rounded-xl max-w-6xl w-full my-8 shadow-2xl animate-in slide-in-from-bottom-4 duration-500 border border-white/5">
-          {/* Close Button */}
-          <button
-            onClick={onClose}
-            className="absolute top-6 right-6 z-10 w-12 h-12 rounded-full bg-black/80 backdrop-blur-sm hover:bg-[var(--color-accent-primary)] flex items-center justify-center transition-all hover:scale-110 border border-white/20"
-            aria-label="Close"
-          >
-            <X size={24} strokeWidth={2.5} />
-          </button>
+  const modalContent = (
+    <>
+      {/* Close Button (desktop only — mobile uses drag-to-dismiss) */}
+      {!mobile && (
+        <button
+          onClick={onClose}
+          className="absolute top-6 right-6 z-10 w-12 h-12 rounded-full bg-black/80 backdrop-blur-sm hover:bg-[var(--color-accent-primary)] flex items-center justify-center transition-all hover:scale-110 border border-white/20"
+          aria-label="Close"
+        >
+          <X size={24} strokeWidth={2.5} />
+        </button>
+      )}
 
           {loading ? (
             <div className="flex items-center justify-center py-32">
@@ -912,15 +928,15 @@ export function MediaDetailModal({
                 )}
 
                 {/* Content */}
-                <div className="relative p-10">
-                  <div className="flex gap-8 w-full items-start">
+                <div className={`relative ${mobile ? 'p-5' : 'p-10'}`}>
+                  <div className={`${mobile ? 'flex flex-col items-center text-center gap-4' : 'flex gap-8 w-full items-start'}`}>
                     {/* Poster */}
                     {details.cover_url && (
                       <div className="relative flex-shrink-0 group">
                         <img
                           src={details.cover_url}
                           alt={details.title}
-                          className="w-48 sm:w-56 h-72 sm:h-80 object-cover rounded-xl shadow-2xl ring-1 ring-white/10 transform group-hover:scale-105 transition-transform duration-300"
+                          className={`object-cover rounded-xl shadow-2xl ring-1 ring-white/10 ${mobile ? 'w-full h-48' : 'w-48 sm:w-56 h-72 sm:h-80 transform group-hover:scale-105 transition-transform duration-300'}`}
                         />
                         <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-black/20 to-transparent" />
                       </div>
@@ -1048,7 +1064,7 @@ export function MediaDetailModal({
                       )}
 
                       {/* Action Buttons */}
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                         {details.episodes.length > 0 && (() => {
                           // Determine which episode to play and button text
                           let episodeToPlay = details.episodes[0]
@@ -1099,14 +1115,14 @@ export function MediaDetailModal({
                           return (
                             <button
                               onClick={() => handleWatch(episodeToPlay.id)}
-                              className={`flex items-center gap-2 px-8 py-3.5 text-white font-bold rounded-lg transition-all transform hover:scale-105 shadow-lg ${
+                              className={`flex items-center gap-1.5 sm:gap-2 px-4 sm:px-8 py-2.5 sm:py-3.5 text-white font-bold rounded-lg transition-all transform hover:scale-105 shadow-lg whitespace-nowrap text-sm sm:text-base ${
                                 isNewEpisode
                                   ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-emerald-500/50'
                                   : 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 shadow-[var(--color-accent-primary)]/50'
                               }`}
                             >
-                              {isNewEpisode && <Sparkles size={20} />}
-                              <Play size={22} fill="currentColor" />
+                              {isNewEpisode && <Sparkles size={18} className="sm:w-5 sm:h-5" />}
+                              <Play size={18} fill="currentColor" className="sm:w-[22px] sm:h-[22px]" />
                               <span>{buttonText}</span>
                             </button>
                           )
@@ -1143,102 +1159,107 @@ export function MediaDetailModal({
                               key="in-library-btn"
                               onClick={handleRemoveFromLibrary}
                               disabled={libraryLoading}
-                              className={`flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${
+                              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all border disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base ${
                                 isOnTrack
                                   ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
                                   : 'bg-green-600 text-white border-green-500 hover:bg-green-700'
                               }`}
                             >
                               {libraryLoading ? (
-                                <Loader2 size={22} className="animate-spin" />
+                                <Loader2 size={18} className="animate-spin sm:w-[22px] sm:h-[22px]" />
                               ) : isOnTrack ? (
-                                <CheckCircle size={22} />
+                                <CheckCircle size={18} className="sm:w-[22px] sm:h-[22px]" />
                               ) : (
-                                <Check size={22} />
+                                <Check size={18} className="sm:w-[22px] sm:h-[22px]" />
                               )}
                               <span>{isOnTrack ? 'On Track' : displayStatus ? getStatusLabel(displayStatus) : 'In My List'}</span>
                             </button>
                           )
                         })() : (
-                          <div key="add-library-btn" className="relative group">
+                          <div key="add-library-btn" className="relative">
                             <button
-                              onClick={() => handleAddToLibrary('plan_to_watch')}
+                              onClick={() => setShowLibraryMenu(!showLibraryMenu)}
                               disabled={libraryLoading}
-                              className="flex items-center gap-2 px-6 py-3.5 font-bold rounded-lg transition-all border bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all border bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base"
                             >
                               {libraryLoading ? (
-                                <Loader2 size={22} className="animate-spin" />
+                                <Loader2 size={18} className="animate-spin sm:w-[22px] sm:h-[22px]" />
                               ) : (
-                                <Plus size={22} />
+                                <Plus size={18} className="sm:w-[22px] sm:h-[22px]" />
                               )}
                               <span>My List</span>
                             </button>
-                            {/* Dropdown menu - opens upward */}
-                            <div className="absolute bottom-full left-0 mb-1 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 min-w-[180px] border border-white/10">
-                              <button
-                                onClick={() => handleAddToLibrary('watching')}
-                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-t-lg"
-                              >
-                                <Tv className="w-4 h-4" />
-                                Watching
-                              </button>
-                              <button
-                                onClick={() => handleAddToLibrary('plan_to_watch')}
-                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                              >
-                                <Library className="w-4 h-4" />
-                                Plan to Watch
-                              </button>
-                              <button
-                                onClick={() => handleAddToLibrary('completed')}
-                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                              >
-                                <Check className="w-4 h-4" />
-                                Completed
-                              </button>
-                              <button
-                                onClick={() => handleAddToLibrary('on_hold')}
-                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                              >
-                                <Clock className="w-4 h-4" />
-                                On Hold
-                              </button>
-                              <button
-                                onClick={() => handleAddToLibrary('dropped')}
-                                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-b-lg"
-                              >
-                                <XCircle className="w-4 h-4" />
-                                Dropped
-                              </button>
-                            </div>
+                            {/* Dropdown menu — click-based for mobile support */}
+                            {showLibraryMenu && (
+                              <>
+                                <div className="fixed inset-0 z-10" onClick={() => setShowLibraryMenu(false)} />
+                                <div className="absolute bottom-full left-0 mb-1 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl z-20 min-w-[180px] border border-white/10">
+                                  <button
+                                    onClick={() => { handleAddToLibrary('watching'); setShowLibraryMenu(false) }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-t-lg"
+                                  >
+                                    <Tv className="w-4 h-4" />
+                                    Watching
+                                  </button>
+                                  <button
+                                    onClick={() => { handleAddToLibrary('plan_to_watch'); setShowLibraryMenu(false) }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                                  >
+                                    <Library className="w-4 h-4" />
+                                    Plan to Watch
+                                  </button>
+                                  <button
+                                    onClick={() => { handleAddToLibrary('completed'); setShowLibraryMenu(false) }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                    Completed
+                                  </button>
+                                  <button
+                                    onClick={() => { handleAddToLibrary('on_hold'); setShowLibraryMenu(false) }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
+                                  >
+                                    <Clock className="w-4 h-4" />
+                                    On Hold
+                                  </button>
+                                  <button
+                                    onClick={() => { handleAddToLibrary('dropped'); setShowLibraryMenu(false) }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-b-lg"
+                                  >
+                                    <XCircle className="w-4 h-4" />
+                                    Dropped
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
                         {/* Favorite button */}
                         <button
                           onClick={handleToggleFavorite}
-                          className={`flex items-center justify-center w-12 h-12 rounded-lg transition-all border ${
+                          className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all border ${
                             isFavorite
                               ? 'bg-red-500 text-white border-red-500 hover:bg-red-600'
                               : 'bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20'
                           }`}
                           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
                         >
-                          <Heart className={`w-6 h-6 ${isFavorite ? 'fill-current' : ''}`} />
+                          <Heart className={`w-5 h-5 sm:w-6 sm:h-6 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
                         {/* Release tracking indicator */}
                         {isTracked && (
                           <div
-                            className="flex items-center justify-center w-12 h-12 bg-indigo-500 text-white rounded-lg transition-all border border-indigo-400"
+                            className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-indigo-500 text-white rounded-lg transition-all border border-indigo-400"
                             title="Tracking new episode releases"
                           >
-                            <Bell className="w-6 h-6" />
+                            <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
                           </div>
                         )}
                         <button
-                          className="flex items-center justify-center w-12 h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
+                          className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
                           aria-label="More info"
                         >
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                         </button>
@@ -1276,7 +1297,7 @@ export function MediaDetailModal({
               </div>
 
               {/* Description & Episodes */}
-              <div className="p-8">
+              <div className="p-4 sm:p-8">
                 {/* Stats Cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                   <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
@@ -1323,9 +1344,9 @@ export function MediaDetailModal({
                       </div>
                     </div>
                   )}
-                  {/* Next Episode Countdown - independent of Last Aired card */}
+                  {/* Next Episode Countdown - spans full width for readable countdown */}
                   {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
-                    <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
+                    <div className="col-span-2 md:col-span-4 bg-[var(--color-bg-secondary)] p-4 rounded-lg">
                       <NextEpisodeCountdown
                         latestEpisodeDate={media.latest_episode_date}
                         lastUpdateEnd={details.last_update_end}
@@ -1352,9 +1373,9 @@ export function MediaDetailModal({
                 {/* Episodes */}
                 {details.episodes.length > 0 && (
                   <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-2xl font-semibold flex items-center gap-2">
-                        <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+                      <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
+                        <svg className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
@@ -1362,29 +1383,29 @@ export function MediaDetailModal({
                       </h2>
 
                       {/* Download Action Buttons */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                         {selectionMode && (
                           <>
                             <button
                               onClick={selectedEpisodes.size === details.episodes.length ? deselectAllEpisodes : selectAllEpisodes}
-                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
+                              className="px-2 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-xs sm:text-sm font-medium whitespace-nowrap"
                             >
                               {selectedEpisodes.size === details.episodes.length ? 'Deselect All' : 'Select All'}
                             </button>
                             <button
                               onClick={handleDownloadSelected}
                               disabled={selectedEpisodes.size === 0}
-                              className="px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
+                              className="px-2 sm:px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
                             >
-                              <Download className="w-4 h-4" />
-                              Download Selected ({selectedEpisodes.size})
+                              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                              Download ({selectedEpisodes.size})
                             </button>
                             <button
                               onClick={() => {
                                 setSelectionMode(false)
                                 setSelectedEpisodes(new Set())
                               }}
-                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium"
+                              className="px-2 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-xs sm:text-sm font-medium whitespace-nowrap"
                             >
                               Cancel
                             </button>
@@ -1394,24 +1415,56 @@ export function MediaDetailModal({
                           <>
                             <button
                               onClick={handleDownloadAll}
-                              className="px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
+                              className="px-2 sm:px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
                             >
-                              <Download className="w-4 h-4" />
+                              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               Download All
                             </button>
                             <button
                               onClick={() => setSelectionMode(true)}
-                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
+                              className="px-2 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
                             >
-                              <CheckSquare className="w-4 h-4" />
-                              Select Episodes
+                              <CheckSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                              Select
                             </button>
                           </>
                         )}
                       </div>
                     </div>
+
+                    {/* Pagination controls (only show when > EPISODES_PER_PAGE) */}
+                    {details.episodes.length > EPISODES_PER_PAGE && (
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm text-[var(--color-text-muted)]">
+                          {episodePage * EPISODES_PER_PAGE + 1}–{Math.min((episodePage + 1) * EPISODES_PER_PAGE, details.episodes.length)} of {details.episodes.length}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setEpisodePage(p => Math.max(0, p - 1))}
+                            disabled={episodePage === 0}
+                            className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
+                          >
+                            Prev
+                          </button>
+                          <span className="text-sm text-[var(--color-text-secondary)] tabular-nums">
+                            {episodePage + 1} / {Math.ceil(details.episodes.length / EPISODES_PER_PAGE)}
+                          </span>
+                          <button
+                            onClick={() => setEpisodePage(p => Math.min(Math.ceil(details.episodes.length / EPISODES_PER_PAGE) - 1, p + 1))}
+                            disabled={episodePage >= Math.ceil(details.episodes.length / EPISODES_PER_PAGE) - 1}
+                            className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                      {details.episodes.map((episode) => (
+                      {details.episodes.slice(
+                        episodePage * EPISODES_PER_PAGE,
+                        (episodePage + 1) * EPISODES_PER_PAGE
+                      ).map((episode) => (
                         <div
                           key={episode.id}
                           className={`group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] hover:ring-2 transition-all hover:scale-105 transform ${
@@ -1429,6 +1482,7 @@ export function MediaDetailModal({
                               src={(episode.thumbnail || details.cover_url)!}
                               alt={episode.title || `Episode ${episode.number}`}
                               className="w-full h-full object-cover"
+                              loading="lazy"
                             />
                           ) : (
                             <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-[var(--color-bg-secondary)] to-[var(--color-bg-hover)]">
@@ -1607,6 +1661,26 @@ export function MediaDetailModal({
               </div>
             </>
           ) : null}
+    </>
+  )
+
+  if (mobile) {
+    return (
+      <BottomSheet isOpen={isOpen} onClose={onClose}>
+        {modalContent}
+      </BottomSheet>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-300">
+      <div
+        className="fixed inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
+        onClick={onClose}
+      />
+      <div className="relative min-h-screen flex items-start justify-center p-4 sm:p-6 lg:p-8">
+        <div className="relative bg-[var(--color-bg-primary)] rounded-xl max-w-6xl w-full my-8 shadow-2xl animate-in slide-in-from-bottom-4 duration-500 border border-white/5">
+          {modalContent}
         </div>
       </div>
     </div>

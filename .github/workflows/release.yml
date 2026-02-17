@@ -10,8 +10,18 @@ on:
         description: 'Version to release (e.g., 0.1.0)'
         required: true
         type: string
+      build_android:
+        description: 'Build Android APK'
+        required: false
+        type: boolean
+        default: true
+      build_ios:
+        description: 'Build iOS IPA (requires Apple signing secrets)'
+        required: false
+        type: boolean
+        default: false
 
-# This workflow will build and release the app for all platforms
+# This workflow builds and releases the app for all platforms
 
 jobs:
   create-release:
@@ -48,12 +58,13 @@ jobs:
               repo: context.repo.repo,
               tag_name: `v${version}`,
               name: `Otaku v${version}`,
-              body: `## What's New\n\nSee the [changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.\n\n## Downloads\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Windows | x64 | \`otaku_${version}_x64-setup.exe\` |\n| macOS | Apple Silicon (M1/M2/M3) | \`otaku_${version}_aarch64.dmg\` |\n| macOS | Intel | \`otaku_${version}_x64.dmg\` |\n| Linux | x64 | \`otaku_${version}_amd64.deb\` / \`.AppImage\` |`,
+              body: `## What's New\n\nSee the [changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.\n\n## Downloads\n\n### Desktop\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Windows | x64 | \`otaku_${version}_x64-setup.exe\` |\n| macOS | Apple Silicon (M1/M2/M3) | \`otaku_${version}_aarch64.dmg\` |\n| macOS | Intel | \`otaku_${version}_x64.dmg\` |\n| Linux | x64 | \`otaku_${version}_amd64.deb\` / \`.AppImage\` |\n\n### Mobile\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Android | ARM64 | \`otaku_${version}_aarch64.apk\` |\n| iOS | ARM64 | \`otaku_${version}_aarch64.ipa\` |`,
               draft: true,
               prerelease: false
             });
             return data.id;
 
+  # ─── Desktop builds (Windows, macOS, Linux) ────────────────────────
   build-tauri:
     needs: create-release
     permissions:
@@ -218,11 +229,316 @@ jobs:
           args: ${{ matrix.args }}
           updaterJsonPreferNsis: true
 
+  # ─── Android APK (aarch64) ─────────────────────────────────────────
+  build-android:
+    needs: create-release
+    permissions:
+      contents: write
+    # Build on tag push (always) or manual dispatch (when checkbox is checked)
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_android)
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: '27.1.12297006'
+      ANDROID_API: '30'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android-aarch64
+
+      - name: Install Android NDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;$NDK_VERSION" \
+            "platforms;android-$ANDROID_API"
+
+      - name: Set NDK environment variables
+        run: |
+          NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+
+          echo "NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android=--sysroot=$TOOLCHAIN/sysroot" >> $GITHUB_ENV
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Update version in config files
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+
+          node -e "
+            const fs = require('fs');
+            const version = '$VERSION';
+
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = version;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+
+            const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            tauri.version = version;
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2) + '\n');
+          "
+
+          sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          echo "✅ Updated version to $VERSION"
+
+      - name: Initialize Android project
+        run: |
+          if [ ! -f "src-tauri/gen/android/build.gradle.kts" ]; then
+            pnpm exec tauri android init
+          fi
+
+      - name: Copy app icons to Android project
+        run: |
+          SRC="src-tauri/icons/android"
+          DEST="src-tauri/gen/android/app/src/main/res"
+          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
+            [ -d "$SRC/$d" ] && cp "$SRC/$d/"* "$DEST/$d/"
+          done
+          mkdir -p "$DEST/mipmap-anydpi-v26" "$DEST/values"
+          cp "$SRC/mipmap-anydpi-v26/ic_launcher.xml" "$DEST/mipmap-anydpi-v26/"
+          cp "$SRC/values/ic_launcher_background.xml" "$DEST/values/"
+          rm -f "$DEST/drawable-v24/ic_launcher_foreground.xml" \
+                "$DEST/drawable/ic_launcher_background.xml"
+
+      - name: Decode Android keystore
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            echo -n "$ANDROID_KEYSTORE" | base64 --decode > $RUNNER_TEMP/otaku-release.keystore
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/otaku-release.keystore" >> $GITHUB_ENV
+            echo "✅ Keystore decoded for release signing"
+          else
+            echo "::notice::No ANDROID_KEYSTORE secret — APK will be unsigned"
+          fi
+
+      - name: Build Android APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: pnpm exec tauri android build --apk true --target aarch64
+
+      - name: Upload APK to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | head -1)
+
+          if [ -n "$APK" ]; then
+            cp "$APK" "otaku_${VERSION}_aarch64.apk"
+            gh release upload "v${VERSION}" "otaku_${VERSION}_aarch64.apk" --clobber
+            echo "✅ APK uploaded: otaku_${VERSION}_aarch64.apk ($(du -h "$APK" | cut -f1))"
+          else
+            echo "::error::No APK found in build output"
+            exit 1
+          fi
+
+  # ─── iOS IPA (aarch64) ─────────────────────────────────────────────
+  #
+  # Requires these secrets to be configured:
+  #   APPLE_CERTIFICATE              — Base64-encoded .p12 signing certificate
+  #   APPLE_CERTIFICATE_PASSWORD     — Password for the .p12 certificate
+  #   APPLE_PROVISIONING_PROFILE     — Base64-encoded .mobileprovision file
+  #   APPLE_SIGNING_IDENTITY         — e.g., "iPhone Distribution: Your Name (TEAM_ID)"
+  #   APPLE_TEAM_ID                  — Your Apple Developer Team ID
+  #
+  # To encode a file as base64: base64 -i certificate.p12 | pbcopy
+  #
+  build-ios:
+    needs: create-release
+    permissions:
+      contents: write
+    # iOS requires Apple signing — only run on manual dispatch when enabled
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ios
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ios-aarch64
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Update version in config files
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+
+          node -e "
+            const fs = require('fs');
+            const version = '$VERSION';
+
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = version;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+
+            const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            tauri.version = version;
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2) + '\n');
+          "
+
+          sed -i '' "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          echo "✅ Updated version to $VERSION"
+
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          # Create and configure temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate from base64 secret
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERT_PATH
+          security import $CERT_PATH \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          echo "✅ Signing certificate imported"
+
+      - name: Install provisioning profile
+        env:
+          PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          echo -n "$PROVISIONING_PROFILE" | base64 --decode -o $PROFILE_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PROFILE_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+          echo "✅ Provisioning profile installed"
+
+      - name: Initialize iOS project
+        run: |
+          if [ ! -f "src-tauri/gen/apple/project.yml" ]; then
+            pnpm exec tauri ios init
+          fi
+
+      - name: Build iOS IPA
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm exec tauri ios build
+
+      - name: Upload IPA to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          IPA=$(find src-tauri/gen/apple/build -name "*.ipa" -type f 2>/dev/null | head -1)
+
+          if [ -n "$IPA" ]; then
+            cp "$IPA" "otaku_${VERSION}_aarch64.ipa"
+            gh release upload "v${VERSION}" "otaku_${VERSION}_aarch64.ipa" --clobber
+            echo "✅ IPA uploaded: otaku_${VERSION}_aarch64.ipa ($(du -h "$IPA" | cut -f1))"
+          else
+            echo "::warning::No IPA found — check Xcode build output for signing issues"
+            # Upload xcarchive as fallback if available
+            ARCHIVE=$(find src-tauri/gen/apple/build -name "*.xcarchive" -type d 2>/dev/null | head -1)
+            if [ -n "$ARCHIVE" ]; then
+              echo "Found xcarchive at: $ARCHIVE"
+              echo "To export IPA manually: xcodebuild -exportArchive -archivePath $ARCHIVE ..."
+            fi
+            exit 1
+          fi
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+
+  # ─── Publish ────────────────────────────────────────────────────────
   publish-release:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    needs: [create-release, build-tauri]
+    needs: [create-release, build-tauri, build-android, build-ios]
+    # Publish if desktop builds succeeded, regardless of mobile build status
+    if: >-
+      !cancelled() &&
+      needs.create-release.result == 'success' &&
+      needs.build-tauri.result == 'success'
 
     steps:
       - name: Publish release

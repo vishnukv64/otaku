@@ -750,6 +750,14 @@ export async function getWatchProgress(episodeId: string): Promise<WatchHistory 
 }
 
 /**
+ * Get watch progress for all episodes of a media (batch).
+ * Returns all watch history entries for the given media in one query.
+ */
+export async function getBatchWatchProgress(mediaId: string): Promise<WatchHistory[]> {
+  return await invoke('get_batch_watch_progress', { mediaId })
+}
+
+/**
  * Get the most recent watch progress for a media (for Resume Watching feature)
  */
 export async function getLatestWatchProgressForMedia(mediaId: string): Promise<WatchHistory | null> {
@@ -1092,6 +1100,7 @@ export interface ContinueReadingEntry {
   chapter_number: number
   current_page: number
   total_pages?: number
+  completed: boolean
   last_read: string
 }
 
@@ -1952,6 +1961,44 @@ export async function getDiscoverCache(
   return await invoke('get_discover_cache', { cacheKey })
 }
 
+// ==================== TTL-aware Discover Cache (SWR) ====================
+
+export interface CachedDataWithMeta {
+  cache_key: string
+  data: string
+  media_type: string
+  is_fresh: boolean
+  cached_at: string
+  age_seconds: number
+}
+
+/**
+ * Get cached discover results with freshness metadata (for SWR pattern)
+ * @param cacheKey - Unique cache key
+ * @returns Cached data with is_fresh boolean and age, or null if not found
+ */
+export async function getDiscoverCacheWithFreshness(
+  cacheKey: string
+): Promise<CachedDataWithMeta | null> {
+  return await invoke('get_discover_cache_with_freshness', { cacheKey })
+}
+
+/**
+ * Save discover results to cache with explicit TTL
+ * @param cacheKey - Unique cache key
+ * @param data - JSON-encoded SearchResult array
+ * @param mediaType - Type of media
+ * @param ttlSeconds - Time-to-live in seconds
+ */
+export async function saveDiscoverCacheWithTtl(
+  cacheKey: string,
+  data: string,
+  mediaType: 'anime' | 'manga' | 'mixed',
+  ttlSeconds: number
+): Promise<void> {
+  return await invoke('save_discover_cache_with_ttl', { cacheKey, data, mediaType, ttlSeconds })
+}
+
 // ==================== Jikan API Commands ====================
 
 /**
@@ -2180,7 +2227,8 @@ export async function resolveAllanimeId(
   mediaType: string,
   malId: string,
   englishTitle?: string,
-  year?: number
+  year?: number,
+  synonyms?: string[]
 ): Promise<string | null> {
   return await invoke('resolve_allanime_id', {
     title,
@@ -2188,6 +2236,7 @@ export async function resolveAllanimeId(
     mediaType,
     year,
     malId,
+    synonyms,
   })
 }
 

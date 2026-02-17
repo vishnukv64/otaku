@@ -14,6 +14,12 @@ import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { Loader2, Tv, BookOpen, X, Square } from 'lucide-react'
 import { stopReleaseCheck } from '@/utils/tauri-commands'
+import { isMobile } from '@/utils/platform'
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification as sendSystemNotification,
+} from '@tauri-apps/plugin-notification'
 
 interface ReleaseCheckProgress {
   current_index: number
@@ -25,12 +31,29 @@ interface ReleaseCheckProgress {
   error_message: string | null
 }
 
+/** Send a native system notification for release check progress on mobile */
+async function sendMobileReleaseNotification(title: string, body: string) {
+  try {
+    let granted = await isPermissionGranted()
+    if (!granted) {
+      const permission = await requestPermission()
+      granted = permission === 'granted'
+    }
+    if (granted) {
+      sendSystemNotification({ title, body })
+    }
+  } catch (err) {
+    console.error('Failed to send mobile release notification:', err)
+  }
+}
+
 export function ReleaseCheckOverlay() {
   const [progress, setProgress] = useState<ReleaseCheckProgress | null>(null)
   const [isVisible, setIsVisible] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
   // Track if user dismissed the overlay for this check session
   const isDismissedRef = useRef(false)
+  const mobile = isMobile()
 
   const handleDismiss = () => {
     isDismissedRef.current = true
@@ -54,6 +77,8 @@ export function ReleaseCheckOverlay() {
 
   useEffect(() => {
     let hideTimeout: ReturnType<typeof setTimeout> | null = null
+    // Track last notified index on mobile to avoid spamming notifications
+    let lastNotifiedIndex = 0
 
     const setupListener = async () => {
       const unlisten = await listen<ReleaseCheckProgress>(
@@ -61,6 +86,29 @@ export function ReleaseCheckOverlay() {
         (event) => {
           const data = event.payload
 
+          // On mobile, send native OS notifications instead of showing overlay
+          if (mobile) {
+            if (data.is_complete) {
+              sendMobileReleaseNotification(
+                'Release Check Complete',
+                `Checked ${data.total_count} items for new releases`
+              )
+              lastNotifiedIndex = 0
+            } else if (
+              data.status === 'checking' &&
+              data.current_index - lastNotifiedIndex >= 5
+            ) {
+              // Send progress notification every 5 items to avoid spam
+              sendMobileReleaseNotification(
+                'Checking Releases...',
+                `${data.current_index}/${data.total_count}: ${data.media_title}`
+              )
+              lastNotifiedIndex = data.current_index
+            }
+            return
+          }
+
+          // Desktop: show in-app overlay
           if (data.is_complete) {
             // Reset dismissed state when check completes (for next check)
             isDismissedRef.current = false
@@ -94,9 +142,10 @@ export function ReleaseCheckOverlay() {
       unlistenPromise.then((unlisten) => unlisten())
       if (hideTimeout) clearTimeout(hideTimeout)
     }
-  }, [])
+  }, [mobile])
 
-  if (!progress) return null
+  // On mobile, the effect handles native notifications — don't render the overlay UI
+  if (mobile || !progress) return null
 
   return (
     <div

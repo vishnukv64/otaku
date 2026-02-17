@@ -224,11 +224,21 @@ pub fn resolve_via_search(
     english_title: Option<&str>,
     year: Option<i32>,
     media_type: &str,
+    synonyms: &[String],
 ) -> Result<Option<String>, String> {
-    let search_queries: Vec<&str> = [english_title, Some(title)]
-        .iter()
-        .filter_map(|q| *q)
-        .collect();
+    // Build deduplicated search queries: english_title → title → up to 4 synonyms
+    let mut seen = HashSet::new();
+    let mut search_queries: Vec<&str> = Vec::new();
+    for q in [english_title, Some(title)].iter().filter_map(|q| *q) {
+        if !q.is_empty() && seen.insert(q.to_lowercase()) {
+            search_queries.push(q);
+        }
+    }
+    for syn in synonyms.iter().take(4) {
+        if !syn.is_empty() && seen.insert(syn.to_lowercase()) {
+            search_queries.push(syn);
+        }
+    }
 
     let mut best_match: Option<(String, f64)> = None;
 
@@ -259,6 +269,16 @@ pub fn resolve_via_search(
                 if let Some(ref aa_eng) = edge.english_name {
                     let cross_eng = title_similarity(aa_eng, eng) * 10.0;
                     score = score.max(cross_eng);
+                }
+            }
+
+            // Score against synonyms (romanizations, native script, etc.)
+            for syn in synonyms {
+                let syn_score = title_similarity(&edge.name, syn) * 10.0;
+                score = score.max(syn_score);
+                if let Some(ref aa_eng) = edge.english_name {
+                    let cross_syn = title_similarity(aa_eng, syn) * 10.0;
+                    score = score.max(cross_syn);
                 }
             }
 

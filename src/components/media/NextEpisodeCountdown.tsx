@@ -171,17 +171,17 @@ export function NextEpisodeCountdown({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 text-[var(--color-text-muted)] text-xs">
-          <Clock className="w-3 h-3" />
-          <span>Next Episode</span>
-        </div>
-        <span className="text-xs text-[var(--color-text-tertiary)]">
+      <div className="flex items-center gap-1.5 text-[var(--color-text-muted)] text-xs mb-2">
+        <Clock className="w-3 h-3" />
+        <span>Next Episode</span>
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-sm text-[var(--color-text-secondary)]">
           {releaseDate}
         </span>
-      </div>
-      <div className="font-mono text-2xl font-bold text-blue-400 tracking-wide">
-        {countdownText}
+        <span className="font-mono text-xl font-bold text-blue-400 tracking-wide whitespace-nowrap">
+          {countdownText}
+        </span>
       </div>
     </div>
   )

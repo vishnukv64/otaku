@@ -57,4 +57,11 @@ out/
 # TanStack Router generated files
 src/routeTree.gen.ts
 
+# Tauri mobile — project scaffolding is committed, build outputs are
+# handled by per-platform .gitignore files inside gen/apple and gen/android.
+# Do NOT add a blanket src-tauri/gen/* rule here.
+
+# Compiled static libs for iOS (generated during build)
+src-tauri/gen/
+
 .serena/

@@ -17,6 +17,7 @@ import { ExportImportSection } from '../components/settings/ExportImportSection'
 import { AutoBackupSection } from '../components/settings/AutoBackupSection'
 import { HardDrive, Activity, ChevronRight, FileText, Info } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
+import { isMobile } from '@/utils/platform'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsScreen,
@@ -113,14 +114,14 @@ function SettingsScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-background)] px-4 py-8">
+    <div className="min-h-screen bg-[var(--color-background)] px-3 sm:px-4 py-4 sm:py-8 overflow-x-hidden">
       <div className="max-w-4xl mx-auto">
         {/* Page Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">
+        <div className="mb-4 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-[var(--color-text-primary)]">
             Settings
           </h1>
-          <p className="text-[var(--color-text-secondary)] mt-2">
+          <p className="text-sm sm:text-base text-[var(--color-text-secondary)] mt-1 sm:mt-2">
             Customize your Otaku experience
           </p>
         </div>
@@ -206,17 +207,20 @@ function SettingsScreen() {
           title="Downloads"
           description="Configure download behavior and storage"
         >
-          <SettingRow
-            label="Download Location"
-            description="Custom folder for downloaded episodes"
-          >
-            <SettingFileInput
-              value={settings.downloadLocation}
-              onChange={(value) =>
-                settings.updateSettings({ downloadLocation: value })
-              }
-            />
-          </SettingRow>
+          {/* Download Location — hidden on mobile (no filesystem picker) */}
+          {!isMobile() && (
+            <SettingRow
+              label="Download Location"
+              description="Custom folder for downloaded episodes"
+            >
+              <SettingFileInput
+                value={settings.downloadLocation}
+                onChange={(value) =>
+                  settings.updateSettings({ downloadLocation: value })
+                }
+              />
+            </SettingRow>
+          )}
 
           <SettingRow
             label="Max Concurrent Downloads"
@@ -286,65 +290,66 @@ function SettingsScreen() {
           </SettingRow>
         </SettingSection>
 
-        {/* Developer Section */}
-        <SettingSection
-          title="Developer"
-          description="Debugging and diagnostic tools"
-        >
-          <SettingRow
-            label="System Stats"
-            description="View real-time CPU, memory, and storage metrics"
+        {/* Developer Section — hidden on mobile */}
+        {!isMobile() && (
+          <SettingSection
+            title="Developer"
+            description="Debugging and diagnostic tools"
           >
-            <Link
-              to="/stats"
-              className="
-                flex items-center gap-2
-                bg-[var(--color-surface-subtle)]
-                hover:bg-[var(--color-surface-hover)]
-                text-[var(--color-text-primary)]
-                rounded-lg
-                px-4
-                py-2
-                font-medium
-                transition-colors
-              "
+            <SettingRow
+              label="System Stats"
+              description="View real-time CPU, memory, and storage metrics"
             >
-              <Activity size={16} />
-              View Stats
-              <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
-            </Link>
-          </SettingRow>
-          <SettingRow
-            label="Application Logs"
-            description="View error logs and debug information"
-          >
-            <Link
-              to="/logs"
-              className="
-                flex items-center gap-2
-                bg-[var(--color-surface-subtle)]
-                hover:bg-[var(--color-surface-hover)]
-                text-[var(--color-text-primary)]
-                rounded-lg
-                px-4
-                py-2
-                font-medium
-                transition-colors
-              "
+              <Link
+                to="/stats"
+                className="
+                  flex items-center gap-2
+                  bg-[var(--color-surface-subtle)]
+                  hover:bg-[var(--color-surface-hover)]
+                  text-[var(--color-text-primary)]
+                  rounded-lg
+                  px-4
+                  py-2
+                  font-medium
+                  transition-colors
+                "
+              >
+                <Activity size={16} />
+                View Stats
+                <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
+              </Link>
+            </SettingRow>
+            <SettingRow
+              label="Application Logs"
+              description="View error logs and debug information"
             >
-              <FileText size={16} />
-              View Logs
-              <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
-            </Link>
-          </SettingRow>
+              <Link
+                to="/logs"
+                className="
+                  flex items-center gap-2
+                  bg-[var(--color-surface-subtle)]
+                  hover:bg-[var(--color-surface-hover)]
+                  text-[var(--color-text-primary)]
+                  rounded-lg
+                  px-4
+                  py-2
+                  font-medium
+                  transition-colors
+                "
+              >
+                <FileText size={16} />
+                View Logs
+                <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
+              </Link>
+            </SettingRow>
+          </SettingSection>
+        )}
 
-        </SettingSection>
+        {/* Export & Import Section — hidden on mobile (filesystem-dependent) */}
+        {!isMobile() && <ExportImportSection />}
 
-        {/* Export & Import Section */}
-        <ExportImportSection />
-
-        {/* Auto-Backup Section */}
-        <AutoBackupSection />
+        {/* Auto-Backup Section — hidden on mobile (filesystem-dependent) */}
+        {!isMobile() && <AutoBackupSection />}
 
         {/* Data & Privacy Section */}
         <SettingSection
@@ -396,8 +401,8 @@ function SettingsScreen() {
           </SettingRow>
         </SettingSection>
 
-        {/* Updates Section */}
-        <UpdateSection />
+        {/* Updates Section (desktop only — Android updates via sideload) */}
+        {!isMobile() && <UpdateSection />}
 
         {/* About Section */}
         <SettingSection

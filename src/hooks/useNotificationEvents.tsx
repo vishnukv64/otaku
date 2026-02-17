@@ -17,6 +17,12 @@ import {
   type Notification,
   type NotificationType,
 } from '@/store/notificationStore'
+import { isMobile } from '@/utils/platform'
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification as sendSystemNotification,
+} from '@tauri-apps/plugin-notification'
 
 const NOTIFICATION_EVENT = 'notification'
 
@@ -170,7 +176,13 @@ export function useNotificationEvents(): UseNotificationEventsReturn {
         // Add to store (uses the current store state)
         useNotificationStore.getState().addNotification(notification)
 
-        // Show toast notification
+        // On mobile, send a system notification instead of in-app toast
+        if (isMobile()) {
+          sendMobileSystemNotification(notification.title, notification.message)
+          return
+        }
+
+        // Desktop: show in-app toast notification
         const toastOptions = {
           id: notification.id, // Use notification ID as toast ID to prevent duplicates
           duration: 4000,
@@ -240,5 +252,21 @@ export function useNotificationEvents(): UseNotificationEventsReturn {
     dismiss,
     clearAll,
     handleAction,
+  }
+}
+
+/** Send a native system notification on Android */
+async function sendMobileSystemNotification(title: string, body: string) {
+  try {
+    let granted = await isPermissionGranted()
+    if (!granted) {
+      const permission = await requestPermission()
+      granted = permission === 'granted'
+    }
+    if (granted) {
+      sendSystemNotification({ title, body })
+    }
+  } catch (err) {
+    console.error('Failed to send system notification:', err)
   }
 }

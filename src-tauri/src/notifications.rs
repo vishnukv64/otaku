@@ -102,17 +102,24 @@ impl NotificationPayload {
     }
 }
 
-/// Emit a notification event to the frontend and optionally save to database
+/// Emit a notification event to the frontend and optionally save to database.
+/// On Android, also sends a system notification to the OS notification tray.
 pub async fn emit_notification(
     app_handle: &AppHandle,
     pool: Option<&SqlitePool>,
     notification: NotificationPayload,
 ) -> Result<()> {
-    // Emit event to frontend
+    // Emit event to frontend (for in-app UI on desktop)
     if let Err(e) = app_handle.emit(NOTIFICATION_EVENT, &notification) {
         log::error!("Failed to emit notification event: {}", e);
     } else {
         log::debug!("Emitted notification: {} - {}", notification.title, notification.message);
+    }
+
+    // On Android, send a system notification to the OS tray
+    #[cfg(target_os = "android")]
+    {
+        send_system_notification(app_handle, &notification);
     }
 
     // Save to database if pool is provided
@@ -121,6 +128,22 @@ pub async fn emit_notification(
     }
 
     Ok(())
+}
+
+/// Send a native system notification via the OS notification tray (Android/mobile)
+#[cfg(target_os = "android")]
+fn send_system_notification(app_handle: &AppHandle, notification: &NotificationPayload) {
+    use tauri_plugin_notification::NotificationExt;
+
+    if let Err(e) = app_handle
+        .notification()
+        .builder()
+        .title(&notification.title)
+        .body(&notification.message)
+        .show()
+    {
+        log::error!("Failed to send system notification: {}", e);
+    }
 }
 
 /// Save a notification to the database (public version for commands)

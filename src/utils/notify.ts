@@ -10,6 +10,12 @@ import toast from 'react-hot-toast'
 import { createElement } from 'react'
 import { useNotificationStore, type NotificationType } from '@/store/notificationStore'
 import { createNotification } from '@/utils/tauri-commands'
+import { isMobile } from '@/utils/platform'
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification as sendSystemNotification,
+} from '@tauri-apps/plugin-notification'
 
 interface NotifyOptions {
   /** Notification title */
@@ -102,7 +108,7 @@ export function notify(options: NotifyOptions): string {
   return id
 }
 
-/** Show a toast popup */
+/** Show a toast popup (desktop: in-app toast, mobile: system notification) */
 function showToast(
   id: string,
   type: NotificationType,
@@ -110,6 +116,12 @@ function showToast(
   message: string,
   duration: number = 4000
 ) {
+  // On mobile, send a system notification instead of an in-app toast
+  if (isMobile()) {
+    sendMobileNotification(title, message)
+    return
+  }
+
   const toastOptions = {
     id,
     duration,
@@ -134,6 +146,22 @@ function showToast(
   )
 
   toast(toastContent, toastOptions)
+}
+
+/** Send a native system notification on Android */
+async function sendMobileNotification(title: string, body: string) {
+  try {
+    let granted = await isPermissionGranted()
+    if (!granted) {
+      const permission = await requestPermission()
+      granted = permission === 'granted'
+    }
+    if (granted) {
+      sendSystemNotification({ title, body })
+    }
+  } catch (err) {
+    console.error('Failed to send system notification:', err)
+  }
 }
 
 /**

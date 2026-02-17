@@ -1,11 +1,13 @@
-import { Link, useRouterState, useRouter } from '@tanstack/react-router'
-import { Search, Settings, Menu, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Link, useRouterState, useRouter, useNavigate } from '@tanstack/react-router'
+import { Search, Settings, Menu, X, Download, ChevronLeft, ChevronRight, Bell } from 'lucide-react'
 import { useEffect, useState, useRef } from 'react'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
 import { DownloadManager } from '@/components/player/DownloadManager'
 import { NotificationCenter } from '@/components/notifications'
+import { useNotificationStore } from '@/store/notificationStore'
 import { ApiStatusIndicator } from './ApiStatusIndicator'
 import logoImage from '@/assets/logo.png'
+import { isMobile } from '@/utils/platform'
 
 const navItems = [
   { name: 'Home', path: '/' },
@@ -26,8 +28,13 @@ export function TopNav({ onSearchClick }: TopNavProps) {
   const [canGoForward, setCanGoForward] = useState(false)
   const routerState = useRouterState()
   const router = useRouter()
+  const navigate = useNavigate()
   const currentPath = routerState.location.pathname
   const { activeCount } = useDownloadStatus()
+  const mobile = isMobile()
+  const unreadNotificationCount = useNotificationStore(
+    (s) => s.notifications.filter((n) => !n.read && !n.dismissed).length
+  )
 
   // Track navigation position using refs
   const navigationPosition = useRef(0)
@@ -81,11 +88,25 @@ export function TopNav({ onSearchClick }: TopNavProps) {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  // Mobile: navigate to route pages. Desktop: open modals/dropdowns.
+  const handleDownloadClick = () => {
+    if (mobile) {
+      navigate({ to: '/downloads' })
+    } else {
+      setDownloadManagerOpen(true)
+    }
+  }
+
+  const handleNotificationClick = () => {
+    navigate({ to: '/notifications' })
+  }
+
   return (
     <nav
-      className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-300 ${
-        scrolled ? 'bg-[var(--color-bg-primary)]' : 'bg-gradient-to-b from-black/80 to-transparent'
+      className={`${mobile ? 'relative shrink-0' : 'fixed top-0 left-0 right-0'} z-[100] transition-all duration-300 ${
+        scrolled ? 'bg-[var(--color-bg-primary)]' : mobile ? 'bg-[var(--color-bg-primary)]' : 'bg-gradient-to-b from-black/80 to-transparent'
       }`}
+      style={mobile ? { paddingTop: 'var(--sat)' } : undefined}
     >
       <div className="max-w-4k mx-auto px-4 sm:px-6 lg:px-8 3xl:px-12">
         <div className="flex items-center justify-between h-16">
@@ -106,35 +127,37 @@ export function TopNav({ onSearchClick }: TopNavProps) {
               </span>
             </Link>
 
-            {/* Back/Forward Buttons */}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleBack}
-                disabled={!canGoBack}
-                className={`p-1.5 rounded-md transition-colors ${
-                  canGoBack
-                    ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
-                    : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
-                }`}
-                aria-label="Go back"
-                title="Go back"
-              >
-                <ChevronLeft size={20} />
-              </button>
-              <button
-                onClick={handleForward}
-                disabled={!canGoForward}
-                className={`p-1.5 rounded-md transition-colors ${
-                  canGoForward
-                    ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
-                    : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
-                }`}
-                aria-label="Go forward"
-                title="Go forward"
-              >
-                <ChevronRight size={20} />
-              </button>
-            </div>
+            {/* Back/Forward Buttons (desktop only — Android has its own back gesture) */}
+            {!isMobile() && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleBack}
+                  disabled={!canGoBack}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    canGoBack
+                      ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+                      : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
+                  }`}
+                  aria-label="Go back"
+                  title="Go back"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <button
+                  onClick={handleForward}
+                  disabled={!canGoForward}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    canGoForward
+                      ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+                      : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
+                  }`}
+                  aria-label="Go forward"
+                  title="Go forward"
+                >
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+            )}
 
             {/* Desktop Navigation Links */}
             <div className="hidden md:flex items-center gap-6">
@@ -156,24 +179,42 @@ export function TopNav({ onSearchClick }: TopNavProps) {
 
           {/* Right Side Icons */}
           <div className="flex items-center gap-2 sm:gap-4">
-            <button
-              onClick={onSearchClick}
-              className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group flex items-center gap-2"
-              aria-label="Search (Cmd+K)"
-              title="Search (Cmd+K)"
-            >
-              <Search size={20} />
-              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] rounded border border-[var(--color-bg-hover)] group-hover:border-[var(--color-text-muted)]">
-                <span className="text-[10px]">⌘</span>K
-              </kbd>
-            </button>
+            {/* Search button (desktop only — mobile uses BottomTabBar search) */}
+            {!mobile && (
+              <button
+                onClick={onSearchClick}
+                className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group flex items-center gap-2"
+                aria-label="Search (Cmd+K)"
+                title="Search (Cmd+K)"
+              >
+                <Search size={20} />
+                <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] rounded border border-[var(--color-bg-hover)] group-hover:border-[var(--color-text-muted)]">
+                  <span className="text-[10px]">⌘</span>K
+                </kbd>
+              </button>
+            )}
 
             {/* Notification Center */}
-            <NotificationCenter />
+            {mobile ? (
+              <button
+                onClick={handleNotificationClick}
+                className="relative p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                aria-label="Notifications"
+              >
+                <Bell size={20} />
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 bg-[var(--color-accent-primary)] text-white text-xs font-bold rounded-full flex items-center justify-center">
+                    {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <NotificationCenter />
+            )}
 
             {/* Download Indicator with Badge */}
             <button
-              onClick={() => setDownloadManagerOpen(true)}
+              onClick={handleDownloadClick}
               className="relative p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
               aria-label="Downloads"
             >
@@ -185,31 +226,35 @@ export function TopNav({ onSearchClick }: TopNavProps) {
               )}
             </button>
 
-            {/* API Status Indicator */}
-            <ApiStatusIndicator />
+            {/* API Status Indicator (desktop only — not useful on mobile) */}
+            {!mobile && <ApiStatusIndicator />}
 
-            <Link
-              to="/settings"
-              className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-              aria-label="Settings"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              <Settings size={20} />
-            </Link>
+            {/* Settings link (desktop only — mobile uses BottomTabBar) */}
+            {!mobile && (
+              <Link
+                to="/settings"
+                className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                aria-label="Settings"
+              >
+                <Settings size={20} />
+              </Link>
+            )}
 
-            {/* Mobile Menu Button */}
-            <button
-              className="md:hidden p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-              aria-label="Menu"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            >
-              {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-            </button>
+            {/* Mobile Menu Button (desktop only — mobile uses BottomTabBar) */}
+            {!mobile && (
+              <button
+                className="md:hidden p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                aria-label="Menu"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              >
+                {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Mobile Menu */}
-        {mobileMenuOpen && (
+        {/* Mobile Menu (desktop small screens only — mobile uses BottomTabBar) */}
+        {!mobile && mobileMenuOpen && (
           <div className="md:hidden py-4 border-t border-[var(--color-bg-hover)]">
             <div className="flex flex-col gap-2">
               {navItems.map((item) => (
@@ -231,11 +276,13 @@ export function TopNav({ onSearchClick }: TopNavProps) {
         )}
       </div>
 
-      {/* Download Manager Modal */}
-      <DownloadManager
-        isOpen={downloadManagerOpen}
-        onClose={() => setDownloadManagerOpen(false)}
-      />
+      {/* Download Manager Modal (desktop only) */}
+      {!mobile && (
+        <DownloadManager
+          isOpen={downloadManagerOpen}
+          onClose={() => setDownloadManagerOpen(false)}
+        />
+      )}
     </nav>
   )
 }
