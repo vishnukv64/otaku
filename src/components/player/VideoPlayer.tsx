@@ -12,8 +12,6 @@ import {
   Pause,
   Volume2,
   VolumeX,
-  Maximize,
-  Minimize,
   Settings,
   Loader2,
   AlertCircle,
@@ -1669,13 +1667,6 @@ export function VideoPlayer({
             {fitModeLabel}
           </button>
 
-          {/* Fullscreen */}
-          <button
-            onClick={toggleFullscreen}
-            className={`${mobile ? 'w-8 h-8' : 'w-10 h-10'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
-          >
-            {isFullscreen ? <Minimize size={mobile ? 16 : 20} /> : <Maximize size={mobile ? 16 : 20} />}
-          </button>
         </div>
       </div>
     </div>

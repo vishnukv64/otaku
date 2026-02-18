@@ -12,7 +12,7 @@ export function SettingToggle({ value, onChange, disabled }: SettingToggleProps)
       className={`
         relative inline-flex h-6 w-11 items-center rounded-full transition-colors
         ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-        ${value ? 'bg-[var(--color-accent-primary)]' : 'bg-[var(--color-surface-subtle)]'}
+        ${value ? 'bg-[var(--color-accent-primary)]' : 'bg-white/20'}
       `}
       aria-checked={value}
       role="switch"

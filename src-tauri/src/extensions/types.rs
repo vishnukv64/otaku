@@ -178,6 +178,7 @@ pub struct VideoSources {
 /// Tag/Genre information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
+    pub id: Option<i64>,
     pub name: String,
     pub slug: String,
     pub count: u32,

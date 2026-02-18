@@ -7,16 +7,20 @@
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Loader2, X, BookOpen } from 'lucide-react'
+import { Search, Loader2, X, BookOpen, Tag as TagIcon } from 'lucide-react'
 import {
   loadExtension,
   jikanTopManga,
   jikanSearchManga,
+  jikanGenresManga,
+  jikanSearchMangaFiltered,
 } from '@/utils/tauri-commands'
+import type { Tag } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
+import { GenreFilterBar } from '@/components/media/GenreFilterBar'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
@@ -38,11 +42,37 @@ function MangaScreen() {
   const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
 
+  const genreLoadMoreRef = useRef<HTMLDivElement>(null)
   const [allanimeExtensionId, setAllanimeExtensionId] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [selectedManga, setSelectedManga] = useState<SearchResult | null>(null)
+
+  // Restore modal state when returning from read page
+  useEffect(() => {
+    const saved = sessionStorage.getItem('otaku_return_manga')
+    if (saved) {
+      sessionStorage.removeItem('otaku_return_manga')
+      try {
+        setSelectedManga(JSON.parse(saved))
+      } catch { /* ignore parse errors */ }
+    }
+  }, [])
+
+  const [showGenres, setShowGenres] = useState(false)
+
+  // Genre state
+  const [mangaGenres, setMangaGenres] = useState<Tag[]>([])
+  const [genresLoading, setGenresLoading] = useState(false)
+  const [selectedGenreIds, setSelectedGenreIds] = useState<Set<number>>(new Set())
+  const [genreFilters, setGenreFilters] = useState({ orderBy: '', sort: 'desc', status: '', type: '' })
+  const [genreResults, setGenreResults] = useState<SearchResult[]>([])
+  const [genreResultsLoading, setGenreResultsLoading] = useState(false)
+  const [genrePage, setGenrePage] = useState(1)
+  const [genreHasNextPage, setGenreHasNextPage] = useState(true)
+  const [genreLoadingMore, setGenreLoadingMore] = useState(false)
+  const genreSeenIdsRef = useRef<Set<string>>(new Set())
 
   // Grid density class mapping for search results grid
   const gridClasses = {
@@ -121,6 +151,108 @@ function MangaScreen() {
     setSelectedManga(item)
   }
 
+  // === GENRE: Fetch genres list ===
+  useEffect(() => {
+    if (!showGenres || mangaGenres.length > 0) return
+    setGenresLoading(true)
+    jikanGenresManga()
+      .then(result => setMangaGenres(result.genres))
+      .catch(err => console.error('Failed to load manga genres:', err))
+      .finally(() => setGenresLoading(false))
+  }, [showGenres, mangaGenres.length])
+
+  // Genre: fetch results when genres/filters change
+  useEffect(() => {
+    if (!showGenres) return
+    if (selectedGenreIds.size === 0 && !genreFilters.orderBy && !genreFilters.status && !genreFilters.type) {
+      setGenreResults([])
+      setGenreHasNextPage(false)
+      return
+    }
+
+    const fetchGenreResults = async () => {
+      setGenreResultsLoading(true)
+      setGenrePage(1)
+      genreSeenIdsRef.current.clear()
+      try {
+        const genreStr = Array.from(selectedGenreIds).join(',')
+        const result = await jikanSearchMangaFiltered({
+          page: 1,
+          sfw: nsfwFilter,
+          genres: genreStr || undefined,
+          orderBy: genreFilters.orderBy || undefined,
+          sort: genreFilters.sort || undefined,
+          status: genreFilters.status || undefined,
+          mangaType: genreFilters.type || undefined,
+        })
+        const filtered = filterNsfwContent(result.results, (item) => item.genres, nsfwFilter, (item) => item.title)
+        filtered.forEach(item => genreSeenIdsRef.current.add(item.id))
+        setGenreResults(filtered)
+        setGenreHasNextPage(result.has_next_page)
+      } catch (err) {
+        console.error('Manga genre search failed:', err)
+      } finally {
+        setGenreResultsLoading(false)
+      }
+    }
+
+    fetchGenreResults()
+  }, [showGenres, selectedGenreIds, genreFilters, nsfwFilter])
+
+  // Load more genre results
+  const loadMoreGenreResults = useCallback(async () => {
+    if (genreLoadingMore || !genreHasNextPage) return
+
+    setGenreLoadingMore(true)
+    try {
+      const nextPage = genrePage + 1
+      const genreStr = Array.from(selectedGenreIds).join(',')
+      const result = await jikanSearchMangaFiltered({
+        page: nextPage,
+        sfw: nsfwFilter,
+        genres: genreStr || undefined,
+        orderBy: genreFilters.orderBy || undefined,
+        sort: genreFilters.sort || undefined,
+        status: genreFilters.status || undefined,
+        mangaType: genreFilters.type || undefined,
+      })
+
+      const newResults = result.results.filter(item => {
+        if (genreSeenIdsRef.current.has(item.id)) return false
+        genreSeenIdsRef.current.add(item.id)
+        return true
+      })
+
+      setGenreResults(prev => [...prev, ...newResults])
+      setGenrePage(nextPage)
+      setGenreHasNextPage(result.has_next_page)
+    } catch (err) {
+      console.error('Failed to load more manga genre results:', err)
+    } finally {
+      setGenreLoadingMore(false)
+    }
+  }, [genrePage, genreHasNextPage, genreLoadingMore, selectedGenreIds, genreFilters, nsfwFilter])
+
+  // Intersection observer for genre tab infinite scroll
+  useEffect(() => {
+    if (!showGenres) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && genreHasNextPage && !genreLoadingMore && !genreResultsLoading) {
+          loadMoreGenreResults()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    if (genreLoadMoreRef.current) {
+      observer.observe(genreLoadMoreRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [showGenres, genreHasNextPage, genreLoadingMore, genreResultsLoading, loadMoreGenreResults])
+
   // Keyboard shortcuts
   useKeyboardShortcut(
     {
@@ -147,6 +279,17 @@ function MangaScreen() {
           <div className="flex items-center gap-3 mb-6">
             <BookOpen className="w-8 h-8 text-[var(--color-accent-primary)]" />
             <h1 className="text-3xl font-bold">Manga</h1>
+            <button
+              onClick={() => setShowGenres(!showGenres)}
+              className={`ml-auto px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                showGenres
+                  ? 'bg-[var(--color-accent-primary)] text-white'
+                  : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              <TagIcon className="w-4 h-4" />
+              Genres
+            </button>
           </div>
 
           {/* Instant Search */}
@@ -189,7 +332,7 @@ function MangaScreen() {
           </div>
         </div>
 
-        {/* Search Results (hides carousels when active) */}
+        {/* Search Results / Genre Browse / Carousels */}
         {searchInput ? (
           <div>
             {searchResults.length > 0 && (
@@ -217,6 +360,77 @@ function MangaScreen() {
                 </p>
               </div>
             )}
+          </div>
+        ) : showGenres ? (
+          // ========== GENRE BROWSE MODE ==========
+          <div>
+            <GenreFilterBar
+              genres={mangaGenres}
+              selectedGenreIds={selectedGenreIds}
+              onToggleGenre={(id) => {
+                setSelectedGenreIds(prev => {
+                  const next = new Set(prev)
+                  if (next.has(id)) {
+                    next.delete(id)
+                  } else {
+                    next.add(id)
+                  }
+                  return next
+                })
+              }}
+              filters={genreFilters}
+              onFilterChange={setGenreFilters}
+              mediaType="manga"
+              loading={genresLoading}
+            />
+
+            <div className="mt-6">
+              {genreResultsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+                </div>
+              ) : genreResults.length > 0 ? (
+                <div className="overflow-visible">
+                  <p className="text-sm text-[var(--color-text-muted)] mb-4">
+                    {genreResults.length} results
+                  </p>
+                  <div className={`grid ${gridClasses} overflow-visible`}>
+                    {genreResults.map((item) => (
+                      <MediaCard
+                        key={item.id}
+                        media={item}
+                        onClick={() => handleMediaClick(item)}
+                        status={getStatus(item.id)}
+                      />
+                    ))}
+                  </div>
+
+                  <div ref={genreLoadMoreRef} className="py-8 flex items-center justify-center">
+                    {genreLoadingMore && (
+                      <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+                    )}
+                    {!genreHasNextPage && genreResults.length > 0 && (
+                      <p className="text-sm text-[var(--color-text-muted)]">
+                        You've reached the end
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : selectedGenreIds.size > 0 || genreFilters.orderBy || genreFilters.status || genreFilters.type ? (
+                <div className="text-center py-12">
+                  <p className="text-[var(--color-text-secondary)]">
+                    No manga found matching the selected filters
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <TagIcon className="w-12 h-12 text-[var(--color-text-muted)] mx-auto mb-3" />
+                  <p className="text-[var(--color-text-secondary)]">
+                    Select one or more genres to browse manga
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <>

@@ -4,7 +4,7 @@
  * Full-screen manga reader with chapter navigation
  */
 
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { Loader2, X, Home } from 'lucide-react'
 import { MangaReader } from '@/components/reader/MangaReader'
@@ -52,7 +52,6 @@ export const Route = createFileRoute('/read')({
 })
 
 function ReadPage() {
-  const navigate = useNavigate()
   const { extensionId, mangaId, chapterId: initialChapterId, malId } = Route.useSearch()
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
 
@@ -408,7 +407,7 @@ function ReadPage() {
   }
 
   const handleGoBack = () => {
-    navigate({ to: '/manga' })
+    window.history.back()
   }
 
   return (

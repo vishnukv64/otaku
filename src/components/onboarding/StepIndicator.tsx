@@ -14,7 +14,7 @@ export function StepIndicator({ totalSteps, currentStep }: StepIndicatorProps) {
               ? 'w-2.5 h-2.5 bg-[#e50914]'
               : i < currentStep
                 ? 'w-2 h-2 bg-[#e50914]/60'
-                : 'w-2 h-2 bg-white/20'
+                : 'w-2 h-2 bg-white/30'
           }`}
           aria-current={i === currentStep ? 'step' : undefined}
         />

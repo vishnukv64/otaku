@@ -4,7 +4,7 @@
  * Full-screen video player with episode list sidebar
  */
 
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -32,7 +32,7 @@ export const Route = createFileRoute('/watch')({
 })
 
 function WatchPage() {
-  const navigate = useNavigate()
+
   const { malId, episodeId: initialEpisodeId } = Route.useSearch()
 
   const [details, setDetails] = useState<MediaDetails | null>(null)
@@ -418,7 +418,7 @@ function WatchPage() {
   }
 
   const handleGoBack = () => {
-    navigate({ to: '/anime' })
+    window.history.back()
   }
 
   const { isMobile, isPortrait } = useMobileLayout()

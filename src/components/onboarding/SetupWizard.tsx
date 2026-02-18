@@ -177,10 +177,10 @@ export function SetupWizard({ onComplete, onBack }: SetupWizardProps) {
                       .getState()
                       .updateSettings({ gridDensity: opt.value })
                   }
-                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
                     gridDensity === opt.value
                       ? 'border-[#e50914] bg-[#e50914]/10'
-                      : 'border-white/10 bg-[var(--color-bg-secondary)]/50 hover:border-white/20'
+                      : 'border-white/20 bg-white/5 hover:border-white/40'
                   }`}
                 >
                   {/* Mini grid preview */}
@@ -197,7 +197,7 @@ export function SetupWizard({ onComplete, onBack }: SetupWizardProps) {
                         className={`aspect-[2/3] rounded-sm ${
                           gridDensity === opt.value
                             ? 'bg-[#e50914]/40'
-                            : 'bg-white/10'
+                            : 'bg-white/20'
                         }`}
                       />
                     ))}

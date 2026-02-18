@@ -2,7 +2,7 @@
 // but not directly read by application code — suppress dead_code for the whole module.
 #![allow(dead_code)]
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Wraps single-item responses: { "data": T }
 #[derive(Debug, Deserialize)]
@@ -32,13 +32,13 @@ pub struct JikanPaginationItems {
     pub per_page: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanImages {
     pub jpg: Option<JikanImageSet>,
     pub webp: Option<JikanImageSet>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanImageSet {
     pub image_url: Option<String>,
     pub small_image_url: Option<String>,
@@ -216,14 +216,14 @@ pub struct JikanEpisode {
     pub forum_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanCharacterEntry {
     pub character: JikanCharacter,
     pub role: Option<String>,
     pub voice_actors: Option<Vec<JikanVoiceActor>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanCharacter {
     pub mal_id: i64,
     pub url: Option<String>,
@@ -231,13 +231,13 @@ pub struct JikanCharacter {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanVoiceActor {
     pub person: JikanPerson,
     pub language: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanPerson {
     pub mal_id: i64,
     pub url: Option<String>,
@@ -266,4 +266,69 @@ pub struct JikanRecommendationItem {
     pub url: Option<String>,
     pub images: Option<JikanImages>,
     pub title: Option<String>,
+}
+
+// ==================== Enrichment Types ====================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanStaffEntry {
+    pub person: JikanPerson,
+    pub positions: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanStatistics {
+    pub watching: Option<i64>,
+    pub reading: Option<i64>,
+    pub completed: Option<i64>,
+    pub on_hold: Option<i64>,
+    pub dropped: Option<i64>,
+    pub plan_to_watch: Option<i64>,
+    pub plan_to_read: Option<i64>,
+    pub total: Option<i64>,
+    pub scores: Option<Vec<JikanScoreDistribution>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanScoreDistribution {
+    pub score: i32,
+    pub votes: i64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanReview {
+    pub mal_id: i64,
+    pub url: Option<String>,
+    pub date: Option<String>,
+    pub review: Option<String>,
+    pub score: Option<i32>,
+    pub tags: Option<Vec<String>>,
+    pub user: Option<JikanReviewUser>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanReviewUser {
+    pub username: String,
+    pub url: Option<String>,
+    pub images: Option<JikanImages>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanPicture {
+    pub jpg: Option<JikanImageSet>,
+    pub webp: Option<JikanImageSet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanNews {
+    pub mal_id: i64,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub date: Option<String>,
+    pub author_username: Option<String>,
+    pub forum_url: Option<String>,
+    pub images: Option<JikanImages>,
+    pub comments: Option<i32>,
+    pub excerpt: Option<String>,
 }

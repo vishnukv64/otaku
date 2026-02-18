@@ -171,13 +171,147 @@ pub fn manga_details(mal_id: i64) -> Result<MangaDetails, String> {
     Ok(jikan_manga_to_manga_details(&response.data))
 }
 
+// --- Enrichment functions ---
+
+pub fn manga_characters(mal_id: i64) -> Result<Vec<JikanCharacterEntry>, String> {
+    let path = format!("/manga/{}/characters", mal_id);
+    let response: JikanResponse<Vec<JikanCharacterEntry>> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn manga_statistics(mal_id: i64) -> Result<JikanStatistics, String> {
+    let path = format!("/manga/{}/statistics", mal_id);
+    let response: JikanResponse<JikanStatistics> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn manga_reviews(mal_id: i64, page: i32) -> Result<Vec<JikanReview>, String> {
+    let page_str = page.to_string();
+    let path = format!("/manga/{}/reviews", mal_id);
+    let response: JikanPaginatedResponse<JikanReview> =
+        JIKAN.get_parsed_with_query(&path, &[("page", &page_str)])?;
+    Ok(response.data)
+}
+
+pub fn manga_pictures(mal_id: i64) -> Result<Vec<JikanPicture>, String> {
+    let path = format!("/manga/{}/pictures", mal_id);
+    let response: JikanResponse<Vec<JikanPicture>> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn manga_news(mal_id: i64) -> Result<Vec<JikanNews>, String> {
+    let path = format!("/manga/{}/news", mal_id);
+    let response: JikanPaginatedResponse<JikanNews> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn manga_recommendations(mal_id: i64) -> Result<SearchResults, String> {
+    let path = format!("/manga/{}/recommendations", mal_id);
+    let response: JikanResponse<Vec<JikanRecommendationEntry>> =
+        JIKAN.get_parsed(&path)?;
+
+    let results: Vec<SearchResult> = response
+        .data
+        .iter()
+        .map(|rec| {
+            let entry = &rec.entry;
+            SearchResult {
+                id: entry.mal_id.to_string(),
+                title: entry.title.clone().unwrap_or_default(),
+                cover_url: entry.images.as_ref().and_then(|i| extract_image_url(i)),
+                trailer_url: None,
+                description: None,
+                year: None,
+                status: None,
+                rating: None,
+                latest_episode: None,
+                latest_episode_date: None,
+                available_episodes: None,
+                media_type: None,
+                genres: None,
+                rank: None,
+                popularity: None,
+                studios: None,
+            }
+        })
+        .collect();
+
+    Ok(SearchResults {
+        has_next_page: false,
+        results,
+    })
+}
+
+// --- Filtered search ---
+
+pub fn search_manga_filtered(
+    query: Option<&str>,
+    page: i32,
+    sfw: bool,
+    genres: Option<&str>,
+    order_by: Option<&str>,
+    sort: Option<&str>,
+    status: Option<&str>,
+    manga_type: Option<&str>,
+    min_score: Option<&str>,
+    max_score: Option<&str>,
+) -> Result<SearchResults, String> {
+    let page_str = page.to_string();
+    let mut params: Vec<(&str, &str)> = vec![("page", &page_str), ("limit", "25")];
+
+    if let Some(q) = query {
+        if !q.is_empty() {
+            params.push(("q", q));
+        }
+    }
+    if sfw {
+        params.push(("sfw", "true"));
+    }
+    if let Some(g) = genres {
+        if !g.is_empty() {
+            params.push(("genres", g));
+        }
+    }
+    if let Some(o) = order_by {
+        params.push(("order_by", o));
+    }
+    if let Some(s) = sort {
+        params.push(("sort", s));
+    }
+    if let Some(st) = status {
+        params.push(("status", st));
+    }
+    if let Some(t) = manga_type {
+        params.push(("type", t));
+    }
+    if let Some(ms) = min_score {
+        params.push(("min_score", ms));
+    }
+    if let Some(mx) = max_score {
+        params.push(("max_score", mx));
+    }
+
+    let response: JikanPaginatedResponse<JikanManga> =
+        JIKAN.get_parsed_with_query("/manga", &params)?;
+
+    Ok(SearchResults {
+        results: response
+            .data
+            .iter()
+            .map(jikan_manga_to_search_result)
+            .collect(),
+        has_next_page: response.pagination.has_next_page,
+    })
+}
+
 pub fn genres_manga() -> Result<TagsResult, String> {
-    let response: JikanPaginatedResponse<JikanGenre> = JIKAN.get_parsed("/genres/manga")?;
+    let response: JikanResponse<Vec<JikanGenre>> = JIKAN.get_parsed("/genres/manga")?;
 
     let genres = response
         .data
         .iter()
         .map(|g| Tag {
+            id: Some(g.mal_id),
             name: g.name.clone(),
             slug: g.name.to_lowercase().replace(' ', "-"),
             count: g.count.unwrap_or(0) as u32,

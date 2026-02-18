@@ -1,5 +1,6 @@
 use crate::commands::AppState;
 use crate::extensions::types::*;
+use super::types::*;
 use super::{anime, bridge, manga};
 use tauri::State;
 
@@ -109,6 +110,83 @@ pub async fn jikan_random_anime() -> Result<SearchResult, String> {
         .map_err(|e| format!("Task error: {}", e))?
 }
 
+// --- Anime Enrichment Commands ---
+
+#[tauri::command]
+pub async fn jikan_anime_characters(mal_id: i64) -> Result<Vec<JikanCharacterEntry>, String> {
+    tokio::task::spawn_blocking(move || anime::anime_characters(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_anime_staff(mal_id: i64) -> Result<Vec<JikanStaffEntry>, String> {
+    tokio::task::spawn_blocking(move || anime::anime_staff(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_anime_statistics(mal_id: i64) -> Result<JikanStatistics, String> {
+    tokio::task::spawn_blocking(move || anime::anime_statistics(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_anime_reviews(mal_id: i64, page: i32) -> Result<Vec<JikanReview>, String> {
+    tokio::task::spawn_blocking(move || anime::anime_reviews(mal_id, page))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_anime_pictures(mal_id: i64) -> Result<Vec<JikanPicture>, String> {
+    tokio::task::spawn_blocking(move || anime::anime_pictures(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_anime_news(mal_id: i64) -> Result<Vec<JikanNews>, String> {
+    tokio::task::spawn_blocking(move || anime::anime_news(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_search_anime_filtered(
+    query: Option<String>,
+    page: i32,
+    sfw: bool,
+    genres: Option<String>,
+    order_by: Option<String>,
+    sort: Option<String>,
+    status: Option<String>,
+    anime_type: Option<String>,
+    min_score: Option<String>,
+    max_score: Option<String>,
+    rating: Option<String>,
+) -> Result<SearchResults, String> {
+    tokio::task::spawn_blocking(move || {
+        anime::search_anime_filtered(
+            query.as_deref(),
+            page,
+            sfw,
+            genres.as_deref(),
+            order_by.as_deref(),
+            sort.as_deref(),
+            status.as_deref(),
+            anime_type.as_deref(),
+            min_score.as_deref(),
+            max_score.as_deref(),
+            rating.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
 // --- Manga Commands ---
 
 #[tauri::command]
@@ -141,6 +219,81 @@ pub async fn jikan_manga_details(mal_id: i64) -> Result<MangaDetails, String> {
     tokio::task::spawn_blocking(move || manga::manga_details(mal_id))
         .await
         .map_err(|e| format!("Task error: {}", e))?
+}
+
+// --- Manga Enrichment Commands ---
+
+#[tauri::command]
+pub async fn jikan_manga_characters(mal_id: i64) -> Result<Vec<JikanCharacterEntry>, String> {
+    tokio::task::spawn_blocking(move || manga::manga_characters(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_manga_statistics(mal_id: i64) -> Result<JikanStatistics, String> {
+    tokio::task::spawn_blocking(move || manga::manga_statistics(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_manga_reviews(mal_id: i64, page: i32) -> Result<Vec<JikanReview>, String> {
+    tokio::task::spawn_blocking(move || manga::manga_reviews(mal_id, page))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_manga_pictures(mal_id: i64) -> Result<Vec<JikanPicture>, String> {
+    tokio::task::spawn_blocking(move || manga::manga_pictures(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_manga_news(mal_id: i64) -> Result<Vec<JikanNews>, String> {
+    tokio::task::spawn_blocking(move || manga::manga_news(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_manga_recommendations(mal_id: i64) -> Result<SearchResults, String> {
+    tokio::task::spawn_blocking(move || manga::manga_recommendations(mal_id))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn jikan_search_manga_filtered(
+    query: Option<String>,
+    page: i32,
+    sfw: bool,
+    genres: Option<String>,
+    order_by: Option<String>,
+    sort: Option<String>,
+    status: Option<String>,
+    manga_type: Option<String>,
+    min_score: Option<String>,
+    max_score: Option<String>,
+) -> Result<SearchResults, String> {
+    tokio::task::spawn_blocking(move || {
+        manga::search_manga_filtered(
+            query.as_deref(),
+            page,
+            sfw,
+            genres.as_deref(),
+            order_by.as_deref(),
+            sort.as_deref(),
+            status.as_deref(),
+            manga_type.as_deref(),
+            min_score.as_deref(),
+            max_score.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]

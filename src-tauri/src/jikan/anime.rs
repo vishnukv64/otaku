@@ -430,7 +430,7 @@ pub fn anime_episodes(mal_id: i64, page: i32) -> Result<(Vec<Episode>, bool), St
 
 pub fn anime_recommendations(mal_id: i64) -> Result<SearchResults, String> {
     let path = format!("/anime/{}/recommendations", mal_id);
-    let response: JikanPaginatedResponse<JikanRecommendationEntry> =
+    let response: JikanResponse<Vec<JikanRecommendationEntry>> =
         JIKAN.get_parsed(&path)?;
 
     let results: Vec<SearchResult> = response
@@ -466,12 +466,13 @@ pub fn anime_recommendations(mal_id: i64) -> Result<SearchResults, String> {
 }
 
 pub fn genres_anime() -> Result<TagsResult, String> {
-    let response: JikanPaginatedResponse<JikanGenre> = JIKAN.get_parsed("/genres/anime")?;
+    let response: JikanResponse<Vec<JikanGenre>> = JIKAN.get_parsed("/genres/anime")?;
 
     let genres = response
         .data
         .iter()
         .map(|g| Tag {
+            id: Some(g.mal_id),
             name: g.name.clone(),
             slug: g.name.to_lowercase().replace(' ', "-"),
             count: g.count.unwrap_or(0) as u32,
@@ -513,4 +514,110 @@ pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResult
 pub fn random_anime() -> Result<SearchResult, String> {
     let response: JikanResponse<JikanAnime> = JIKAN.get_parsed("/random/anime")?;
     Ok(jikan_anime_to_search_result(&response.data))
+}
+
+// --- Enrichment functions ---
+
+pub fn anime_characters(mal_id: i64) -> Result<Vec<JikanCharacterEntry>, String> {
+    let path = format!("/anime/{}/characters", mal_id);
+    let response: JikanResponse<Vec<JikanCharacterEntry>> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn anime_staff(mal_id: i64) -> Result<Vec<JikanStaffEntry>, String> {
+    let path = format!("/anime/{}/staff", mal_id);
+    let response: JikanResponse<Vec<JikanStaffEntry>> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn anime_statistics(mal_id: i64) -> Result<JikanStatistics, String> {
+    let path = format!("/anime/{}/statistics", mal_id);
+    let response: JikanResponse<JikanStatistics> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn anime_reviews(mal_id: i64, page: i32) -> Result<Vec<JikanReview>, String> {
+    let page_str = page.to_string();
+    let path = format!("/anime/{}/reviews", mal_id);
+    let response: JikanPaginatedResponse<JikanReview> =
+        JIKAN.get_parsed_with_query(&path, &[("page", &page_str)])?;
+    Ok(response.data)
+}
+
+pub fn anime_pictures(mal_id: i64) -> Result<Vec<JikanPicture>, String> {
+    let path = format!("/anime/{}/pictures", mal_id);
+    let response: JikanResponse<Vec<JikanPicture>> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+pub fn anime_news(mal_id: i64) -> Result<Vec<JikanNews>, String> {
+    let path = format!("/anime/{}/news", mal_id);
+    let response: JikanPaginatedResponse<JikanNews> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
+}
+
+// --- Filtered search ---
+
+pub fn search_anime_filtered(
+    query: Option<&str>,
+    page: i32,
+    sfw: bool,
+    genres: Option<&str>,
+    order_by: Option<&str>,
+    sort: Option<&str>,
+    status: Option<&str>,
+    anime_type: Option<&str>,
+    min_score: Option<&str>,
+    max_score: Option<&str>,
+    rating: Option<&str>,
+) -> Result<SearchResults, String> {
+    let page_str = page.to_string();
+    let mut params: Vec<(&str, &str)> = vec![("page", &page_str), ("limit", "25")];
+
+    if let Some(q) = query {
+        if !q.is_empty() {
+            params.push(("q", q));
+        }
+    }
+    if sfw {
+        params.push(("sfw", "true"));
+    }
+    if let Some(g) = genres {
+        if !g.is_empty() {
+            params.push(("genres", g));
+        }
+    }
+    if let Some(o) = order_by {
+        params.push(("order_by", o));
+    }
+    if let Some(s) = sort {
+        params.push(("sort", s));
+    }
+    if let Some(st) = status {
+        params.push(("status", st));
+    }
+    if let Some(t) = anime_type {
+        params.push(("type", t));
+    }
+    if let Some(ms) = min_score {
+        params.push(("min_score", ms));
+    }
+    if let Some(mx) = max_score {
+        params.push(("max_score", mx));
+    }
+    if let Some(r) = rating {
+        params.push(("rating", r));
+    }
+
+    let response: JikanPaginatedResponse<JikanAnime> =
+        JIKAN.get_parsed_with_query("/anime", &params)?;
+
+    Ok(SearchResults {
+        results: response
+            .data
+            .iter()
+            .map(jikan_anime_to_search_result)
+            .collect(),
+        has_next_page: response.pagination.has_next_page,
+    })
 }

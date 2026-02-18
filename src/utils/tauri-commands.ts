@@ -371,6 +371,7 @@ export async function onSeasonAnimeDiscoverResults(
 
 // Tag/Genre types
 export interface Tag {
+  id?: number
   name: string
   slug: string
   count: number
@@ -2172,15 +2173,242 @@ export async function jikanAnimeRecommendations(malId: number): Promise<SearchRe
 /**
  * Get all anime genres from the Jikan API
  */
-export async function jikanGenresAnime(): Promise<unknown> {
+export async function jikanGenresAnime(): Promise<TagsResult> {
   return await invoke('jikan_genres_anime')
 }
 
 /**
  * Get all manga genres from the Jikan API
  */
-export async function jikanGenresManga(): Promise<unknown> {
+export async function jikanGenresManga(): Promise<TagsResult> {
   return await invoke('jikan_genres_manga')
+}
+
+// Filtered search types
+export interface AnimeSearchFilters {
+  query?: string
+  page?: number
+  sfw?: boolean
+  genres?: string
+  orderBy?: string
+  sort?: string
+  status?: string
+  animeType?: string
+  minScore?: string
+  maxScore?: string
+  rating?: string
+}
+
+export interface MangaSearchFilters {
+  query?: string
+  page?: number
+  sfw?: boolean
+  genres?: string
+  orderBy?: string
+  sort?: string
+  status?: string
+  mangaType?: string
+  minScore?: string
+  maxScore?: string
+}
+
+/**
+ * Search anime with advanced filters (genres, ordering, status, type, score range)
+ */
+export async function jikanSearchAnimeFiltered(
+  filters: AnimeSearchFilters
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_search_anime_filtered', {
+      query: filters.query ?? null,
+      page: filters.page ?? 1,
+      sfw: filters.sfw ?? true,
+      genres: filters.genres ?? null,
+      orderBy: filters.orderBy ?? null,
+      sort: filters.sort ?? null,
+      status: filters.status ?? null,
+      animeType: filters.animeType ?? null,
+      minScore: filters.minScore ?? null,
+      maxScore: filters.maxScore ?? null,
+      rating: filters.rating ?? null,
+    })
+    reportApiStatus('anime', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('anime', false)
+    throw err
+  }
+}
+
+/**
+ * Search manga with advanced filters (genres, ordering, status, type, score range)
+ */
+export async function jikanSearchMangaFiltered(
+  filters: MangaSearchFilters
+): Promise<SearchResults> {
+  try {
+    const result = await invoke<SearchResults>('jikan_search_manga_filtered', {
+      query: filters.query ?? null,
+      page: filters.page ?? 1,
+      sfw: filters.sfw ?? true,
+      genres: filters.genres ?? null,
+      orderBy: filters.orderBy ?? null,
+      sort: filters.sort ?? null,
+      status: filters.status ?? null,
+      mangaType: filters.mangaType ?? null,
+      minScore: filters.minScore ?? null,
+      maxScore: filters.maxScore ?? null,
+    })
+    reportApiStatus('manga', true, result.results?.length ?? 0)
+    return result
+  } catch (err) {
+    reportApiStatus('manga', false)
+    throw err
+  }
+}
+
+// ==================== Jikan Enrichment Types ====================
+
+export interface JikanImageSet {
+  image_url?: string
+  small_image_url?: string
+  large_image_url?: string
+}
+
+export interface JikanImages {
+  jpg?: JikanImageSet
+  webp?: JikanImageSet
+}
+
+export interface JikanPerson {
+  mal_id: number
+  url?: string
+  images?: JikanImages
+  name: string
+}
+
+export interface JikanCharacter {
+  mal_id: number
+  url?: string
+  images?: JikanImages
+  name: string
+}
+
+export interface JikanVoiceActor {
+  person: JikanPerson
+  language?: string
+}
+
+export interface JikanCharacterEntry {
+  character: JikanCharacter
+  role?: string
+  voice_actors?: JikanVoiceActor[]
+}
+
+export interface JikanStaffEntry {
+  person: JikanPerson
+  positions?: string[]
+}
+
+export interface JikanScoreDistribution {
+  score: number
+  votes: number
+  percentage: number
+}
+
+export interface JikanStatistics {
+  watching?: number
+  reading?: number
+  completed?: number
+  on_hold?: number
+  dropped?: number
+  plan_to_watch?: number
+  plan_to_read?: number
+  total?: number
+  scores?: JikanScoreDistribution[]
+}
+
+export interface JikanReviewUser {
+  username: string
+  url?: string
+  images?: JikanImages
+}
+
+export interface JikanReview {
+  mal_id: number
+  url?: string
+  date?: string
+  review?: string
+  score?: number
+  tags?: string[]
+  user?: JikanReviewUser
+}
+
+export interface JikanPicture {
+  jpg?: JikanImageSet
+  webp?: JikanImageSet
+}
+
+export interface JikanNews {
+  mal_id: number
+  url?: string
+  title?: string
+  date?: string
+  author_username?: string
+  forum_url?: string
+  images?: JikanImages
+  comments?: number
+  excerpt?: string
+}
+
+// ==================== Jikan Enrichment Commands ====================
+
+export async function jikanAnimeCharacters(malId: number): Promise<JikanCharacterEntry[]> {
+  return await invoke('jikan_anime_characters', { malId })
+}
+
+export async function jikanAnimeStaff(malId: number): Promise<JikanStaffEntry[]> {
+  return await invoke('jikan_anime_staff', { malId })
+}
+
+export async function jikanAnimeStatistics(malId: number): Promise<JikanStatistics> {
+  return await invoke('jikan_anime_statistics', { malId })
+}
+
+export async function jikanAnimeReviews(malId: number, page: number = 1): Promise<JikanReview[]> {
+  return await invoke('jikan_anime_reviews', { malId, page })
+}
+
+export async function jikanAnimePictures(malId: number): Promise<JikanPicture[]> {
+  return await invoke('jikan_anime_pictures', { malId })
+}
+
+export async function jikanAnimeNews(malId: number): Promise<JikanNews[]> {
+  return await invoke('jikan_anime_news', { malId })
+}
+
+export async function jikanMangaCharacters(malId: number): Promise<JikanCharacterEntry[]> {
+  return await invoke('jikan_manga_characters', { malId })
+}
+
+export async function jikanMangaStatistics(malId: number): Promise<JikanStatistics> {
+  return await invoke('jikan_manga_statistics', { malId })
+}
+
+export async function jikanMangaReviews(malId: number, page: number = 1): Promise<JikanReview[]> {
+  return await invoke('jikan_manga_reviews', { malId, page })
+}
+
+export async function jikanMangaPictures(malId: number): Promise<JikanPicture[]> {
+  return await invoke('jikan_manga_pictures', { malId })
+}
+
+export async function jikanMangaNews(malId: number): Promise<JikanNews[]> {
+  return await invoke('jikan_manga_news', { malId })
+}
+
+export async function jikanMangaRecommendations(malId: number): Promise<SearchResults> {
+  return await invoke('jikan_manga_recommendations', { malId })
 }
 
 /**

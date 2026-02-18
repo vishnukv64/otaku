@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -25,6 +25,13 @@ import { Description } from '@/components/ui/Description'
 import { NextEpisodeCountdown } from './NextEpisodeCountdown'
 import { BottomSheet } from '@/components/ui/BottomSheet'
 import { isMobile } from '@/utils/platform'
+import { DetailTabBar } from './DetailTabBar'
+import { CharacterGrid } from './CharacterGrid'
+import { StaffList } from './StaffList'
+import { ScoreDistribution } from './ScoreDistribution'
+import { ReviewList } from './ReviewCard'
+import { GalleryGrid } from './GalleryGrid'
+import { NewsList } from './NewsCard'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -108,9 +115,26 @@ export function MediaDetailModal({
   const [showNewBadge, setShowNewBadge] = useState(false)
   const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
 
+  // Enrichment tab state
+  const [activeTab, setActiveTab] = useState('episodes')
+  const [characters, setCharacters] = useState<JikanCharacterEntry[] | null>(null)
+  const [charactersLoading, setCharactersLoading] = useState(false)
+  const [staffData, setStaffData] = useState<JikanStaffEntry[] | null>(null)
+  const [staffLoading, setStaffLoading] = useState(false)
+  const [statistics, setStatistics] = useState<JikanStatistics | null>(null)
+  const [statisticsLoading, setStatisticsLoading] = useState(false)
+  const [reviews, setReviews] = useState<JikanReview[] | null>(null)
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [pictures, setPictures] = useState<JikanPicture[] | null>(null)
+  const [picturesLoading, setPicturesLoading] = useState(false)
+  const [newsData, setNewsData] = useState<JikanNews[] | null>(null)
+  const [newsLoading, setNewsLoading] = useState(false)
+  const loadedTabsRef = useRef<Set<string>>(new Set())
+
   // AllAnime extension for video sources (downloads)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
   const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
+  const [bridgeFailed, setBridgeFailed] = useState(false)
   useEffect(() => {
     if (!allanimeExtId) {
       loadExtension(ALLANIME_EXTENSION).then(meta => setAllanimeExtId(meta.id)).catch(() => {})
@@ -121,8 +145,15 @@ export function MediaDetailModal({
   useEffect(() => {
     if (!details || allanimeShowId) return
     resolveAllanimeId(details.title, 'anime', media.id, details.english_name, details.year, details.title_synonyms, details.type, details.episode_count, details.native_name, details.season?.quarter)
-      .then(id => { if (id) setAllanimeShowId(id) })
-      .catch(() => {})
+      .then(id => {
+        if (id) {
+          setAllanimeShowId(id)
+          setBridgeFailed(false)
+        } else {
+          setBridgeFailed(true)
+        }
+      })
+      .catch(() => { setBridgeFailed(true) })
   }, [details, allanimeShowId, media.id])
 
   // Tag state
@@ -145,6 +176,8 @@ export function MediaDetailModal({
   })
 
   const handleWatch = (episodeId: string) => {
+    // Save media to sessionStorage so the modal can reopen when user navigates back
+    sessionStorage.setItem('otaku_return_media', JSON.stringify(media))
     // Navigate directly - don't call onClose() first as it triggers state updates
     // that can interfere with navigation. The modal will unmount when the route changes.
     navigate({
@@ -474,10 +507,26 @@ export function MediaDetailModal({
     }
   }
 
-  // Reset episode page when modal opens for a different anime
+  // Reset episode page and enrichment state when modal opens for a different anime
   useEffect(() => {
     setEpisodePage(0)
+    setActiveTab('episodes')
+    setCharacters(null)
+    setStaffData(null)
+    setStatistics(null)
+    setReviews(null)
+    setPictures(null)
+    setNewsData(null)
+    setRelatedAnime([])
+    loadedTabsRef.current = new Set()
   }, [media.id])
+
+  // If anime has no episodes, default to characters tab
+  useEffect(() => {
+    if (details && details.episodes.length === 0 && activeTab === 'episodes') {
+      setActiveTab('characters')
+    }
+  }, [details, activeTab])
 
   useEffect(() => {
     if (!isOpen) return
@@ -737,38 +786,6 @@ export function MediaDetailModal({
     }
   }, [episodeWatchHistory, details])
 
-  // Load related anime
-  useEffect(() => {
-    if (!isOpen || !media.title) return
-
-    const loadRelated = async () => {
-      setRelatedLoading(true)
-      try {
-        // Use first part of title for broader search (before ":", "-", "–", etc.)
-        // This helps find related anime when the full title is too specific
-        const searchTitle = media.title.split(/[:\-–—]/)[0].trim()
-        console.log('[Related Anime] Searching with:', searchTitle, '(original:', media.title, ')')
-
-        const results = await jikanSearchAnime(searchTitle, 1, true)
-        console.log('[Related Anime] Search returned:', results.results.length, 'results')
-
-        // Filter out the current anime and limit to 12 results
-        const filtered = results.results
-          .filter(item => item.id !== media.id)
-          .slice(0, 12)
-
-        console.log('[Related Anime] After filtering:', filtered.length, 'results')
-        setRelatedAnime(filtered)
-      } catch (error) {
-        console.error('[Related Anime] Failed to load:', error)
-      } finally {
-        setRelatedLoading(false)
-      }
-    }
-
-    loadRelated()
-  }, [isOpen, media.id, media.title])
-
   // Check for new episodes using episode watch history
   useEffect(() => {
     if (!isOpen || !details) {
@@ -807,6 +824,71 @@ export function MediaDetailModal({
       setShowNewBadge(false)
     }
   }, [isOpen, media, media.latest_episode, details, details?.status, isTracked, inLibrary, episodeWatchHistory])
+
+  // Lazy-load enrichment data when tab changes
+  useEffect(() => {
+    if (!isOpen || !details) return
+    if (loadedTabsRef.current.has(activeTab)) return
+
+    const malId = parseInt(media.id)
+
+    if (activeTab === 'characters') {
+      loadedTabsRef.current.add('characters')
+      setCharactersLoading(true)
+      jikanAnimeCharacters(malId)
+        .then(setCharacters)
+        .catch(() => setCharacters([]))
+        .finally(() => setCharactersLoading(false))
+    } else if (activeTab === 'staff') {
+      loadedTabsRef.current.add('staff')
+      setStaffLoading(true)
+      jikanAnimeStaff(malId)
+        .then(setStaffData)
+        .catch(() => setStaffData([]))
+        .finally(() => setStaffLoading(false))
+    } else if (activeTab === 'stats') {
+      loadedTabsRef.current.add('stats')
+      setStatisticsLoading(true)
+      jikanAnimeStatistics(malId)
+        .then(setStatistics)
+        .catch(() => setStatistics({} as JikanStatistics))
+        .finally(() => setStatisticsLoading(false))
+    } else if (activeTab === 'reviews') {
+      loadedTabsRef.current.add('reviews')
+      setReviewsLoading(true)
+      jikanAnimeReviews(malId, 1)
+        .then(setReviews)
+        .catch(() => setReviews([]))
+        .finally(() => setReviewsLoading(false))
+    } else if (activeTab === 'gallery') {
+      loadedTabsRef.current.add('gallery')
+      setPicturesLoading(true)
+      jikanAnimePictures(malId)
+        .then(setPictures)
+        .catch(() => setPictures([]))
+        .finally(() => setPicturesLoading(false))
+    } else if (activeTab === 'news') {
+      loadedTabsRef.current.add('news')
+      setNewsLoading(true)
+      jikanAnimeNews(malId)
+        .then(setNewsData)
+        .catch(() => setNewsData([]))
+        .finally(() => setNewsLoading(false))
+    } else if (activeTab === 'related') {
+      loadedTabsRef.current.add('related')
+      setRelatedLoading(true)
+      const searchTitle = media.title.split(/[:\-–—]/)[0].trim()
+      jikanSearchAnime(searchTitle, 1, true)
+        .then(results => {
+          setRelatedAnime(
+            results.results.filter(item => item.id !== media.id).slice(0, 12)
+          )
+        })
+        .catch(() => setRelatedAnime([]))
+        .finally(() => setRelatedLoading(false))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isOpen, details, media.id])
 
   // Keyboard shortcuts
   useKeyboardShortcut(
@@ -1370,8 +1452,25 @@ export function MediaDetailModal({
                   </div>
                 )}
 
+                {/* Detail Tabs */}
+                <DetailTabBar
+                  tabs={[
+                    ...(details.episodes.length > 0 ? [{ id: 'episodes', label: 'Episodes', count: details.episodes.length }] : []),
+                    { id: 'characters', label: 'Characters' },
+                    { id: 'staff', label: 'Staff' },
+                    { id: 'stats', label: 'Stats' },
+                    { id: 'reviews', label: 'Reviews' },
+                    { id: 'gallery', label: 'Gallery' },
+                    { id: 'news', label: 'News' },
+                    { id: 'related', label: 'Related' },
+                  ]}
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                />
+
+                <div className="mt-4">
                 {/* Episodes */}
-                {details.episodes.length > 0 && (
+                {activeTab === 'episodes' && details.episodes.length > 0 && (
                   <div>
                     <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
                       <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
@@ -1467,14 +1566,17 @@ export function MediaDetailModal({
                       ).map((episode) => (
                         <div
                           key={episode.id}
-                          className={`group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] hover:ring-2 transition-all hover:scale-105 transform ${
-                            selectionMode
-                              ? selectedEpisodes.has(episode.id)
-                                ? 'ring-2 ring-[var(--color-accent-primary)]'
-                                : 'hover:ring-white/30'
-                              : 'hover:ring-[var(--color-accent-primary)]'
-                          } ${selectionMode ? 'cursor-pointer' : ''}`}
-                          onClick={selectionMode ? () => toggleEpisodeSelection(episode.id) : undefined}
+                          className={`group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] transition-all transform ${
+                            bridgeFailed
+                              ? 'opacity-60 grayscale cursor-not-allowed'
+                              : selectionMode
+                                ? `hover:ring-2 hover:scale-105 cursor-pointer ${selectedEpisodes.has(episode.id)
+                                    ? 'ring-2 ring-[var(--color-accent-primary)]'
+                                    : 'hover:ring-white/30'
+                                  }`
+                                : 'hover:ring-2 hover:scale-105 hover:ring-[var(--color-accent-primary)]'
+                          }`}
+                          onClick={bridgeFailed ? undefined : selectionMode ? () => toggleEpisodeSelection(episode.id) : undefined}
                         >
                           {/* Thumbnail or placeholder */}
                           {episode.thumbnail || details.cover_url ? (
@@ -1494,8 +1596,16 @@ export function MediaDetailModal({
                             </div>
                           )}
 
-                          {/* Play button overlay on hover (only in normal mode) */}
-                          {!selectionMode && (
+                          {/* Unavailable overlay (bridge resolution failed) */}
+                          {bridgeFailed && !selectionMode && (
+                            <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-20">
+                              <AlertTriangle className="w-5 h-5 text-yellow-500 mb-1" />
+                              <span className="text-[10px] font-semibold text-yellow-500/90 uppercase tracking-wide">Unavailable</span>
+                            </div>
+                          )}
+
+                          {/* Play button overlay on hover (only in normal mode, and bridge resolved) */}
+                          {!selectionMode && !bridgeFailed && (
                             <div
                               className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
                               onClick={() => handleWatch(episode.id)}
@@ -1508,8 +1618,8 @@ export function MediaDetailModal({
                             </div>
                           )}
 
-                          {/* Small download/delete button at top right on hover (only in normal mode, not downloading) */}
-                          {!selectionMode && !downloadingEpisodes.has(episode.number) && (
+                          {/* Small download/delete button at top right on hover (only in normal mode, not downloading, bridge resolved) */}
+                          {!selectionMode && !bridgeFailed && !downloadingEpisodes.has(episode.number) && (
                             <>
                               {/* Download button (only for non-downloaded episodes) */}
                               {!downloadedEpisodes.has(episode.number) && (
@@ -1619,9 +1729,41 @@ export function MediaDetailModal({
                   </div>
                 )}
 
+                {/* Characters Tab */}
+                {activeTab === 'characters' && (
+                  <CharacterGrid characters={characters || []} loading={charactersLoading || !characters} />
+                )}
+
+                {/* Staff Tab */}
+                {activeTab === 'staff' && (
+                  <StaffList staff={staffData || []} loading={staffLoading || !staffData} />
+                )}
+
+                {/* Stats Tab */}
+                {activeTab === 'stats' && (
+                  <ScoreDistribution statistics={statistics || {} as JikanStatistics} loading={statisticsLoading || !statistics} mediaType="anime" />
+                )}
+
+                {/* Reviews Tab */}
+                {activeTab === 'reviews' && (
+                  <ReviewList reviews={reviews || []} loading={reviewsLoading || !reviews} />
+                )}
+
+                {/* Gallery Tab */}
+                {activeTab === 'gallery' && (
+                  <GalleryGrid pictures={pictures || []} loading={picturesLoading || !pictures} />
+                )}
+
+                {/* News Tab */}
+                {activeTab === 'news' && (
+                  <NewsList news={newsData || []} loading={newsLoading || !newsData} />
+                )}
+
                 {/* Related Anime */}
+                {activeTab === 'related' && (
+                  <>
                 {relatedLoading && (
-                  <div className="mt-12">
+                  <div>
                     <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
                       <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
@@ -1658,6 +1800,9 @@ export function MediaDetailModal({
                     </div>
                   </div>
                 )}
+                  </>
+                )}
+                </div>
               </div>
             </>
           ) : null}

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Loader2, AlertCircle, X, Sparkles, Calendar, Star } from 'lucide-react'
+import { Search, Loader2, AlertCircle, X, Sparkles, Calendar, Star, Tag as TagIcon } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import {
   loadExtension,
@@ -8,9 +8,13 @@ import {
   jikanSeasonNow,
   jikanSeason,
   getContinueWatchingWithDetails,
+  jikanGenresAnime,
+  jikanSearchAnimeFiltered,
 } from '@/utils/tauri-commands'
+import type { Tag } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
+import { GenreFilterBar } from '@/components/media/GenreFilterBar'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
@@ -47,7 +51,7 @@ export const Route = createFileRoute('/anime')({
   component: AnimeScreen,
 })
 
-type TabType = 'browse' | 'season'
+type TabType = 'browse' | 'season' | 'genres'
 
 function AnimeScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
@@ -56,9 +60,21 @@ function AnimeScreen() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const seasonLoadMoreRef = useRef<HTMLDivElement>(null)
+  const genreLoadMoreRef = useRef<HTMLDivElement>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
+
+  // Restore modal state when returning from watch page
+  useEffect(() => {
+    const saved = sessionStorage.getItem('otaku_return_media')
+    if (saved) {
+      sessionStorage.removeItem('otaku_return_media')
+      try {
+        setSelectedMedia(JSON.parse(saved))
+      } catch { /* ignore parse errors */ }
+    }
+  }, [])
 
   // Browse tab infinite scroll state (pages 2+)
   const [browseExtraItems, setBrowseExtraItems] = useState<SearchResult[]>([])
@@ -90,6 +106,18 @@ function AnimeScreen() {
   const [fullSeasonPage, setFullSeasonPage] = useState(1)
   const [fullSeasonHasNextPage, setFullSeasonHasNextPage] = useState(true)
   const fullSeasonSeenIdsRef = useRef<Set<string>>(new Set())
+
+  // Genre tab state
+  const [animeGenres, setAnimeGenres] = useState<Tag[]>([])
+  const [genresLoading, setGenresLoading] = useState(false)
+  const [selectedGenreIds, setSelectedGenreIds] = useState<Set<number>>(new Set())
+  const [genreFilters, setGenreFilters] = useState({ orderBy: '', sort: 'desc', status: '', type: '' })
+  const [genreResults, setGenreResults] = useState<SearchResult[]>([])
+  const [genreResultsLoading, setGenreResultsLoading] = useState(false)
+  const [genrePage, setGenrePage] = useState(1)
+  const [genreHasNextPage, setGenreHasNextPage] = useState(true)
+  const [genreLoadingMore, setGenreLoadingMore] = useState(false)
+  const genreSeenIdsRef = useRef<Set<string>>(new Set())
 
   // Grid density class mapping
   const gridClasses = {
@@ -268,6 +296,88 @@ function AnimeScreen() {
     }
   }, [fullSeasonPage, fullSeasonHasNextPage, fullSeasonLoadingMore, nsfwFilter, selectedYear, selectedSeason, isCurrentSeason])
 
+  // === GENRE TAB: Fetch genres list ===
+  useEffect(() => {
+    if (activeTab !== 'genres' || animeGenres.length > 0) return
+    setGenresLoading(true)
+    jikanGenresAnime()
+      .then(result => setAnimeGenres(result.genres))
+      .catch(err => console.error('Failed to load anime genres:', err))
+      .finally(() => setGenresLoading(false))
+  }, [activeTab, animeGenres.length])
+
+  // Genre tab: fetch results when genres/filters change
+  useEffect(() => {
+    if (activeTab !== 'genres') return
+    if (selectedGenreIds.size === 0 && !genreFilters.orderBy && !genreFilters.status && !genreFilters.type) {
+      setGenreResults([])
+      setGenreHasNextPage(false)
+      return
+    }
+
+    const fetchGenreResults = async () => {
+      setGenreResultsLoading(true)
+      setGenrePage(1)
+      genreSeenIdsRef.current.clear()
+      try {
+        const genreStr = Array.from(selectedGenreIds).join(',')
+        const result = await jikanSearchAnimeFiltered({
+          page: 1,
+          sfw: nsfwFilter,
+          genres: genreStr || undefined,
+          orderBy: genreFilters.orderBy || undefined,
+          sort: genreFilters.sort || undefined,
+          status: genreFilters.status || undefined,
+          animeType: genreFilters.type || undefined,
+        })
+        const filtered = filterNsfwContent(result.results, (item) => item.genres, nsfwFilter, (item) => item.title)
+        filtered.forEach(item => genreSeenIdsRef.current.add(item.id))
+        setGenreResults(filtered)
+        setGenreHasNextPage(result.has_next_page)
+      } catch (err) {
+        console.error('Genre search failed:', err)
+      } finally {
+        setGenreResultsLoading(false)
+      }
+    }
+
+    fetchGenreResults()
+  }, [activeTab, selectedGenreIds, genreFilters, nsfwFilter])
+
+  // Load more genre results (pages 2+)
+  const loadMoreGenreResults = useCallback(async () => {
+    if (genreLoadingMore || !genreHasNextPage) return
+
+    setGenreLoadingMore(true)
+    try {
+      const nextPage = genrePage + 1
+      const genreStr = Array.from(selectedGenreIds).join(',')
+      const result = await jikanSearchAnimeFiltered({
+        page: nextPage,
+        sfw: nsfwFilter,
+        genres: genreStr || undefined,
+        orderBy: genreFilters.orderBy || undefined,
+        sort: genreFilters.sort || undefined,
+        status: genreFilters.status || undefined,
+        animeType: genreFilters.type || undefined,
+      })
+
+      const newResults = result.results.filter(item => {
+        if (genreSeenIdsRef.current.has(item.id)) return false
+        genreSeenIdsRef.current.add(item.id)
+        return true
+      })
+
+      setGenreResults(prev => [...prev, ...newResults])
+      setGenrePage(nextPage)
+      setGenreHasNextPage(result.has_next_page)
+    } catch (err) {
+      console.error('Failed to load more genre results:', err)
+    } finally {
+      setGenreLoadingMore(false)
+    }
+  }, [genrePage, genreHasNextPage, genreLoadingMore, selectedGenreIds, genreFilters, nsfwFilter])
+
   // Intersection observer for infinite scroll (Browse tab)
   useEffect(() => {
     if (activeTab !== 'browse') return
@@ -307,6 +417,26 @@ function AnimeScreen() {
 
     return () => observer.disconnect()
   }, [activeTab, fullSeasonHasNextPage, fullSeasonLoadingMore, fullSeasonLoading, loadMoreSeasonAnime])
+
+  // Intersection observer for genre tab infinite scroll
+  useEffect(() => {
+    if (activeTab !== 'genres') return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && genreHasNextPage && !genreLoadingMore && !genreResultsLoading) {
+          loadMoreGenreResults()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    if (genreLoadMoreRef.current) {
+      observer.observe(genreLoadMoreRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [activeTab, genreHasNextPage, genreLoadingMore, genreResultsLoading, loadMoreGenreResults])
 
   // Debounced instant search
   useEffect(() => {
@@ -464,10 +594,26 @@ function AnimeScreen() {
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent-primary)]" />
               )}
             </button>
+            <button
+              onClick={() => setActiveTab('genres')}
+              className={`px-4 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === 'genres'
+                  ? 'text-[var(--color-accent-primary)]'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <TagIcon className="w-4 h-4" />
+                Genres
+              </span>
+              {activeTab === 'genres' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent-primary)]" />
+              )}
+            </button>
           </div>
 
           {/* Tab Content */}
-          {activeTab === 'browse' ? (
+          {activeTab === 'browse' && (
             // ========== BROWSE TAB ==========
             <div>
               {/* Recommendations / Popular */}
@@ -521,7 +667,9 @@ function AnimeScreen() {
                 )}
               </div>
             </div>
-          ) : (
+          )}
+
+          {activeTab === 'season' && (
             // ========== SEASON TAB ==========
             <div>
               <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -598,6 +746,81 @@ function AnimeScreen() {
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'genres' && (
+            // ========== GENRES TAB ==========
+            <div>
+              <GenreFilterBar
+                genres={animeGenres}
+                selectedGenreIds={selectedGenreIds}
+                onToggleGenre={(id) => {
+                  setSelectedGenreIds(prev => {
+                    const next = new Set(prev)
+                    if (next.has(id)) {
+                      next.delete(id)
+                    } else {
+                      next.add(id)
+                    }
+                    return next
+                  })
+                }}
+                filters={genreFilters}
+                onFilterChange={setGenreFilters}
+                mediaType="anime"
+                loading={genresLoading}
+              />
+
+              {/* Genre Results */}
+              <div className="mt-6">
+                {genreResultsLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+                  </div>
+                ) : genreResults.length > 0 ? (
+                  <div className="overflow-visible">
+                    <p className="text-sm text-[var(--color-text-muted)] mb-4">
+                      {genreResults.length} results
+                    </p>
+                    <div className={`grid ${gridClasses} overflow-visible`}>
+                      {genreResults.map((item) => (
+                        <MediaCard
+                          key={item.id}
+                          media={item}
+                          onClick={() => setSelectedMedia(item)}
+                          status={getStatus(item.id)}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Infinite scroll sentinel */}
+                    <div ref={genreLoadMoreRef} className="py-8 flex items-center justify-center">
+                      {genreLoadingMore && (
+                        <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+                      )}
+                      {!genreHasNextPage && genreResults.length > 0 && (
+                        <p className="text-sm text-[var(--color-text-muted)]">
+                          You've reached the end
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : selectedGenreIds.size > 0 || genreFilters.orderBy || genreFilters.status || genreFilters.type ? (
+                  <div className="text-center py-12">
+                    <p className="text-[var(--color-text-secondary)]">
+                      No anime found matching the selected filters
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <TagIcon className="w-12 h-12 text-[var(--color-text-muted)] mx-auto mb-3" />
+                    <p className="text-[var(--color-text-secondary)]">
+                      Select one or more genres to browse anime
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </>
