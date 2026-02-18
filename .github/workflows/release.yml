@@ -53,12 +53,36 @@ jobs:
         with:
           script: |
             const version = '${{ steps.get-version.outputs.version }}';
+            const tag = `v${version}`;
+            const body = `## What's New\n\nSee the [changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.\n\n## Downloads\n\n### Desktop\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Windows | x64 | \`otaku_${version}_x64-setup.exe\` |\n| macOS | Apple Silicon (M1/M2/M3) | \`otaku_${version}_aarch64.dmg\` |\n| macOS | Intel | \`otaku_${version}_x64.dmg\` |\n| Linux | x64 | \`otaku_${version}_amd64.deb\` / \`.AppImage\` |\n\n### Mobile\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Android | ARM64 | \`otaku_${version}_aarch64.apk\` |\n| iOS | ARM64 | \`otaku_${version}_aarch64.ipa\` |`;
+
+            // Reuse existing release if one already exists for this tag
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tag
+              });
+              console.log(`Found existing release ${existing.data.id} for ${tag}, reusing it`);
+              // Reset to draft so publish-release can finalize it
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: existing.data.id,
+                draft: true
+              });
+              return existing.data.id;
+            } catch (e) {
+              // No existing release — create a new one
+              console.log(`No existing release for ${tag}, creating new draft`);
+            }
+
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `v${version}`,
+              tag_name: tag,
               name: `Otaku v${version}`,
-              body: `## What's New\n\nSee the [changelog](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.\n\n## Downloads\n\n### Desktop\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Windows | x64 | \`otaku_${version}_x64-setup.exe\` |\n| macOS | Apple Silicon (M1/M2/M3) | \`otaku_${version}_aarch64.dmg\` |\n| macOS | Intel | \`otaku_${version}_x64.dmg\` |\n| Linux | x64 | \`otaku_${version}_amd64.deb\` / \`.AppImage\` |\n\n### Mobile\n\n| Platform | Architecture | Download |\n|----------|--------------|----------|\n| Android | ARM64 | \`otaku_${version}_aarch64.apk\` |\n| iOS | ARM64 | \`otaku_${version}_aarch64.ipa\` |`,
+              body,
               draft: true,
               prerelease: false
             });
@@ -376,20 +400,56 @@ jobs:
         run: pnpm exec tauri android build --apk true --target aarch64
 
       - name: Upload APK to release
+        uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | head -1)
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+            const version = '${{ needs.create-release.outputs.version }}';
+            const releaseId = ${{ needs.create-release.outputs.release_id }};
 
-          if [ -n "$APK" ]; then
-            cp "$APK" "otaku_${VERSION}_aarch64.apk"
-            gh release upload "v${VERSION}" "otaku_${VERSION}_aarch64.apk" --clobber
-            echo "✅ APK uploaded: otaku_${VERSION}_aarch64.apk ($(du -h "$APK" | cut -f1))"
-          else
-            echo "::error::No APK found in build output"
-            exit 1
-          fi
+            // Find the APK
+            const apkPath = execSync(
+              'find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | head -1'
+            ).toString().trim();
+
+            if (!apkPath) {
+              core.setFailed('No APK found in build output');
+              return;
+            }
+
+            const assetName = `otaku_${version}_aarch64.apk`;
+
+            // Delete existing asset with same name if present
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId
+            });
+            const existing = assets.find(a => a.name === assetName);
+            if (existing) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: existing.id
+              });
+            }
+
+            // Upload APK to the specific release ID
+            const data = fs.readFileSync(apkPath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              name: assetName,
+              data
+            });
+
+            const sizeMB = (data.length / 1024 / 1024).toFixed(1);
+            console.log(`✅ APK uploaded: ${assetName} (${sizeMB}MB) to release ${releaseId}`);
 
   # ─── iOS IPA (aarch64) ─────────────────────────────────────────────
   #
