@@ -28,14 +28,20 @@ cp "$PATCHES/MainActivity.kt" \
 echo "✅ MainActivity.kt patched"
 
 # 2. Patch RustWebView.kt — add mixedContentMode after javaScriptCanOpenWindowsAutomatically
+# This file lives in the generated/ subdirectory which may not exist until build time.
+# Find it dynamically; skip gracefully if not present (MainActivity.kt is the primary fix).
 echo "Patching RustWebView.kt..."
-WEBVIEW_FILE="$GEN_ANDROID/app/src/main/java/com/otaku/player/generated/RustWebView.kt"
-if grep -q 'mixedContentMode' "$WEBVIEW_FILE"; then
-  echo "⏭  RustWebView.kt already has mixedContentMode, skipping"
+WEBVIEW_FILE=$(find "$GEN_ANDROID" -name "RustWebView.kt" -type f 2>/dev/null | head -1)
+if [ -z "$WEBVIEW_FILE" ]; then
+  echo "⏭  RustWebView.kt not found (generated at build time), skipping"
 else
-  sed -i.bak 's/settings.javaScriptCanOpenWindowsAutomatically = true/settings.javaScriptCanOpenWindowsAutomatically = true\n        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW/' "$WEBVIEW_FILE"
-  rm -f "$WEBVIEW_FILE.bak"
-  echo "✅ RustWebView.kt patched"
+  if grep -q 'mixedContentMode' "$WEBVIEW_FILE"; then
+    echo "⏭  RustWebView.kt already has mixedContentMode, skipping"
+  else
+    sed -i.bak 's/settings.javaScriptCanOpenWindowsAutomatically = true/settings.javaScriptCanOpenWindowsAutomatically = true\n        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW/' "$WEBVIEW_FILE"
+    rm -f "$WEBVIEW_FILE.bak"
+    echo "✅ RustWebView.kt patched"
+  fi
 fi
 
 echo "✅ All Android patches applied"
