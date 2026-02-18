@@ -350,39 +350,6 @@ jobs:
           sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
           echo "✅ Updated version to $VERSION"
 
-      - name: Initialize Android project
-        run: |
-          # Always start fresh to avoid stale package structure
-          rm -rf src-tauri/gen/android
-          echo "NDK_HOME=$NDK_HOME"
-          pnpm exec tauri android init
-
-          # Verify the Java package directory was created
-          EXPECTED_DIR="src-tauri/gen/android/app/src/main/java/com/otaku/player"
-          if [ ! -d "$EXPECTED_DIR" ]; then
-            echo "::error::Android init did not create expected package directory: $EXPECTED_DIR"
-            echo "Listing gen/android structure:"
-            find src-tauri/gen/android -type d | head -30
-            exit 1
-          fi
-          echo "✅ Android project initialized successfully"
-
-      - name: Apply Android patches
-        run: ./scripts/patch-android.sh
-
-      - name: Copy app icons to Android project
-        run: |
-          SRC="src-tauri/icons/android"
-          DEST="src-tauri/gen/android/app/src/main/res"
-          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-            [ -d "$SRC/$d" ] && cp "$SRC/$d/"* "$DEST/$d/"
-          done
-          mkdir -p "$DEST/mipmap-anydpi-v26" "$DEST/values"
-          cp "$SRC/mipmap-anydpi-v26/ic_launcher.xml" "$DEST/mipmap-anydpi-v26/"
-          cp "$SRC/values/ic_launcher_background.xml" "$DEST/values/"
-          rm -f "$DEST/drawable-v24/ic_launcher_foreground.xml" \
-                "$DEST/drawable/ic_launcher_background.xml"
-
       - name: Decode Android keystore
         env:
           ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
@@ -393,57 +360,6 @@ jobs:
             echo "✅ Keystore decoded for release signing"
           else
             echo "::notice::No ANDROID_KEYSTORE secret — APK will be unsigned"
-          fi
-
-      - name: Inject signing config into build.gradle.kts
-        if: env.ANDROID_KEYSTORE_FILE != ''
-        run: |
-          GRADLE_FILE="src-tauri/gen/android/app/build.gradle.kts"
-
-          # The generated build.gradle.kts from `tauri android init` doesn't include
-          # signing config. Since gen/ is gitignored, we must patch it in CI.
-          # Insert signingConfigs block before buildTypes, and wire it into the release buildType.
-
-          node -e "
-            const fs = require('fs');
-            let content = fs.readFileSync('$GRADLE_FILE', 'utf8');
-
-            // Insert signingConfigs block right before buildTypes
-            const signingBlock = [
-              '    signingConfigs {',
-              '        create(\"release\") {',
-              '            val ksFile = System.getenv(\"ANDROID_KEYSTORE_FILE\")',
-              '            if (ksFile != null && file(ksFile).exists()) {',
-              '                storeFile = file(ksFile)',
-              '                storePassword = System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")',
-              '                keyAlias = System.getenv(\"ANDROID_KEY_ALIAS\")',
-              '                keyPassword = System.getenv(\"ANDROID_KEY_PASSWORD\")',
-              '            }',
-              '        }',
-              '    }',
-            ].join('\n');
-
-            content = content.replace(
-              /(    buildTypes \{)/,
-              signingBlock + '\n' + '\$1'
-            );
-
-            // Wire signingConfig into the release buildType
-            content = content.replace(
-              /(getByName\(\"release\"\) \{)/,
-              '\$1\n            signingConfig = signingConfigs.getByName(\"release\")'
-            );
-
-            fs.writeFileSync('$GRADLE_FILE', content);
-            console.log('✅ Signing config injected into build.gradle.kts');
-          "
-
-          # Verify the patch
-          if grep -q 'signingConfigs' "$GRADLE_FILE"; then
-            echo "✅ Signing config verified in build.gradle.kts"
-          else
-            echo "::error::Failed to inject signing config"
-            exit 1
           fi
 
       - name: Build Android APK
