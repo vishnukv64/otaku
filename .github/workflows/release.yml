@@ -392,6 +392,57 @@ jobs:
             echo "::notice::No ANDROID_KEYSTORE secret — APK will be unsigned"
           fi
 
+      - name: Inject signing config into build.gradle.kts
+        if: env.ANDROID_KEYSTORE_FILE != ''
+        run: |
+          GRADLE_FILE="src-tauri/gen/android/app/build.gradle.kts"
+
+          # The generated build.gradle.kts from `tauri android init` doesn't include
+          # signing config. Since gen/ is gitignored, we must patch it in CI.
+          # Insert signingConfigs block before buildTypes, and wire it into the release buildType.
+
+          node -e "
+            const fs = require('fs');
+            let content = fs.readFileSync('$GRADLE_FILE', 'utf8');
+
+            // Insert signingConfigs block right before buildTypes
+            const signingBlock = [
+              '    signingConfigs {',
+              '        create(\"release\") {',
+              '            val ksFile = System.getenv(\"ANDROID_KEYSTORE_FILE\")',
+              '            if (ksFile != null && file(ksFile).exists()) {',
+              '                storeFile = file(ksFile)',
+              '                storePassword = System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")',
+              '                keyAlias = System.getenv(\"ANDROID_KEY_ALIAS\")',
+              '                keyPassword = System.getenv(\"ANDROID_KEY_PASSWORD\")',
+              '            }',
+              '        }',
+              '    }',
+            ].join('\n');
+
+            content = content.replace(
+              /(    buildTypes \{)/,
+              signingBlock + '\n' + '\$1'
+            );
+
+            // Wire signingConfig into the release buildType
+            content = content.replace(
+              /(getByName\(\"release\"\) \{)/,
+              '\$1\n            signingConfig = signingConfigs.getByName(\"release\")'
+            );
+
+            fs.writeFileSync('$GRADLE_FILE', content);
+            console.log('✅ Signing config injected into build.gradle.kts');
+          "
+
+          # Verify the patch
+          if grep -q 'signingConfigs' "$GRADLE_FILE"; then
+            echo "✅ Signing config verified in build.gradle.kts"
+          else
+            echo "::error::Failed to inject signing config"
+            exit 1
+          fi
+
       - name: Build Android APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
