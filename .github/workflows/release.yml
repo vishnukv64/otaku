@@ -297,6 +297,8 @@ jobs:
           TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
 
           echo "NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$NDK_HOME" >> $GITHUB_ENV
           echo "CC_aarch64_linux_android=$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" >> $GITHUB_ENV
           echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
           echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android=--sysroot=$TOOLCHAIN/sysroot" >> $GITHUB_ENV
@@ -326,9 +328,20 @@ jobs:
 
       - name: Initialize Android project
         run: |
-          if [ ! -f "src-tauri/gen/android/build.gradle.kts" ]; then
-            pnpm exec tauri android init
+          # Always start fresh to avoid stale package structure
+          rm -rf src-tauri/gen/android
+          echo "NDK_HOME=$NDK_HOME"
+          pnpm exec tauri android init
+
+          # Verify the Java package directory was created
+          EXPECTED_DIR="src-tauri/gen/android/app/src/main/java/com/otaku/player"
+          if [ ! -d "$EXPECTED_DIR" ]; then
+            echo "::error::Android init did not create expected package directory: $EXPECTED_DIR"
+            echo "Listing gen/android structure:"
+            find src-tauri/gen/android -type d | head -30
+            exit 1
           fi
+          echo "✅ Android project initialized successfully"
 
       - name: Copy app icons to Android project
         run: |
