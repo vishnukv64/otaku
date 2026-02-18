@@ -357,26 +357,29 @@ pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
     let response: JikanResponse<JikanAnime> = JIKAN.get_parsed(&path)?;
 
     // Don't fail the entire request if episodes can't be fetched (rate limiting)
-    let (episodes, last_aired) = match fetch_all_episodes(mal_id) {
+    let (mut episodes, last_aired) = match fetch_all_episodes(mal_id) {
         Ok((eps, aired)) => (eps, aired),
         Err(e) => {
             log::warn!("Failed to fetch episodes for {}: {}, generating synthetic episodes", mal_id, e);
-            // Generate synthetic episodes from episode_count so the watch page still works
-            let eps = if let Some(count) = response.data.episodes {
-                (1..=count)
-                    .map(|n| Episode {
-                        id: format!("{}-{}", mal_id, n),
-                        number: n as f32,
-                        title: Some(format!("Episode {}", n)),
-                        thumbnail: None,
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            (eps, None)
+            (Vec::new(), None)
         }
     };
+
+    // Generate synthetic episodes when Jikan returns none but episode_count exists
+    // (common for movies and specials where /episodes endpoint returns empty)
+    if episodes.is_empty() {
+        if let Some(count) = response.data.episodes {
+            log::info!("Generating {} synthetic episodes for MAL {}", count, mal_id);
+            episodes = (1..=count)
+                .map(|n| Episode {
+                    id: format!("{}-{}", mal_id, n),
+                    number: n as f32,
+                    title: Some(format!("Episode {}", n)),
+                    thumbnail: None,
+                })
+                .collect();
+        }
+    }
 
     Ok(jikan_anime_to_media_details(&response.data, episodes, last_aired))
 }

@@ -19,6 +19,7 @@ const ANIME_SEARCH_GQL: &str = r#"query($search: SearchInput, $limit: Int, $page
             nativeName
             availableEpisodes
             airedStart
+            season
             type
             status
             __typename
@@ -63,6 +64,8 @@ struct AllAnimeEdge {
     /// airedStart contains a date object like {"year":2024,"month":10,"date":5}
     #[serde(rename = "airedStart")]
     aired_start: Option<AllAnimeAiredStart>,
+    /// Season info from AllAnime (e.g., { quarter: "Fall", year: 2020 })
+    season: Option<AllAnimeSeason>,
     /// Media type from AllAnime (e.g., "TV", "Movie", "OVA", "ONA", "Special")
     #[serde(rename = "type")]
     show_type: Option<String>,
@@ -73,6 +76,12 @@ struct AllAnimeEdge {
 
 #[derive(Debug, Deserialize)]
 struct AllAnimeAiredStart {
+    year: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AllAnimeSeason {
+    quarter: Option<String>,
     year: Option<i32>,
 }
 
@@ -285,7 +294,9 @@ fn search_allanime(query: &str, media_type: &str) -> Result<Vec<AllAnimeEdge>, S
 pub fn resolve_via_search(
     title: &str,
     english_title: Option<&str>,
+    title_japanese: Option<&str>,
     year: Option<i32>,
+    season: Option<&str>,
     media_type: &str,
     synonyms: &[String],
     _hints: &MatchHints,
@@ -312,6 +323,12 @@ pub fn resolve_via_search(
             jikan_titles.push(e);
         }
     }
+    if let Some(jp) = title_japanese {
+        let j = jp.to_lowercase();
+        if !j.is_empty() && !jikan_titles.contains(&j) {
+            jikan_titles.push(j);
+        }
+    }
     for syn in synonyms {
         let s = syn.to_lowercase();
         if !s.is_empty() && !jikan_titles.contains(&s) {
@@ -320,13 +337,13 @@ pub fn resolve_via_search(
     }
 
     log::info!(
-        "BRIDGE SEARCH for title='{}' | all_jikan_titles={:?} | year={:?}",
-        title, jikan_titles, year
+        "BRIDGE SEARCH for title='{}' | japanese={:?} | english={:?} | season={:?} | year={:?} | all_jikan_titles={:?}",
+        title, title_japanese, english_title, season, year, jikan_titles
     );
 
-    // --- Pass 1: Exact native name match (strongest signal) ---
+    // --- Pass 1: Exact native/Japanese name match (strongest signal) ---
     // --- Pass 2: Exact romaji/english name match ---
-    // --- Pass 3: Fuzzy fallback (only if no exact match found) ---
+    // --- No fuzzy fallback — only exact matches are trusted ---
 
     let mut all_edges: Vec<AllAnimeEdge> = Vec::new();
 
@@ -353,12 +370,41 @@ pub fn resolve_via_search(
     // Log all candidates for debugging
     for edge in &all_edges {
         log::info!(
-            "BRIDGE CANDIDATE [{}]: name='{}', english={:?}, native={:?}, type={:?}, eps={:?}, year={:?}",
+            "BRIDGE CANDIDATE [{}]: name='{}', english={:?}, native={:?}, type={:?}, eps={:?}, year={:?}, season={:?}",
             edge._id, edge.name, edge.english_name, edge.native_name,
             edge.show_type, edge.available_episodes.as_ref().and_then(|ae| ae.sub),
             edge.aired_start.as_ref().and_then(|s| s.year),
+            edge.season.as_ref().and_then(|s| s.quarter.as_deref()),
         );
     }
+
+    // Helper: validate season+year between Jikan and AllAnime candidate.
+    // Returns false (reject) only when BOTH sides have data and they conflict.
+    let season_year_ok = |edge: &AllAnimeEdge| -> bool {
+        // Year validation: check both airedStart.year and season.year
+        if let Some(jikan_year) = year {
+            let aa_year = edge.season.as_ref().and_then(|s| s.year)
+                .or_else(|| edge.aired_start.as_ref().and_then(|s| s.year));
+            if let Some(aa_y) = aa_year {
+                if aa_y != jikan_year {
+                    log::info!("BRIDGE REJECT [{}]: year mismatch (jikan={}, allanime={})", edge._id, jikan_year, aa_y);
+                    return false;
+                }
+            }
+        }
+        // Season quarter validation
+        if let Some(jikan_season) = season {
+            if let Some(ref aa_season) = edge.season {
+                if let Some(ref aa_quarter) = aa_season.quarter {
+                    if !jikan_season.eq_ignore_ascii_case(aa_quarter) {
+                        log::info!("BRIDGE REJECT [{}]: season mismatch (jikan='{}', allanime='{}')", edge._id, jikan_season, aa_quarter);
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    };
 
     // Pass 1: Exact native/Japanese name match
     for edge in &all_edges {
@@ -367,90 +413,67 @@ pub fn resolve_via_search(
             if aa_native_trimmed.is_empty() {
                 continue;
             }
-            for jt in &jikan_titles {
-                if jt.trim() == aa_native_trimmed {
-                    log::info!(
-                        "BRIDGE MATCH (native exact): '{}' native='{}' == jikan '{}' → id={}",
-                        edge.name, aa_native, jt, edge._id
-                    );
-                    return Ok(Some((edge._id.clone(), 100.0)));
+            // Compare against title_japanese specifically first, then all jikan_titles
+            let matched_title = if let Some(jp) = title_japanese {
+                jp.to_lowercase().trim().to_string() == aa_native_trimmed
+            } else {
+                false
+            };
+            let matched_any = matched_title || jikan_titles.iter().any(|jt| jt.trim() == aa_native_trimmed);
+
+            if matched_any {
+                if !season_year_ok(edge) {
+                    continue; // Season/year mismatch — skip this candidate
                 }
+                log::info!(
+                    "BRIDGE MATCH (native exact): '{}' native='{}' → id={}",
+                    edge.name, aa_native, edge._id
+                );
+                return Ok(Some((edge._id.clone(), 100.0)));
             }
         }
     }
-    log::info!("BRIDGE: No native name match found, trying exact title match");
+    log::info!("BRIDGE: No native name match found, trying exact English/romaji match");
 
     // Pass 2: Exact romaji or english name match
     for edge in &all_edges {
         let edge_name_lower = edge.name.to_lowercase();
+        let mut matched = false;
+
+        // Check AllAnime romaji name vs all Jikan titles
         for jt in &jikan_titles {
             if jt.trim() == edge_name_lower.trim() {
-                log::info!(
-                    "BRIDGE MATCH (title exact): name='{}' == jikan '{}' → id={}",
-                    edge.name, jt, edge._id
-                );
-                return Ok(Some((edge._id.clone(), 50.0)));
+                matched = true;
+                break;
             }
         }
-        if let Some(ref aa_eng) = edge.english_name {
-            let aa_eng_lower = aa_eng.to_lowercase();
-            for jt in &jikan_titles {
-                if jt.trim() == aa_eng_lower.trim() {
-                    log::info!(
-                        "BRIDGE MATCH (english exact): english='{}' == jikan '{}' → id={}",
-                        aa_eng, jt, edge._id
-                    );
-                    return Ok(Some((edge._id.clone(), 50.0)));
+
+        // Check AllAnime englishName vs all Jikan titles
+        if !matched {
+            if let Some(ref aa_eng) = edge.english_name {
+                let aa_eng_lower = aa_eng.to_lowercase();
+                for jt in &jikan_titles {
+                    if jt.trim() == aa_eng_lower.trim() {
+                        matched = true;
+                        break;
+                    }
                 }
             }
         }
-    }
-    log::info!("BRIDGE: No exact title match found, trying fuzzy fallback");
 
-    // Pass 3: Fuzzy fallback — title similarity + year (for titles with no exact match)
-    let mut best_match: Option<(String, f64)> = None;
-
-    for edge in &all_edges {
-        let mut score = title_similarity(&edge.name, title) * 10.0;
-
-        if let Some(ref aa_eng) = edge.english_name {
-            let eng_score = title_similarity(aa_eng, title) * 10.0;
-            score = score.max(eng_score);
-        }
-        if let Some(eng) = english_title {
-            let eng_score = title_similarity(&edge.name, eng) * 10.0;
-            score = score.max(eng_score);
-            if let Some(ref aa_eng) = edge.english_name {
-                let cross = title_similarity(aa_eng, eng) * 10.0;
-                score = score.max(cross);
+        if matched {
+            if !season_year_ok(edge) {
+                continue; // Season/year mismatch — skip this candidate
             }
-        }
-
-        // Year match bonus
-        if let (Some(aa_year), Some(search_year)) =
-            (edge.aired_start.as_ref().and_then(|s| s.year), year)
-        {
-            if aa_year == search_year {
-                score += 3.0;
-            }
-        }
-
-        log::info!(
-            "BRIDGE FUZZY '{}' [{}]: score={:.1}",
-            edge.name, edge._id, score
-        );
-
-        let dominated = best_match.as_ref().map_or(false, |(_, s)| score <= *s);
-        if !dominated && score > 5.0 {
-            best_match = Some((edge._id.clone(), score));
+            log::info!(
+                "BRIDGE MATCH (title exact): name='{}', english={:?} → id={}",
+                edge.name, edge.english_name, edge._id
+            );
+            return Ok(Some((edge._id.clone(), 50.0)));
         }
     }
 
-    if let Some((ref id, score)) = best_match {
-        log::info!("BRIDGE RESULT for '{}': winner='{}' score={:.1} (fuzzy)", title, id, score);
-    } else {
-        log::warn!("BRIDGE RESULT for '{}': NO MATCH found", title);
-    }
-
-    Ok(best_match)
+    // No exact match found — do NOT fall back to fuzzy matching
+    log::warn!("BRIDGE RESULT for '{}': NO EXACT MATCH found (fuzzy disabled)", title);
+    Ok(None)
 }

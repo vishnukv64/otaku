@@ -185,7 +185,7 @@ function WatchPage() {
           year: result.year,
           malId,
         })
-        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year, result.title_synonyms, result.type, result.episode_count)
+        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year, result.title_synonyms, result.type, result.episode_count, result.native_name, result.season?.quarter)
         console.log('[Watch] Resolved AllAnime ID:', resolvedId)
         if (resolvedId) {
           setAllanimeId(resolvedId)
@@ -350,7 +350,7 @@ function WatchPage() {
           if (!hasValidSources && malId && details) {
             console.warn('[Watch] No valid sources - clearing stale mapping and re-resolving')
             await clearAllanimeMapping(malId)
-            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year, details.title_synonyms, details.type, details.episode_count)
+            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year, details.title_synonyms, details.type, details.episode_count, details.native_name, details.season?.quarter)
             if (freshId && freshId !== allanimeId) {
               setAllanimeId(freshId)
               const freshEpisodeId = `${freshId}::${currentEpisode.number}`

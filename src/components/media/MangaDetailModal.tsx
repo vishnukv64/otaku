@@ -47,11 +47,11 @@ const CHAPTERS_PER_PAGE = 50
 
 interface MangaDetailModalProps {
   manga: SearchResult | null
-  extensionId: string
+  extensionId?: string
   onClose: () => void
 }
 
-export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailModalProps) {
+export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDetailModalProps) {
   const navigate = useNavigate()
   const maxConcurrentDownloads = useSettingsStore((state) => state.maxConcurrentDownloads)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
@@ -226,7 +226,7 @@ export function MangaDetailModal({ manga, extensionId, onClose }: MangaDetailMod
       try {
         // Step 1: Try bridge resolution (cached mappings)
         const bridgeId = await resolveAllanimeId(
-          details.title, 'manga', manga.id, details.english_name, details.year, details.title_synonyms, details.type, details.totalChapters
+          details.title, 'manga', manga.id, details.english_name, details.year, details.title_synonyms, details.type, details.totalChapters, details.native_name
         )
         if (bridgeId) {
           setAllanimeShowId(bridgeId)

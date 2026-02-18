@@ -2231,12 +2231,16 @@ export async function resolveAllanimeId(
   synonyms?: string[],
   animeType?: string,
   episodeCount?: number,
+  titleJapanese?: string,
+  season?: string,
 ): Promise<string | null> {
   return await invoke('resolve_allanime_id', {
     title,
     englishTitle,
+    titleJapanese,
     mediaType,
     year,
+    season,
     malId,
     synonyms,
     animeType,

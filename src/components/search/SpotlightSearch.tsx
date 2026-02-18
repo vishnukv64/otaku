@@ -11,9 +11,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Loader2, X, Star, ChevronRight, Tv, BookOpen } from 'lucide-react'
-import { loadExtension, searchAnime, searchManga } from '@/utils/tauri-commands'
-import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
+import { jikanSearchAnime, jikanSearchManga } from '@/utils/tauri-commands'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -35,29 +33,10 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GlobalSearchResult[]>([])
   const [loading, setLoading] = useState(false)
-  const [animeExtensionId, setAnimeExtensionId] = useState<string | null>(null)
-  const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [selectedMedia, setSelectedMedia] = useState<GlobalSearchResult | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
-
-  // Load both extensions on mount
-  useEffect(() => {
-    const initExtensions = async () => {
-      try {
-        const [animeMetadata, mangaMetadata] = await Promise.all([
-          loadExtension(ALLANIME_EXTENSION),
-          loadExtension(ALLANIME_MANGA_EXTENSION)
-        ])
-        setAnimeExtensionId(animeMetadata.id)
-        setMangaExtensionId(mangaMetadata.id)
-      } catch (err) {
-        console.error('Failed to load extensions:', err)
-      }
-    }
-    initExtensions()
-  }, [])
 
   // Focus input when modal opens and handle global Escape key
   useEffect(() => {
@@ -90,9 +69,9 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     }
   }, [isOpen, onClose])
 
-  // Debounced global search (anime + manga)
+  // Debounced global search (anime + manga) via Jikan API
   useEffect(() => {
-    if (!query.trim() || !animeExtensionId || !mangaExtensionId) {
+    if (!query.trim()) {
       setResults([])
       setLoading(false)
       return
@@ -101,11 +80,11 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     setLoading(true)
     const timer = setTimeout(async () => {
       try {
-        // Search both anime and manga in parallel
-        // nsfwFilter=true means "hide adult", so allowAdult should be !nsfwFilter
+        // Search both anime and manga in parallel via Jikan
+        // nsfwFilter=true means "hide adult", so sfw should be nsfwFilter
         const [animeResults, mangaResults] = await Promise.all([
-          searchAnime(animeExtensionId, query, 1, !nsfwFilter),
-          searchManga(mangaExtensionId, query, 1, !nsfwFilter)
+          jikanSearchAnime(query, 1, nsfwFilter),
+          jikanSearchManga(query, 1, nsfwFilter)
         ])
 
         // Filter NSFW content on frontend as well
@@ -143,7 +122,7 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [query, animeExtensionId, mangaExtensionId, nsfwFilter])
+  }, [query, nsfwFilter])
 
   const handleSelectResult = (result: GlobalSearchResult) => {
     setSelectedMedia(result)
@@ -366,10 +345,9 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
       )}
 
       {/* Media Detail Modal - rendered outside spotlight so it persists after spotlight closes */}
-      {selectedMedia && selectedMedia.mediaType === 'anime' && animeExtensionId && (
+      {selectedMedia && selectedMedia.mediaType === 'anime' && (
         <MediaDetailModal
           media={selectedMedia}
-          extensionId={animeExtensionId}
           isOpen={true}
           onClose={handleCloseMediaModal}
           onMediaChange={(media) => setSelectedMedia(media ? { ...media, mediaType: 'anime' } : null)}
@@ -377,10 +355,9 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
       )}
 
       {/* Manga Detail Modal */}
-      {selectedMedia && selectedMedia.mediaType === 'manga' && mangaExtensionId && (
+      {selectedMedia && selectedMedia.mediaType === 'manga' && (
         <MangaDetailModal
           manga={selectedMedia}
-          extensionId={mangaExtensionId}
           onClose={handleCloseMediaModal}
         />
       )}
