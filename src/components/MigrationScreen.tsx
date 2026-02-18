@@ -184,7 +184,7 @@ export function MigrationScreen({ onComplete }: MigrationScreenProps) {
           <button
             onClick={() => {
               setError(null)
-              setStarted(false)
+              startedRef.current = false
             }}
             className="mt-6 px-6 py-2 rounded-lg bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-primary)]/90 transition-colors"
           >
