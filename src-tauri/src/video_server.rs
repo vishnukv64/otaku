@@ -97,6 +97,8 @@ impl VideoServer {
             .route("/local/*path", get(serve_local_redirect))
             // Remote video proxy
             .route("/proxy", get(proxy_video))
+            // HLS manifest rewriter (rewrites segment URLs to go through /proxy)
+            .route("/hls", get(proxy_hls_manifest))
             // Add token validation middleware
             .layer(middleware::from_fn_with_state(state.clone(), validate_token))
             .layer(cors)
@@ -419,4 +421,128 @@ async fn proxy_video(
     }
 
     builder.body(body).unwrap()
+}
+
+#[derive(serde::Deserialize)]
+struct HlsQuery {
+    #[allow(dead_code)]
+    token: Option<String>,
+    url: Option<String>,
+}
+
+// Proxy and rewrite HLS manifest so segment URLs go through our /proxy endpoint.
+// This enables Android's native MediaPlayer to play HLS streams that require
+// Referer headers — our /proxy endpoint adds the required headers automatically.
+async fn proxy_hls_manifest(
+    State(_state): State<Arc<VideoServerState>>,
+    Query(query): Query<HlsQuery>,
+) -> Response {
+    let url = match query.url {
+        Some(u) => u,
+        None => return (StatusCode::BAD_REQUEST, "Missing url parameter").into_response(),
+    };
+
+    let token = query.token.unwrap_or_default();
+
+    log::debug!("Proxying HLS manifest");
+
+    // Fetch the original m3u8 manifest
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let response = match client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
+        .header("Referer", "https://allmanga.to")
+        .header("Origin", "https://allmanga.to")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("HLS manifest fetch failed: {}", e);
+            return (StatusCode::BAD_GATEWAY, format!("HLS manifest fetch error: {}", e)).into_response();
+        }
+    };
+
+    let manifest_text = match response.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            log::error!("Failed to read HLS manifest body: {}", e);
+            return (StatusCode::BAD_GATEWAY, format!("Failed to read manifest: {}", e)).into_response();
+        }
+    };
+
+    // Determine the base URL of the manifest for resolving relative URLs
+    let base_url = if let Some(last_slash) = url.rfind('/') {
+        format!("{}/", &url[..last_slash])
+    } else {
+        String::new()
+    };
+
+    // Rewrite each line: non-comment lines that are URLs get proxied
+    let rewritten = manifest_text
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                // Check for URI= attributes in EXT-X-MAP or EXT-X-MEDIA tags
+                if trimmed.contains("URI=\"") {
+                    rewrite_uri_attribute(trimmed, &base_url, &token)
+                } else {
+                    line.to_string()
+                }
+            } else {
+                // This is a URL line (segment or sub-playlist)
+                let full_url = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                    trimmed.to_string()
+                } else {
+                    // Relative URL — resolve against manifest base
+                    format!("{}{}", base_url, trimmed)
+                };
+
+                // Check if this is a sub-playlist (.m3u8) — route through /hls for recursive rewriting
+                if full_url.contains(".m3u8") {
+                    format!("/hls?token={}&url={}", token, urlencoding::encode(&full_url))
+                } else {
+                    // Segment file — route through /proxy
+                    format!("/proxy?token={}&url={}", token, urlencoding::encode(&full_url))
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Body::from(rewritten))
+        .unwrap()
+}
+
+/// Rewrite URI="..." attributes inside HLS tags (e.g., EXT-X-MAP, EXT-X-MEDIA)
+fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
+    // Find URI="..." and rewrite the URL inside
+    if let Some(start) = line.find("URI=\"") {
+        let uri_start = start + 5; // skip URI="
+        if let Some(end) = line[uri_start..].find('"') {
+            let original_uri = &line[uri_start..uri_start + end];
+            let full_url = if original_uri.starts_with("http://") || original_uri.starts_with("https://") {
+                original_uri.to_string()
+            } else {
+                format!("{}{}", base_url, original_uri)
+            };
+            let proxied = format!("/proxy?token={}&url={}", token, urlencoding::encode(&full_url));
+            return format!("{}URI=\"{}\"{}",
+                &line[..start],
+                proxied,
+                &line[uri_start + end + 1..],
+            );
+        }
+    }
+    line.to_string()
 }

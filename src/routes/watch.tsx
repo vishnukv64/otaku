@@ -7,12 +7,14 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { useMobileLayout } from '@/hooks/useMobileLayout'
 import { jikanAnimeDetails, loadExtension, resolveAllanimeId, clearAllanimeMapping, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
+import { isAndroid } from '@/utils/platform'
 
 interface WatchSearch {
   malId: string
@@ -293,8 +295,26 @@ function WatchPage() {
         const filePath = await getEpisodeFilePath(malId, currentEpisode.number)
         let localSourceLoaded = false
 
-        if (filePath && videoServerInfo) {
-          // Use video server for local file (proper Range request support for large files)
+        if (filePath && isAndroid()) {
+          // Android: Use convertFileSrc to serve via https://asset.localhost/
+          // This avoids mixed content issues (HTTPS page loading HTTP video server)
+          const localUrl = convertFileSrc(filePath)
+          setSources({
+            sources: [{
+              url: localUrl,
+              quality: 'Downloaded',
+              type: 'video/mp4',
+              server: 'Local'
+            }],
+            subtitles: []
+          })
+          localSourceLoaded = true
+          if (shownOfflineToastRef.current !== currentEpisodeId) {
+            shownOfflineToastRef.current = currentEpisodeId
+            toastInfo('Offline Mode', 'Playing from downloaded video')
+          }
+        } else if (filePath && videoServerInfo) {
+          // Desktop/iOS: Use video server for local file (proper Range request support for large files)
           const localUrl = `http://127.0.0.1:${videoServerInfo.port}/absolute?path=${encodeURIComponent(filePath)}&token=${videoServerInfo.token}`
           setSources({
             sources: [{

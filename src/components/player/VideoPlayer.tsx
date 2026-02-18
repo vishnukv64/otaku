@@ -33,6 +33,13 @@ function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
   return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}`
 }
 
+// Helper to create HLS manifest rewriting URL (rewrites segment URLs to go through /proxy)
+// Used for native HLS playback on Android where HLS.js MSE fails
+function createHlsProxyUrl(videoServer: VideoServerUrls, m3u8Url: string): string {
+  const baseUrl = videoServer.proxy_base_url.replace(/\/proxy$/, '')
+  return `${baseUrl}/hls?token=${videoServer.token}&url=${encodeURIComponent(m3u8Url)}`
+}
+
 interface Episode {
   id: string
   number: number
@@ -289,24 +296,77 @@ export function VideoPlayer({
                   }
                   break
                 case Hls.ErrorTypes.MEDIA_ERROR:
-                  setError(`Media error: ${data.details}`)
-                  hls.recoverMediaError()
+                  // On Android, MSE codec support can be buggy (bufferAppendError).
+                  // Fall back to native HLS playback with rewritten manifest.
+                  if (isAndroid() && videoServer) {
+                    console.log('[VideoPlayer] HLS.js media error on Android, falling back to native HLS')
+                    hls.destroy()
+                    hlsRef.current = null
+
+                    const hlsUrl = createHlsProxyUrl(videoServer, currentSource.url)
+                    video.src = hlsUrl
+                    setError(null)
+
+                    const handleNativeLoaded = () => {
+                      setLoading(false)
+                      if (initialTime > 0) {
+                        video.currentTime = initialTime
+                      }
+                      if (autoPlay) {
+                        video.play().catch(() => {})
+                      }
+                      video.removeEventListener('loadedmetadata', handleNativeLoaded)
+                    }
+                    video.addEventListener('loadedmetadata', handleNativeLoaded)
+                  } else {
+                    setError(`Media error: ${data.details}`)
+                    hls.recoverMediaError()
+                  }
                   break
                 default:
-                  setError(`Fatal error: ${data.details}`)
-                  setLoading(false)
+                  // On Android, any fatal HLS.js error should fall back to native HLS
+                  if (isAndroid() && videoServer) {
+                    console.log('[VideoPlayer] HLS.js fatal error on Android, falling back to native HLS:', data.details)
+                    hls.destroy()
+                    hlsRef.current = null
+
+                    const hlsUrl2 = createHlsProxyUrl(videoServer, currentSource.url)
+                    video.src = hlsUrl2
+                    setError(null)
+
+                    const handleNativeLoaded2 = () => {
+                      setLoading(false)
+                      if (initialTime > 0) {
+                        video.currentTime = initialTime
+                      }
+                      if (autoPlay) {
+                        video.play().catch(() => {})
+                      }
+                      video.removeEventListener('loadedmetadata', handleNativeLoaded2)
+                    }
+                    video.addEventListener('loadedmetadata', handleNativeLoaded2)
+                  } else {
+                    setError(`Fatal error: ${data.details}`)
+                    setLoading(false)
+                  }
                   break
               }
             }
           })
-        } else if (isActuallyHls && video.canPlayType('application/vnd.apple.mpegurl')) {
-          // Native HLS support (Safari) - only for actual HLS streams
-          const proxyUrl = createProxyUrl(videoServer, currentSource.url)
-          video.src = proxyUrl
-          setLoading(false)
+        } else if (isActuallyHls && (video.canPlayType('application/vnd.apple.mpegurl') || isAndroid())) {
+          // Native HLS support (Safari, Android) - only for actual HLS streams
+          // Android's MediaPlayer has built-in HLS support but needs rewritten manifest
+          // so segment URLs go through our proxy (which adds Referer headers).
+          // Note: On Android, this branch is only reached if Hls.isSupported() is false
+          // (rare). The primary Android path is HLS.js with error-handler fallback above.
+          const hlsUrl = isAndroid()
+            ? createHlsProxyUrl(videoServer, currentSource.url)
+            : createProxyUrl(videoServer, currentSource.url)
+          video.src = hlsUrl
 
           // Seek to initial time when metadata is loaded
           const handleLoadedMetadata = () => {
+            setLoading(false)
             if (initialTime > 0) {
               video.currentTime = initialTime
             }
