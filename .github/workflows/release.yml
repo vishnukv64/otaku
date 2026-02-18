@@ -367,6 +367,9 @@ jobs:
           fi
           echo "✅ Android project initialized successfully"
 
+      - name: Apply Android patches
+        run: ./scripts/patch-android.sh
+
       - name: Copy app icons to Android project
         run: |
           SRC="src-tauri/icons/android"
