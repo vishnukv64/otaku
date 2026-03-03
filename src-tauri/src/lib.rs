@@ -473,6 +473,7 @@ pub fn run() {
       jikan::commands::jikan_season_upcoming,
       jikan::commands::jikan_anime_details,
       jikan::commands::jikan_anime_episodes,
+      jikan::commands::jikan_anime_episode_detail,
       jikan::commands::jikan_anime_recommendations,
       jikan::commands::jikan_genres_anime,
       jikan::commands::jikan_search_anime_filtered,

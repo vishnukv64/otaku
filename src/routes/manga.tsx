@@ -28,6 +28,7 @@ import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
+import { consumePendingReturn } from '@/utils/return-media'
 
 // Debounce delay for instant search (ms)
 const SEARCH_DEBOUNCE_MS = 300
@@ -51,13 +52,8 @@ function MangaScreen() {
 
   // Restore modal state when returning from read page
   useEffect(() => {
-    const saved = sessionStorage.getItem('otaku_return_manga')
-    if (saved) {
-      sessionStorage.removeItem('otaku_return_manga')
-      try {
-        setSelectedManga(JSON.parse(saved))
-      } catch { /* ignore parse errors */ }
-    }
+    const manga = consumePendingReturn('manga')
+    if (manga) setSelectedManga(manga)
   }, [])
 
   const [showGenres, setShowGenres] = useState(false)

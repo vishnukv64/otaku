@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { getMangaDetails, jikanMangaDetails, resolveAllanimeId, loadExtension, searchManga, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag, jikanMangaCharacters, jikanMangaStatistics, jikanMangaReviews, jikanMangaPictures, jikanMangaNews, jikanMangaRecommendations, type JikanCharacterEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews } from '@/utils/tauri-commands'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
+import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { Description } from '@/components/ui/Description'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -440,8 +441,8 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const handleReadNow = (chapterId?: string) => {
     if (!details) return
 
-    // Save manga to sessionStorage so the modal can reopen when user navigates back
-    sessionStorage.setItem('otaku_return_manga', JSON.stringify(manga))
+    // Save manga so the modal can reopen when user navigates back
+    savePendingReturn('manga', manga)
 
     if (malIdMode && allanimeShowId) {
       // MAL flow: AllAnime IDs for content, MAL ID for tracking

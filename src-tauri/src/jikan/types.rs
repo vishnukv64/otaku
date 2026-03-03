@@ -216,6 +216,21 @@ pub struct JikanEpisode {
     pub forum_url: Option<String>,
 }
 
+/// Single-episode detail from `/anime/{id}/episodes/{ep}` — includes synopsis and duration
+/// which the list endpoint omits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JikanEpisodeDetail {
+    pub mal_id: i64,
+    pub title: Option<String>,
+    pub title_japanese: Option<String>,
+    pub title_romanji: Option<String>,
+    pub duration: Option<i64>, // seconds
+    pub aired: Option<String>,
+    pub filler: Option<bool>,
+    pub recap: Option<bool>,
+    pub synopsis: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanCharacterEntry {
     pub character: JikanCharacter,

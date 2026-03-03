@@ -79,6 +79,16 @@ pub async fn jikan_anime_episodes(mal_id: i64, page: i32) -> Result<(Vec<Episode
 }
 
 #[tauri::command]
+pub async fn jikan_anime_episode_detail(
+    mal_id: i64,
+    episode: i64,
+) -> Result<JikanEpisodeDetail, String> {
+    tokio::task::spawn_blocking(move || anime::anime_episode_detail(mal_id, episode))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
 pub async fn jikan_anime_recommendations(mal_id: i64) -> Result<SearchResults, String> {
     tokio::task::spawn_blocking(move || anime::anime_recommendations(mal_id))
         .await

@@ -10,11 +10,12 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database } from 'lucide-react'
+import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
@@ -131,6 +132,11 @@ export function MediaDetailModal({
   const [newsLoading, setNewsLoading] = useState(false)
   const loadedTabsRef = useRef<Set<string>>(new Set())
 
+  // Episode info overlay
+  const [episodeInfoTarget, setEpisodeInfoTarget] = useState<{ id: string; number: number } | null>(null)
+  const [episodeInfo, setEpisodeInfo] = useState<JikanEpisodeDetail | null>(null)
+  const [episodeInfoLoading, setEpisodeInfoLoading] = useState(false)
+
   // AllAnime extension for video sources (downloads)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
   const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
@@ -175,9 +181,24 @@ export function MediaDetailModal({
     },
   })
 
+  const handleEpisodeInfo = async (e: React.MouseEvent, epId: string, epNumber: number) => {
+    e.stopPropagation()
+    setEpisodeInfoTarget({ id: epId, number: epNumber })
+    setEpisodeInfo(null)
+    setEpisodeInfoLoading(true)
+    try {
+      const detail = await jikanAnimeEpisodeDetail(parseInt(media.id), epNumber)
+      setEpisodeInfo(detail)
+    } catch {
+      // silently fail — overlay will show basic info only
+    } finally {
+      setEpisodeInfoLoading(false)
+    }
+  }
+
   const handleWatch = (episodeId: string) => {
-    // Save media to sessionStorage so the modal can reopen when user navigates back
-    sessionStorage.setItem('otaku_return_media', JSON.stringify(media))
+    // Save media so the modal can reopen when user navigates back
+    savePendingReturn('anime', media)
     // Navigate directly - don't call onClose() first as it triggers state updates
     // that can interfere with navigation. The modal will unmount when the route changes.
     navigate({
@@ -1337,14 +1358,6 @@ export function MediaDetailModal({
                             <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
                           </div>
                         )}
-                        <button
-                          className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-white/10 backdrop-blur-sm text-white rounded-lg hover:bg-white/20 transition-all border border-white/20"
-                          aria-label="More info"
-                        >
-                          <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </button>
                       </div>
 
                       {/* Tags Section */}
@@ -1667,6 +1680,17 @@ export function MediaDetailModal({
                             EP {episode.number}
                           </div>
 
+                          {/* Info button — always visible on mobile (no hover), hover-reveal on desktop */}
+                          {!selectionMode && (
+                            <button
+                              onClick={(e) => handleEpisodeInfo(e, episode.id, episode.number)}
+                              className="absolute bottom-2 left-2 w-6 h-6 rounded-md bg-black/70 hover:bg-white/20 backdrop-blur-sm flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition-all z-10"
+                              title="Episode info"
+                            >
+                              <Info size={12} />
+                            </button>
+                          )}
+
                           {/* Download status badge - Downloading takes priority over Downloaded */}
                           {downloadingEpisodes.has(episode.number) ? (
                             <div className="absolute top-2 right-2 px-2.5 py-1 bg-blue-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1.5">
@@ -1725,6 +1749,85 @@ export function MediaDetailModal({
                           )}
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Episode info overlay */}
+                {episodeInfoTarget && (
+                  <div
+                    className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setEpisodeInfoTarget(null)}
+                  >
+                    <div
+                      className="relative w-full max-w-lg max-h-[80vh] overflow-y-auto bg-[var(--color-bg-modal)] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Mobile grab handle */}
+                      <div className="sm:hidden w-10 h-1 bg-white/20 rounded-full mx-auto mb-4" />
+                      {/* Header */}
+                      <div className="flex items-start justify-between gap-3 mb-4">
+                        <div>
+                          <span className="text-xs font-semibold text-[var(--color-accent-primary)] uppercase tracking-wider">
+                            Episode {episodeInfoTarget.number}
+                          </span>
+                          <h3 className="text-base font-bold mt-0.5 leading-snug">
+                            {episodeInfoLoading
+                              ? <span className="opacity-40">Loading…</span>
+                              : (episodeInfo?.title || `Episode ${episodeInfoTarget.number}`)}
+                          </h3>
+                          {episodeInfo?.title_japanese && (
+                            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{episodeInfo.title_japanese}</p>
+                          )}
+                          {episodeInfo?.title_romanji && episodeInfo.title_romanji !== episodeInfo.title && (
+                            <p className="text-xs text-[var(--color-text-muted)]">{episodeInfo.title_romanji}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setEpisodeInfoTarget(null)}
+                          className="shrink-0 p-1.5 rounded-lg hover:bg-white/10 transition-colors text-[var(--color-text-muted)]"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      {/* Meta badges */}
+                      {episodeInfo && (
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {episodeInfo.aired && (
+                            <span className="px-2 py-0.5 bg-white/8 rounded text-xs text-[var(--color-text-secondary)]">
+                              {new Date(episodeInfo.aired).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          {episodeInfo.duration && (
+                            <span className="px-2 py-0.5 bg-white/8 rounded text-xs text-[var(--color-text-secondary)]">
+                              {Math.floor(episodeInfo.duration / 60)} min
+                            </span>
+                          )}
+                          {episodeInfo.filler && (
+                            <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-300 rounded text-xs font-medium">Filler</span>
+                          )}
+                          {episodeInfo.recap && (
+                            <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs font-medium">Recap</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Synopsis */}
+                      {episodeInfoLoading && (
+                        <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                          <Loader2 size={14} className="animate-spin" />
+                          Loading episode info…
+                        </div>
+                      )}
+                      {!episodeInfoLoading && episodeInfo?.synopsis && (
+                        <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                          {episodeInfo.synopsis}
+                        </p>
+                      )}
+                      {!episodeInfoLoading && !episodeInfo?.synopsis && (
+                        <p className="text-sm text-[var(--color-text-muted)] italic">No synopsis available.</p>
+                      )}
                     </div>
                   </div>
                 )}

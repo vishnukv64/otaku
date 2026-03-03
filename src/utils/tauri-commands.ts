@@ -2162,6 +2162,25 @@ export async function jikanAnimeEpisodes(malId: number, page: number): Promise<S
   return await invoke('jikan_anime_episodes', { malId, page })
 }
 
+export interface JikanEpisodeDetail {
+  mal_id: number
+  title?: string
+  title_japanese?: string
+  title_romanji?: string
+  duration?: number // seconds
+  aired?: string
+  filler?: boolean
+  recap?: boolean
+  synopsis?: string
+}
+
+/**
+ * Get detailed info for a single episode (includes synopsis, duration)
+ */
+export async function jikanAnimeEpisodeDetail(malId: number, episode: number): Promise<JikanEpisodeDetail> {
+  return await invoke('jikan_anime_episode_detail', { malId, episode })
+}
+
 /**
  * Get anime recommendations from the Jikan API
  * @param malId - MyAnimeList ID

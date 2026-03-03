@@ -357,7 +357,7 @@ pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
     let response: JikanResponse<JikanAnime> = JIKAN.get_parsed(&path)?;
 
     // Don't fail the entire request if episodes can't be fetched (rate limiting)
-    let (mut episodes, last_aired) = match fetch_all_episodes(mal_id) {
+    let (mut episodes, mut last_aired) = match fetch_all_episodes(mal_id) {
         Ok((eps, aired)) => (eps, aired),
         Err(e) => {
             log::warn!("Failed to fetch episodes for {}: {}, generating synthetic episodes", mal_id, e);
@@ -381,7 +381,72 @@ pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
         }
     }
 
+    // For airing anime, fill in any episodes that aired but aren't indexed by Jikan yet.
+    // last_aired is mutated to the most recent synthetic episode's expected date so that
+    // the next-episode countdown is computed from the right baseline.
+    fill_synthetic_episodes(
+        &mut episodes,
+        mal_id,
+        &mut last_aired,
+        response.data.episodes,
+        &response.data,
+    );
+
     Ok(jikan_anime_to_media_details(&response.data, episodes, last_aired))
+}
+
+/// For airing TV anime, Jikan's `/episodes` list sometimes lags behind the real broadcast
+/// schedule by several days. This function generates synthetic episode entries for any
+/// episodes that should have aired (based on the 7-day weekly interval) but haven't been
+/// indexed yet by Jikan.
+///
+/// Also advances `last_aired` to the expected air date of the last synthetic episode so
+/// that the next-episode countdown is computed from the correct baseline (otherwise the
+/// countdown would remain "New episode available!" even for synthetic episodes).
+fn fill_synthetic_episodes(
+    episodes: &mut Vec<Episode>,
+    mal_id: i64,
+    last_aired: &mut Option<String>,
+    episode_count: Option<i32>,
+    anime: &JikanAnime,
+) {
+    if !is_airing_tv_with_broadcast(anime) {
+        return;
+    }
+    let last_aired_str = match last_aired {
+        Some(ref s) => s.clone(),
+        None => return,
+    };
+    let Ok(last_dt) = chrono::DateTime::parse_from_rfc3339(&last_aired_str) else {
+        return;
+    };
+    let now = chrono::Utc::now();
+    let days_since = (now - last_dt.with_timezone(&chrono::Utc)).num_days();
+    if days_since < 7 {
+        return; // no new episode due yet
+    }
+    let expected_new = (days_since / 7) as usize;
+    let current_count = episodes.len();
+    let max = episode_count.unwrap_or(i32::MAX) as usize;
+    let target = (current_count + expected_new).min(max);
+    for n in (current_count + 1)..=target {
+        let weeks_offset = (n - current_count) as i64;
+        let ep_date = last_dt + chrono::Duration::weeks(weeks_offset);
+        // Advance last_aired so the countdown baseline reflects this synthetic episode's date
+        *last_aired = Some(ep_date.to_rfc3339());
+        log::info!(
+            "Synthetic episode {} generated for MAL {} (expected: {})",
+            n,
+            mal_id,
+            ep_date.to_rfc3339()
+        );
+        episodes.push(Episode {
+            id: format!("{}-{}", mal_id, n),
+            number: n as f32,
+            title: Some(format!("Episode {}", n)),
+            thumbnail: None,
+        });
+    }
 }
 
 /// Returns (episodes, last_aired_date) where last_aired_date is the aired timestamp
@@ -426,6 +491,12 @@ pub fn anime_episodes(mal_id: i64, page: i32) -> Result<(Vec<Episode>, bool), St
 
     let episodes = response.data.iter().map(|ep| jikan_episode_to_episode(mal_id, ep)).collect();
     Ok((episodes, response.pagination.has_next_page))
+}
+
+pub fn anime_episode_detail(mal_id: i64, episode: i64) -> Result<JikanEpisodeDetail, String> {
+    let path = format!("/anime/{}/episodes/{}", mal_id, episode);
+    let response: JikanResponse<JikanEpisodeDetail> = JIKAN.get_parsed(&path)?;
+    Ok(response.data)
 }
 
 pub fn anime_recommendations(mal_id: i64) -> Result<SearchResults, String> {
