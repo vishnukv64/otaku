@@ -379,3 +379,12 @@ pub async fn clear_allanime_mapping(
     let pool = state.database.pool();
     bridge::delete_cached_mapping(pool, &mal_id).await
 }
+
+#[tauri::command]
+pub async fn check_daily_schedule(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    super::schedule::check_daily_schedule_inner(&app, pool).await
+}

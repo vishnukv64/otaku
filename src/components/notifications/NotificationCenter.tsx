@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Bell, CheckCheck, Trash2, RefreshCw, Settings, Clock } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Bell, CheckCheck, X, RefreshCw, Settings, Clock } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import { useNotificationStore, type Notification } from '@/store/notificationStore'
 import {
@@ -13,6 +14,7 @@ import {
   getReleaseCheckStatus,
   type ReleaseCheckSettings,
   type ReleaseCheckStatus,
+  getCachedMediaDetails,
 } from '@/utils/tauri-commands'
 import { NotificationItem } from './NotificationItem'
 
@@ -33,7 +35,28 @@ function formatRelativeTime(timestamp: number | null): string {
   return `${days}d ago`
 }
 
-/** Interval options for release checking (V2: in minutes for more granular control) */
+/** Derive a notification category for tab filtering and badge display */
+export function getNotifCategory(n: Notification): 'episode' | 'chapter' | 'schedule' | 'download' | 'system' {
+  // Check source first
+  if (n.source === 'schedule') return 'schedule'
+  if (n.source === 'release') {
+    const lower = (n.title + ' ' + n.message).toLowerCase()
+    if (lower.includes('ch.') || lower.includes('chapter') || lower.includes('manga')) return 'chapter'
+    return 'episode'
+  }
+  if (n.source === 'download') return 'download'
+
+  // Fallback: infer from title/message
+  const lower = (n.title + ' ' + n.message).toLowerCase()
+  if (lower.includes('schedule') || lower.includes('airs today')) return 'schedule'
+  if (lower.includes('download')) return 'download'
+  if (lower.includes('episode') || lower.includes('ep ')) return 'episode'
+  if (lower.includes('chapter') || lower.includes('ch.')) return 'chapter'
+
+  return 'system'
+}
+
+/** Interval options for release checking */
 const INTERVAL_OPTIONS = [
   { value: 30, label: '30 min' },
   { value: 60, label: '1 hour' },
@@ -44,7 +67,7 @@ const INTERVAL_OPTIONS = [
   { value: 1440, label: '24 hours' },
 ]
 
-type TabType = 'all' | 'releases'
+type TabType = 'all' | 'episode' | 'chapter' | 'schedule' | 'download' | 'system'
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false)
@@ -53,7 +76,7 @@ export function NotificationCenter() {
   const [isChecking, setIsChecking] = useState(false)
   const [releaseSettings, setReleaseSettings] = useState<ReleaseCheckSettings | null>(null)
   const [releaseStatus, setReleaseStatus] = useState<ReleaseCheckStatus | null>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const [coverUrls, setCoverUrls] = useState<Record<string, string>>({})
   const buttonRef = useRef<HTMLButtonElement>(null)
   const navigate = useNavigate()
 
@@ -62,23 +85,38 @@ export function NotificationCenter() {
 
   // Filter notifications by tab
   const filteredNotifications = useMemo(() => {
-    if (activeTab === 'releases') {
-      return notifications.filter((n) => n.source === 'release')
-    }
-    return notifications
+    if (activeTab === 'all') return notifications
+    return notifications.filter((n) => getNotifCategory(n) === activeTab)
   }, [notifications, activeTab])
 
-  // Count release notifications for badge
-  const releaseCount = useMemo(() => {
-    return notifications.filter((n) => n.source === 'release' && !n.read && !n.dismissed).length
-  }, [notifications])
-
-  // Load release settings and status when panel opens
+  // Load release settings, status, and cover URLs when panel opens
   useEffect(() => {
     if (isOpen) {
       loadReleaseData()
+      // Fetch cover URLs for notifications that have media_id but no thumbnail
+      const mediaIds = new Set<string>()
+      for (const n of notifications) {
+        const mid = n.metadata?.media_id as string | undefined
+        const thumb = n.metadata?.thumbnail as string | undefined
+        if (mid && !thumb && !coverUrls[mid]) mediaIds.add(mid)
+      }
+      if (mediaIds.size > 0) {
+        Promise.all(
+          Array.from(mediaIds).map(async (id) => {
+            try {
+              const details = await getCachedMediaDetails(id)
+              if (details?.media?.cover_url) return [id, details.media.cover_url] as const
+            } catch { /* ignore */ }
+            return null
+          })
+        ).then((results) => {
+          const newCovers: Record<string, string> = {}
+          for (const r of results) if (r) newCovers[r[0]] = r[1]
+          if (Object.keys(newCovers).length > 0) setCoverUrls(prev => ({ ...prev, ...newCovers }))
+        })
+      }
     }
-  }, [isOpen])
+  }, [isOpen, notifications])
 
   const loadReleaseData = async () => {
     try {
@@ -141,7 +179,7 @@ export function NotificationCenter() {
       if (notification.action?.route) {
         let route = notification.action.route
 
-        // Migrate old manga routes: /manga/{id}?extensionId={ext} -> /read?extensionId={ext}&mangaId={id}
+        // Migrate old manga routes
         const oldMangaRouteMatch = route.match(/^\/manga\/([^?]+)\?extensionId=(.+)$/)
         if (oldMangaRouteMatch) {
           const [, mangaId, extensionId] = oldMangaRouteMatch
@@ -155,7 +193,7 @@ export function NotificationCenter() {
     [navigate, markAsRead]
   )
 
-  // Release check handlers (V2: uses interval_minutes)
+  // Release check handlers
   const handleToggleReleaseCheck = async () => {
     if (!releaseSettings) return
 
@@ -184,13 +222,11 @@ export function NotificationCenter() {
     setIsChecking(true)
     try {
       const results = await checkForNewReleases()
-      // Refresh status after check
       const status = await getReleaseCheckStatus()
       setReleaseStatus(status)
 
-      // Switch to releases tab if new releases found
       if (results.length > 0) {
-        setActiveTab('releases')
+        setActiveTab('episode')
       }
     } catch (error) {
       console.error('Failed to check for releases:', error)
@@ -201,29 +237,6 @@ export function NotificationCenter() {
 
   // Calculate unread count
   const unreadCount = notifications.filter((n) => !n.read && !n.dismissed).length
-
-  // Close panel when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        panelRef.current &&
-        buttonRef.current &&
-        !panelRef.current.contains(event.target as Node) &&
-        !buttonRef.current.contains(event.target as Node)
-      ) {
-        setIsOpen(false)
-        setShowSettings(false)
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isOpen])
 
   // Close panel on escape key
   useEffect(() => {
@@ -248,8 +261,17 @@ export function NotificationCenter() {
     setIsOpen(false)
   }
 
+  const tabs: { key: TabType; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'episode', label: 'Episodes' },
+    { key: 'chapter', label: 'Chapters' },
+    { key: 'schedule', label: 'Schedule' },
+    { key: 'download', label: 'Downloads' },
+    { key: 'system', label: 'System' },
+  ]
+
   return (
-    <div className="relative">
+    <>
       {/* Bell Button */}
       <button
         ref={buttonRef}
@@ -266,207 +288,187 @@ export function NotificationCenter() {
         )}
       </button>
 
-      {/* Dropdown Panel */}
-      {isOpen && (
-        <div
-          ref={panelRef}
-          className="absolute right-0 top-full mt-2 w-96 max-w-[calc(100vw-2rem)] bg-[var(--color-bg-primary)] border border-[var(--color-bg-hover)] rounded-lg shadow-2xl overflow-hidden z-50"
-        >
-          {/* Header with Tabs */}
-          <div className="border-b border-[var(--color-bg-hover)]">
-            <div className="flex items-center justify-between px-4 py-2">
-              <h3 className="font-semibold text-[var(--color-text-primary)]">
-                Notifications
-              </h3>
-              <div className="flex items-center gap-1">
-                {notifications.length > 0 && (
-                  <>
-                    <button
-                      onClick={markAllAsRead}
-                      className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                      title="Mark all as read"
-                    >
-                      <CheckCheck size={16} />
-                    </button>
-                    <button
-                      onClick={clearAll}
-                      className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                      title="Clear all"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+      {/* Portal: render overlay + panel outside nav stacking context */}
+      {createPortal(
+        <>
+          {/* Overlay Backdrop */}
+          <div
+            className={`fixed inset-0 z-[9500] bg-black/50 backdrop-blur-[4px] transition-opacity duration-250 ${
+              isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}
+            onClick={() => { setIsOpen(false); setShowSettings(false) }}
+          />
 
-            {/* Tabs */}
-            <div className="flex px-4 gap-4">
-              <button
-                onClick={() => setActiveTab('all')}
-                className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'all'
-                    ? 'text-[var(--color-accent-primary)] border-[var(--color-accent-primary)]'
-                    : 'text-[var(--color-text-secondary)] border-transparent hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setActiveTab('releases')}
-                className={`pb-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
-                  activeTab === 'releases'
-                    ? 'text-[var(--color-accent-primary)] border-[var(--color-accent-primary)]'
-                    : 'text-[var(--color-text-secondary)] border-transparent hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                Releases
-                {releaseCount > 0 && (
-                  <span className="px-1.5 py-0.5 text-xs bg-[var(--color-accent-primary)] text-white rounded-full">
-                    {releaseCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Release Check Controls (only on Releases tab) */}
-          {activeTab === 'releases' && releaseSettings && (
-            <div className="px-4 py-2 border-b border-[var(--color-bg-hover)] bg-[var(--color-bg-secondary)]">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-[var(--color-text-secondary)]">
-                    Auto-check
-                  </span>
-                  {/* Toggle Switch */}
-                  <button
-                    onClick={handleToggleReleaseCheck}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                      releaseSettings.enabled
-                        ? 'bg-[var(--color-accent-primary)]'
-                        : 'bg-[var(--color-bg-hover)]'
-                    }`}
-                    title={releaseSettings.enabled ? 'Disable release alerts' : 'Enable release alerts'}
-                  >
-                    <span
-                      className="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"
-                      style={{
-                        transform: releaseSettings.enabled ? 'translateX(18px)' : 'translateX(4px)',
-                      }}
-                    />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  {/* Check Now Button */}
-                  <button
-                    onClick={handleCheckNow}
-                    disabled={isChecking}
-                    className={`p-1.5 rounded-md transition-colors ${
-                      isChecking
-                        ? 'text-[var(--color-text-muted)] cursor-not-allowed'
-                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
-                    }`}
-                    title="Check for new releases now"
-                  >
-                    <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
-                  </button>
-
-                  {/* Settings Dropdown Toggle */}
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowSettings(!showSettings)}
-                      className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                      title="Release check settings"
-                    >
-                      <Settings size={14} />
-                    </button>
-
-                    {/* Settings Dropdown */}
-                    {showSettings && (
-                      <div className="absolute right-0 top-full mt-1 w-36 bg-[var(--color-bg-primary)] border border-[var(--color-bg-hover)] rounded-lg shadow-lg z-10 overflow-hidden">
-                        <div className="py-1">
-                          <div className="px-3 py-1.5 text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
-                            Check Interval
-                          </div>
-                          {INTERVAL_OPTIONS.map((option) => (
-                            <button
-                              key={option.value}
-                              onClick={() => handleIntervalChange(option.value)}
-                              className={`w-full px-3 py-1.5 text-sm text-left transition-colors ${
-                                releaseSettings.interval_minutes === option.value
-                                  ? 'bg-[var(--color-accent-primary)] text-white'
-                                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Line */}
-              {releaseStatus && releaseSettings.enabled && (
-                <div className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)]">
-                  <Clock size={10} />
-                  <span>
-                    Last checked: {formatRelativeTime(releaseStatus.last_check)}
-                    {releaseStatus.items_checked > 0 && (
-                      <> · {releaseStatus.items_checked} items</>
-                    )}
-                  </span>
-                </div>
-              )}
-            </div>
+          {/* Slide-out Panel */}
+          <div
+        className={`fixed top-0 right-0 bottom-0 w-[420px] max-w-[100vw] z-[9501] bg-[var(--color-bg-primary)] border-l border-[var(--color-glass-border)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+        style={{ boxShadow: isOpen ? '-8px 0 40px rgba(0,0,0,0.6), 0 0 60px rgba(0,0,0,0.3)' : 'none' }}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3.5 border-b border-[var(--color-glass-border)] flex-shrink-0">
+          <h3 className="font-display font-bold text-[1.125rem] flex-1">Notifications</h3>
+          {notifications.length > 0 && (
+            <button
+              onClick={markAllAsRead}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-white/10 rounded-lg transition-colors text-sm text-[var(--color-text-secondary)]"
+              title="Mark all as read"
+            >
+              <CheckCheck size={14} />
+              <span className="text-xs">Mark all read</span>
+            </button>
           )}
+          <button
+            onClick={() => { setIsOpen(false); setShowSettings(false) }}
+            className="w-8 h-8 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-white/10 hover:text-white flex items-center justify-center transition-all"
+          >
+            <X size={16} />
+          </button>
+        </div>
 
-          {/* Notification List */}
-          <div className="max-h-[400px] overflow-y-auto">
-            {filteredNotifications.length === 0 ? (
-              <div className="py-12 px-4 text-center">
-                <Bell
-                  size={32}
-                  className="mx-auto mb-3 text-[var(--color-text-muted)]"
-                />
-                <p className="text-[var(--color-text-secondary)]">
-                  {activeTab === 'releases'
-                    ? 'No release notifications'
-                    : 'No notifications yet'}
-                </p>
-                <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                  {activeTab === 'releases'
-                    ? 'New episodes and chapters will appear here'
-                    : 'Download updates and alerts will appear here'}
-                </p>
+        {/* Tabs */}
+        <div className="flex gap-1 px-5 py-3 border-b border-[var(--color-glass-border)] flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-3 py-1.5 rounded-full text-[0.8rem] font-medium whitespace-nowrap transition-all ${
+                activeTab === tab.key
+                  ? 'bg-[var(--color-accent-primary)] text-white'
+                  : 'text-[var(--color-text-secondary)] hover:text-white hover:bg-white/5'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Release Check Controls (compact bar) */}
+        {releaseSettings && (
+          <div className="px-5 py-2 border-b border-[var(--color-glass-border)] flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--color-text-secondary)]">Auto-check</span>
+                <button
+                  onClick={handleToggleReleaseCheck}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    releaseSettings.enabled
+                      ? 'bg-[var(--color-accent-primary)]'
+                      : 'bg-[var(--color-bg-hover)]'
+                  }`}
+                  title={releaseSettings.enabled ? 'Disable release alerts' : 'Enable release alerts'}
+                >
+                  <span
+                    className="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"
+                    style={{
+                      transform: releaseSettings.enabled ? 'translateX(18px)' : 'translateX(4px)',
+                    }}
+                  />
+                </button>
               </div>
-            ) : (
-              filteredNotifications.map((notification) => (
-                <NotificationItem
-                  key={notification.id}
-                  notification={notification}
-                  onDismiss={dismiss}
-                  onAction={handleNotificationAction}
-                  onMarkRead={markAsRead}
-                />
-              ))
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleCheckNow}
+                  disabled={isChecking}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    isChecking
+                      ? 'text-[var(--color-text-muted)] cursor-not-allowed'
+                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-white/5'
+                  }`}
+                  title="Check for new releases now"
+                >
+                  <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSettings(!showSettings)}
+                    className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-white/5 transition-colors"
+                    title="Release check settings"
+                  >
+                    <Settings size={14} />
+                  </button>
+                  {showSettings && (
+                    <div className="absolute right-0 top-full mt-1 w-36 bg-[var(--color-bg-primary)] border border-[var(--color-glass-border)] rounded-lg shadow-lg z-10 overflow-hidden">
+                      <div className="py-1">
+                        <div className="px-3 py-1.5 text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
+                          Check Interval
+                        </div>
+                        {INTERVAL_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            onClick={() => handleIntervalChange(option.value)}
+                            className={`w-full px-3 py-1.5 text-sm text-left transition-colors ${
+                              releaseSettings.interval_minutes === option.value
+                                ? 'bg-[var(--color-accent-primary)] text-white'
+                                : 'text-[var(--color-text-secondary)] hover:bg-white/5'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            {releaseStatus && releaseSettings.enabled && (
+              <div className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)]">
+                <Clock size={10} />
+                <span>
+                  Last checked: {formatRelativeTime(releaseStatus.last_check)}
+                  {releaseStatus.items_checked > 0 && (
+                    <> · {releaseStatus.items_checked} items</>
+                  )}
+                </span>
+              </div>
             )}
           </div>
+        )}
 
-          {/* Footer */}
-          {filteredNotifications.length > 0 && (
-            <div className="px-4 py-2 border-t border-[var(--color-bg-hover)] text-center">
-              <span className="text-xs text-[var(--color-text-muted)]">
-                {filteredNotifications.length} notification{filteredNotifications.length !== 1 ? 's' : ''}
-                {activeTab === 'all' && unreadCount > 0 && ` (${unreadCount} unread)`}
-              </span>
+        {/* Notification List */}
+        <div className="flex-1 overflow-y-auto px-2 py-2" style={{ scrollbarWidth: 'thin' }}>
+          {filteredNotifications.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-5 gap-3 text-[var(--color-text-muted)] text-center">
+              <Bell size={40} style={{ opacity: 0.3 }} />
+              <div className="font-semibold text-[0.9375rem] text-[var(--color-text-secondary)]">
+                {activeTab === 'all' ? 'No notifications yet' : `No ${activeTab} notifications`}
+              </div>
+              <div className="text-[0.8125rem]">
+                New updates will appear here
+              </div>
             </div>
+          ) : (
+            filteredNotifications.map((notification) => (
+              <NotificationItem
+                key={notification.id}
+                notification={notification}
+                coverUrl={coverUrls[(notification.metadata?.media_id as string) || ''] || (notification.metadata?.thumbnail as string)}
+                onDismiss={dismiss}
+                onAction={handleNotificationAction}
+                onMarkRead={markAsRead}
+              />
+            ))
           )}
         </div>
+
+        {/* Footer */}
+        {filteredNotifications.length > 0 && (
+          <div className="px-5 py-3 border-t border-[var(--color-glass-border)] text-center flex-shrink-0 flex items-center justify-center gap-3">
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {filteredNotifications.length} notification{filteredNotifications.length !== 1 ? 's' : ''}
+              {activeTab === 'all' && unreadCount > 0 && ` (${unreadCount} unread)`}
+            </span>
+            <button onClick={clearAll} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors">
+              Clear all
+            </button>
+          </div>
+        )}
+      </div>
+        </>,
+        document.body
       )}
-    </div>
+    </>
   )
 }

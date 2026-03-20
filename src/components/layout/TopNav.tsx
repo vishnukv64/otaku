@@ -5,7 +5,6 @@ import { useDownloadStatus } from '@/hooks/useDownloadStatus'
 import { DownloadManager } from '@/components/player/DownloadManager'
 import { NotificationCenter } from '@/components/notifications'
 import { useNotificationStore } from '@/store/notificationStore'
-import { ApiStatusIndicator } from './ApiStatusIndicator'
 import logoImage from '@/assets/logo.png'
 import { isMobile } from '@/utils/platform'
 
@@ -13,6 +12,7 @@ const navItems = [
   { name: 'Home', path: '/' },
   { name: 'Anime', path: '/anime' },
   { name: 'Manga', path: '/manga' },
+  { name: 'Schedule', path: '/schedule' },
   { name: 'Library', path: '/library' },
 ]
 
@@ -102,27 +102,44 @@ export function TopNav({ onSearchClick }: TopNavProps) {
   }
 
   return (
+    <>
     <nav
-      className={`${mobile ? 'relative shrink-0' : 'fixed top-0 left-0 right-0'} z-[100] transition-all duration-300 ${
-        scrolled ? 'bg-[var(--color-bg-primary)]' : mobile ? 'bg-[var(--color-bg-primary)]' : 'bg-gradient-to-b from-black/80 to-transparent'
+      className={`${mobile ? 'relative shrink-0' : 'fixed top-0 left-0 right-0'} z-[100] transition-all duration-300 backdrop-blur-[12px] ${
+        scrolled
+          ? 'bg-[rgba(20,20,20,0.98)] border-b border-[var(--color-glass-border)] shadow-[var(--shadow-md)]'
+          : mobile
+            ? 'bg-[var(--color-bg-primary)]'
+            : 'bg-[linear-gradient(to_bottom,rgba(20,20,20,0.95)_0%,rgba(20,20,20,0.6)_60%,transparent_100%)] border-b border-transparent'
       }`}
       style={mobile ? { paddingTop: 'var(--sat)' } : undefined}
     >
       <div className="max-w-4k mx-auto px-4 sm:px-6 lg:px-8 3xl:px-12">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between" style={{ height: 'var(--nav-height)' }}>
           {/* Logo & Navigation Buttons */}
           <div className="flex items-center gap-6">
             <Link
               to="/"
-              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
               onClick={() => setMobileMenuOpen(false)}
             >
-              <img
-                src={logoImage}
-                alt="Otaku Logo"
-                className="h-10 w-10 object-contain bg-black rounded-full"
-              />
-              <span className="text-2xl font-bold text-[var(--color-accent-primary)] hidden sm:inline">
+              <div
+                className="h-9 w-9 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(229,9,20,0.25)] overflow-hidden"
+                style={{ background: 'var(--accent-gradient)' }}
+              >
+                <img
+                  src={logoImage}
+                  alt="Otaku Logo"
+                  className="h-9 w-9 object-contain"
+                />
+              </div>
+              <span
+                className="text-xl font-extrabold font-display hidden sm:inline"
+                style={{
+                  background: 'var(--accent-gradient-h)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                }}
+              >
                 OTAKU
               </span>
             </Link>
@@ -160,18 +177,21 @@ export function TopNav({ onSearchClick }: TopNavProps) {
             )}
 
             {/* Desktop Navigation Links */}
-            <div className="hidden md:flex items-center gap-6">
+            <div className="hidden md:flex items-center gap-1">
               {navItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`text-sm font-medium transition-colors hover:text-[var(--color-text-primary)] ${
+                  className={`relative px-3.5 py-1.5 text-sm font-medium rounded-full transition-all duration-200 ${
                     currentPath === item.path
-                      ? 'text-[var(--color-text-primary)]'
-                      : 'text-[var(--color-text-secondary)]'
+                      ? 'text-white bg-[var(--color-glass-bg)]'
+                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-glass-bg)]'
                   }`}
                 >
                   {item.name}
+                  {currentPath === item.path && (
+                    <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-full bg-[var(--color-accent-mid)] shadow-[0_0_8px_var(--color-accent-primary)]" />
+                  )}
                 </Link>
               ))}
             </div>
@@ -183,13 +203,14 @@ export function TopNav({ onSearchClick }: TopNavProps) {
             {!mobile && (
               <button
                 onClick={onSearchClick}
-                className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group flex items-center gap-2"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm text-[var(--color-text-muted)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-[var(--color-glass-bg-hover)] hover:border-[var(--color-glass-border-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200"
                 aria-label="Search (Cmd+K)"
                 title="Search (Cmd+K)"
               >
-                <Search size={20} />
-                <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] rounded border border-[var(--color-bg-hover)] group-hover:border-[var(--color-text-muted)]">
-                  <span className="text-[10px]">⌘</span>K
+                <Search size={16} />
+                <span className="hidden lg:inline text-[var(--color-text-dim)]">Search</span>
+                <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)] bg-[var(--color-glass-bg)] rounded border border-[var(--color-glass-border)]">
+                  ⌘K
                 </kbd>
               </button>
             )}
@@ -198,12 +219,12 @@ export function TopNav({ onSearchClick }: TopNavProps) {
             {mobile ? (
               <button
                 onClick={handleNotificationClick}
-                className="relative p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                className="relative p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-glass-bg)] transition-all duration-200"
                 aria-label="Notifications"
               >
                 <Bell size={20} />
                 {unreadNotificationCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 bg-[var(--color-accent-primary)] text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 bg-[var(--color-accent-primary)] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                     {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
                   </span>
                 )}
@@ -215,25 +236,22 @@ export function TopNav({ onSearchClick }: TopNavProps) {
             {/* Download Indicator with Badge */}
             <button
               onClick={handleDownloadClick}
-              className="relative p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+              className="relative p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-glass-bg)] transition-all duration-200"
               aria-label="Downloads"
             >
               <Download size={20} />
               {activeCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-[var(--color-accent-primary)] text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 bg-[var(--color-accent-primary)] text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
                   {activeCount}
                 </span>
               )}
             </button>
 
-            {/* API Status Indicator (desktop only — not useful on mobile) */}
-            {!mobile && <ApiStatusIndicator />}
-
             {/* Settings link (desktop only — mobile uses BottomTabBar) */}
             {!mobile && (
               <Link
                 to="/settings"
-                className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-glass-bg)] transition-all duration-200"
                 aria-label="Settings"
               >
                 <Settings size={20} />
@@ -255,16 +273,16 @@ export function TopNav({ onSearchClick }: TopNavProps) {
 
         {/* Mobile Menu (desktop small screens only — mobile uses BottomTabBar) */}
         {!mobile && mobileMenuOpen && (
-          <div className="md:hidden py-4 border-t border-[var(--color-bg-hover)]">
-            <div className="flex flex-col gap-2">
+          <div className="md:hidden py-3 border-t border-[var(--color-glass-border)]">
+            <div className="flex flex-col gap-1">
               {navItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`px-4 py-3 text-base font-medium transition-colors hover:bg-[var(--color-bg-hover)] rounded ${
+                  className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
                     currentPath === item.path
-                      ? 'text-[var(--color-text-primary)] bg-[var(--color-bg-secondary)]'
-                      : 'text-[var(--color-text-secondary)]'
+                      ? 'text-white bg-[var(--color-accent-primary)]'
+                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-glass-bg)]'
                   }`}
                   onClick={() => setMobileMenuOpen(false)}
                 >
@@ -276,13 +294,15 @@ export function TopNav({ onSearchClick }: TopNavProps) {
         )}
       </div>
 
-      {/* Download Manager Modal (desktop only) */}
+    </nav>
+
+      {/* Download Manager Modal (desktop only) — rendered outside nav to escape its stacking context */}
       {!mobile && (
         <DownloadManager
           isOpen={downloadManagerOpen}
           onClose={() => setDownloadManagerOpen(false)}
         />
       )}
-    </nav>
+    </>
   )
 }

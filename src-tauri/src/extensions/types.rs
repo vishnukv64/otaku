@@ -71,6 +71,15 @@ pub struct SearchResult {
     /// Studios (from Jikan anime data)
     #[serde(default)]
     pub studios: Option<Vec<String>>,
+    /// Broadcast day (e.g., "Mondays") — from Jikan schedule data
+    #[serde(default, alias = "broadcastDay")]
+    pub broadcast_day: Option<String>,
+    /// Broadcast time in JST (e.g., "01:30") — from Jikan schedule data
+    #[serde(default, alias = "broadcastTime")]
+    pub broadcast_time: Option<String>,
+    /// Broadcast timezone (e.g., "Asia/Tokyo")
+    #[serde(default, alias = "broadcastTimezone")]
+    pub broadcast_timezone: Option<String>,
 }
 
 /// Paginated search results
@@ -268,4 +277,16 @@ pub struct MangaDetails {
     pub season: Option<Season>,
     #[serde(alias = "totalChapters")]
     pub total_chapters: Option<u32>,
+    /// Total volumes (from Jikan)
+    pub volumes: Option<u32>,
+    /// Authors (name strings from Jikan)
+    pub authors: Option<Vec<String>>,
+    /// Serializations / magazines (name strings from Jikan)
+    pub serializations: Option<Vec<String>>,
+    /// Demographics (Shounen, Seinen, etc.)
+    pub demographics: Option<Vec<String>>,
+    /// Themes (Isekai, Romance, etc.)
+    pub themes: Option<Vec<String>>,
+    /// Background info
+    pub background: Option<String>,
 }

@@ -45,6 +45,12 @@ export interface SearchResult {
   popularity?: number
   /** Studios (from Jikan anime data) */
   studios?: string[]
+  /** Broadcast day (e.g., "Mondays") — from Jikan schedule data */
+  broadcast_day?: string
+  /** Broadcast time in JST (e.g., "01:30") — from Jikan schedule data */
+  broadcast_time?: string
+  /** Broadcast timezone (e.g., "Asia/Tokyo") */
+  broadcast_timezone?: string
 }
 
 export interface SearchResults {
@@ -144,4 +150,10 @@ export interface ChapterImages {
 export interface MangaDetails extends Omit<MediaDetails, 'episodes'> {
   chapters: Chapter[]
   totalChapters?: number
+  volumes?: number
+  authors?: string[]
+  serializations?: string[]
+  demographics?: string[]
+  themes?: string[]
+  background?: string
 }

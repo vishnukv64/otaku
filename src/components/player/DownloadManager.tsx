@@ -861,6 +861,18 @@ function DownloadItem({
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }
 
+  const formatEta = (dl: DownloadProgress): string | null => {
+    if (dl.speed <= 0 || dl.total_bytes <= 0) return null
+    const remaining = dl.total_bytes - dl.downloaded_bytes
+    if (remaining <= 0) return null
+    const secs = Math.ceil(remaining / dl.speed)
+    if (secs < 60) return `${secs}s left`
+    if (secs < 3600) return `${Math.ceil(secs / 60)}m left`
+    const h = Math.floor(secs / 3600)
+    const m = Math.ceil((secs % 3600) / 60)
+    return `${h}h ${m}m left`
+  }
+
   return (
     <div className="bg-[var(--color-bg-secondary)] rounded-lg p-3 sm:p-4 hover:bg-[var(--color-bg-hover)] transition-colors">
       <div className="flex items-start gap-2 sm:gap-4">
@@ -900,6 +912,11 @@ function DownloadItem({
                 {download.speed > 0 && (
                   <span className="text-blue-400 whitespace-nowrap">
                     {formatBytes(download.speed)}/s
+                  </span>
+                )}
+                {formatEta(download) && (
+                  <span className="text-[var(--color-text-muted)] whitespace-nowrap">
+                    {formatEta(download)}
                   </span>
                 )}
               </>

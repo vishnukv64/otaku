@@ -1372,6 +1372,19 @@ pub async fn get_batch_watch_progress(
         .map_err(|e| format!("Failed to get batch watch progress: {}", e))
 }
 
+/// Get reading progress for all chapters of a manga (batch)
+#[tauri::command]
+pub async fn get_batch_reading_progress(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Vec<crate::database::reading_history::ReadingHistory>, String> {
+    use crate::database::reading_history::get_manga_reading_history;
+
+    get_manga_reading_history(state.database.pool(), &media_id)
+        .await
+        .map_err(|e| format!("Failed to get batch reading progress: {}", e))
+}
+
 /// Get the most recent watch progress for a media (for Resume Watching feature)
 #[tauri::command]
 pub async fn get_latest_watch_progress_for_media(

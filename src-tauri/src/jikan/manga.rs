@@ -43,6 +43,9 @@ fn jikan_manga_to_search_result(manga: &JikanManga) -> SearchResult {
         rank: manga.rank,
         popularity: manga.popularity,
         studios: None,
+        broadcast_day: None,
+        broadcast_time: None,
+        broadcast_timezone: None,
     }
 }
 
@@ -109,6 +112,12 @@ fn jikan_manga_to_manga_details(manga: &JikanManga) -> MangaDetails {
         media_type: manga.manga_type.clone(),
         season: None,
         total_chapters: manga.chapters.map(|c| c as u32),
+        volumes: manga.volumes.map(|v| v as u32),
+        authors: manga.authors.as_ref().map(|a| a.iter().map(|e| e.name.clone()).collect()),
+        serializations: manga.serializations.as_ref().map(|s| s.iter().map(|e| e.name.clone()).collect()),
+        demographics: manga.demographics.as_ref().map(|d| d.iter().map(|e| e.name.clone()).collect()),
+        themes: manga.themes.as_ref().map(|t| t.iter().map(|e| e.name.clone()).collect()),
+        background: manga.background.clone(),
     }
 }
 
@@ -232,6 +241,9 @@ pub fn manga_recommendations(mal_id: i64) -> Result<SearchResults, String> {
                 rank: None,
                 popularity: None,
                 studios: None,
+                broadcast_day: None,
+                broadcast_time: None,
+                broadcast_timezone: None,
             }
         })
         .collect();

@@ -12,6 +12,7 @@ import { ReleaseCheckOverlay } from '@/components/notifications/ReleaseCheckOver
 import { MigrationScreen } from '@/components/MigrationScreen'
 import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow'
 import { checkMigrationNeeded } from '@/utils/tauri-commands'
+import { OfflineGuard } from '@/components/layout/OfflineGuard'
 import { Home, Search, ArrowLeft } from 'lucide-react'
 import { isMobile } from '@/utils/platform'
 
@@ -129,7 +130,9 @@ function RootComponent() {
   return (
     <MediaStatusProvider>
       <AppShell>
-        <Outlet />
+        <OfflineGuard>
+          <Outlet />
+        </OfflineGuard>
       </AppShell>
       <Toaster
         position={isMobile() ? "top-center" : "bottom-right"}

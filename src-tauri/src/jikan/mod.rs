@@ -4,3 +4,4 @@ pub mod anime;
 pub mod manga;
 pub mod commands;
 pub mod bridge;
+pub mod schedule;

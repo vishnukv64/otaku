@@ -80,6 +80,9 @@ fn jikan_anime_to_search_result(anime: &JikanAnime) -> SearchResult {
         rank: anime.rank,
         popularity: anime.popularity,
         studios: anime.studios.as_ref().map(|s| s.iter().map(|e| e.name.clone()).collect()),
+        broadcast_day: anime.broadcast.as_ref().and_then(|b| b.day.clone()),
+        broadcast_time: anime.broadcast.as_ref().and_then(|b| b.time.clone()),
+        broadcast_timezone: anime.broadcast.as_ref().and_then(|b| b.timezone.clone()),
     }
 }
 
@@ -526,6 +529,9 @@ pub fn anime_recommendations(mal_id: i64) -> Result<SearchResults, String> {
                 rank: None,
                 popularity: None,
                 studios: None,
+                broadcast_day: None,
+                broadcast_time: None,
+                broadcast_timezone: None,
             }
         })
         .collect();
@@ -560,11 +566,12 @@ pub fn genres_anime() -> Result<TagsResult, String> {
 
 pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResults, String> {
     let page_str = page.to_string();
-    let path = match day {
-        Some(d) => format!("/schedules?filter={}", d),
-        None => "/schedules".to_string(),
-    };
+    let path = "/schedules";
     let mut params = vec![("page", page_str.as_str()), ("limit", "30")];
+    let day_owned = day.map(|d| d.to_string());
+    if let Some(ref d) = day_owned {
+        params.push(("filter", d.as_str()));
+    }
     if sfw {
         params.push(("sfw", "true"));
     }

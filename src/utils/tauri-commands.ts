@@ -823,6 +823,13 @@ export async function getReadingProgress(chapterId: string): Promise<ReadingHist
 }
 
 /**
+ * Get reading progress for all chapters of a manga (batch)
+ */
+export async function getBatchReadingProgress(mediaId: string): Promise<ReadingHistory[]> {
+  return await invoke('get_batch_reading_progress', { mediaId })
+}
+
+/**
  * Get the most recent reading progress for a manga (for Resume Reading feature)
  */
 export async function getLatestReadingProgressForMedia(mediaId: string): Promise<ReadingHistory | null> {
@@ -2442,6 +2449,11 @@ export async function jikanSchedules(
   sfw: boolean = true
 ): Promise<SearchResults> {
   return await invoke('jikan_schedules', { day, page, sfw })
+}
+
+/** Trigger daily schedule notification check */
+export async function checkDailySchedule(): Promise<void> {
+  return await invoke('check_daily_schedule')
 }
 
 /**

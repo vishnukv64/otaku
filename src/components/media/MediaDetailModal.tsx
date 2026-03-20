@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, saveWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
@@ -33,6 +33,27 @@ import { ScoreDistribution } from './ScoreDistribution'
 import { ReviewList } from './ReviewCard'
 import { GalleryGrid } from './GalleryGrid'
 import { NewsList } from './NewsCard'
+
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
+
+/**
+ * Returns true if the episode aired within the last 3 days, based on the last-episode
+ * broadcast timestamp and weekly interval already stored in MediaDetails.
+ * Formula: airTime(N) = last_update_end - (lastEpNum - N) * broadcast_interval
+ */
+function isRecentlyAired(
+  epNumber: number,
+  lastEpNumber: number,
+  lastUpdateEnd: string | undefined,
+  broadcastInterval: number | undefined,
+): boolean {
+  if (!lastUpdateEnd || !broadcastInterval) return false
+  const lastAirMs = new Date(lastUpdateEnd).getTime()
+  if (isNaN(lastAirMs)) return false
+  const epAirMs = lastAirMs - (lastEpNumber - epNumber) * broadcastInterval
+  const ageMs = Date.now() - epAirMs
+  return ageMs >= 0 && ageMs <= THREE_DAYS_MS
+}
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -137,6 +158,15 @@ export function MediaDetailModal({
   const [episodeInfo, setEpisodeInfo] = useState<JikanEpisodeDetail | null>(null)
   const [episodeInfoLoading, setEpisodeInfoLoading] = useState(false)
 
+  useEffect(() => {
+    if (episodeInfoTarget) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [episodeInfoTarget])
+
   // AllAnime extension for video sources (downloads)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
   const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
@@ -180,6 +210,40 @@ export function MediaDetailModal({
       })
     },
   })
+
+  const handleToggleEpisodeWatched = async (e: React.MouseEvent, epId: string, epNumber: number) => {
+    e.stopPropagation()
+    const current = episodeWatchHistory.get(epId)
+    const isWatched = current?.completed || (current?.progress_seconds ?? 0) > 0
+    try {
+      if (isWatched) {
+        // Reset to unwatched: 0 progress, not completed
+        await saveWatchProgress(media.id, epId, epNumber, 0, undefined, false)
+        setEpisodeWatchHistory(prev => {
+          const next = new Map(prev)
+          next.delete(epId)
+          return next
+        })
+      } else {
+        // Mark as completed
+        await saveWatchProgress(media.id, epId, epNumber, 1, 1, true)
+        const now = new Date().toISOString()
+        setEpisodeWatchHistory(prev => new Map(prev).set(epId, {
+          id: 0,
+          media_id: media.id,
+          episode_id: epId,
+          episode_number: epNumber,
+          progress_seconds: 1,
+          duration: 1,
+          completed: true,
+          last_watched: now,
+          created_at: now,
+        }))
+      }
+    } catch (err) {
+      console.error('Failed to toggle watched state:', err)
+    }
+  }
 
   const handleEpisodeInfo = async (e: React.MouseEvent, epId: string, epNumber: number) => {
     e.stopPropagation()
@@ -1675,20 +1739,35 @@ export function MediaDetailModal({
                             </div>
                           )}
 
-                          {/* Episode number badge */}
-                          <div className="absolute top-2 left-2 px-2.5 py-1 bg-black/80 backdrop-blur-sm rounded-md text-xs font-bold">
-                            EP {episode.number}
+                          {/* Top-left row: EP badge stays put; "i" expands in before it on hover */}
+                          <div className="absolute top-2 left-2 flex items-center gap-1 z-10">
+                            {!selectionMode && (
+                              <button
+                                onClick={(e) => handleEpisodeInfo(e, episode.id, episode.number)}
+                                className="h-6 overflow-hidden rounded-md bg-black/70 hover:bg-white/20 backdrop-blur-sm flex items-center justify-center transition-all duration-200 w-6 opacity-100 sm:w-0 sm:opacity-0 sm:group-hover:w-6 sm:group-hover:opacity-100"
+                                title="Episode info"
+                              >
+                                <Info size={12} className="shrink-0" />
+                              </button>
+                            )}
+                            <div className="px-2.5 py-1 bg-black/80 backdrop-blur-sm rounded-md text-xs font-bold whitespace-nowrap">
+                              EP {episode.number}
+                            </div>
                           </div>
 
-                          {/* Info button — always visible on mobile (no hover), hover-reveal on desktop */}
-                          {!selectionMode && (
-                            <button
-                              onClick={(e) => handleEpisodeInfo(e, episode.id, episode.number)}
-                              className="absolute bottom-2 left-2 w-6 h-6 rounded-md bg-black/70 hover:bg-white/20 backdrop-blur-sm flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition-all z-10"
-                              title="Episode info"
-                            >
-                              <Info size={12} />
-                            </button>
+                          {/* NEW badge — shown for episodes aired in the last 3 days (hides on hover) */}
+                          {!selectionMode &&
+                            !episodeWatchHistory.has(episode.id) &&
+                            details.last_update_end &&
+                            isRecentlyAired(
+                              episode.number,
+                              details.episodes[details.episodes.length - 1].number,
+                              details.last_update_end,
+                              details.broadcast_interval,
+                            ) && (
+                            <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-emerald-500/90 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wide text-white group-hover:opacity-0 transition-opacity">
+                              NEW
+                            </div>
                           )}
 
                           {/* Download status badge - Downloading takes priority over Downloaded */}
@@ -1708,6 +1787,18 @@ export function MediaDetailModal({
                             </div>
                           )}
 
+                          {/* Mark watched button — visible on hover when not fully watched */}
+                          {!selectionMode && !episodeWatchHistory.get(episode.id)?.completed && (
+                            <button
+                              onClick={(e) => handleToggleEpisodeWatched(e, episode.id, episode.number)}
+                              className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 hover:bg-blue-600 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10"
+                              title="Mark as watched"
+                            >
+                              <Check className="w-3 h-3" />
+                              Watched
+                            </button>
+                          )}
+
                           {/* Watched indicator */}
                           {episodeWatchHistory.has(episode.id) && (() => {
                             const history = episodeWatchHistory.get(episode.id)!
@@ -1718,12 +1809,16 @@ export function MediaDetailModal({
 
                             return (
                               <>
-                                {/* Completed badge */}
+                                {/* Completed badge — clickable to unwatch */}
                                 {isCompleted && (
-                                  <div className="absolute bottom-2 right-2 px-2 py-1 bg-blue-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1">
+                                  <button
+                                    onClick={(e) => handleToggleEpisodeWatched(e, episode.id, episode.number)}
+                                    className="absolute bottom-2 right-2 px-2 py-1 bg-blue-600/90 hover:bg-red-600/90 backdrop-blur-sm rounded-md text-xs font-bold flex items-center gap-1 transition-colors z-10"
+                                    title="Click to mark as unwatched"
+                                  >
                                     <Check className="w-3 h-3" />
                                     Watched
-                                  </div>
+                                  </button>
                                 )}
 
                                 {/* Progress bar for partially watched */}

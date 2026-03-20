@@ -236,6 +236,7 @@ pub fn run() {
 
         let db_pool = Arc::new(database.pool().clone());
         let checker_db_pool = db_pool.clone(); // Clone for release checker before it's moved
+        let schedule_db_pool = db_pool.clone(); // Clone for schedule checker before it's moved
 
         // Add database to app state
         app_handle.manage(AppState::new(database));
@@ -293,6 +294,23 @@ pub fn run() {
                     Err(e) => {
                         log::error!("Failed to get release settings on startup: {}", e);
                     }
+                }
+            });
+        }
+
+        // Spawn schedule notification check
+        {
+            let schedule_app_handle = app_handle.clone();
+            tokio::spawn(async move {
+                // Small delay to let app fully initialize
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                if let Err(e) = jikan::schedule::check_daily_schedule_inner(
+                    &schedule_app_handle,
+                    &schedule_db_pool,
+                )
+                .await
+                {
+                    log::error!("Schedule notification check failed: {}", e);
                 }
             });
         }
@@ -368,6 +386,7 @@ pub fn run() {
       // Reading History
       commands::save_reading_progress,
       commands::get_reading_progress,
+      commands::get_batch_reading_progress,
       commands::get_latest_reading_progress_for_media,
       commands::get_continue_reading,
       commands::remove_from_continue_reading_manga,
@@ -498,6 +517,7 @@ pub fn run() {
       jikan::commands::jikan_genres_manga,
       jikan::commands::resolve_allanime_id,
       jikan::commands::clear_allanime_mapping,
+      jikan::commands::check_daily_schedule,
       // Migration (AllAnime → Jikan)
       commands::check_migration_needed,
       commands::start_migration,

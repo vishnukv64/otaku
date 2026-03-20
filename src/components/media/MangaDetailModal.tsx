@@ -25,7 +25,7 @@ import {
   Bell,
   Tags,
 } from 'lucide-react'
-import { getMangaDetails, jikanMangaDetails, resolveAllanimeId, loadExtension, searchManga, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag, jikanMangaCharacters, jikanMangaStatistics, jikanMangaReviews, jikanMangaPictures, jikanMangaNews, jikanMangaRecommendations, type JikanCharacterEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews } from '@/utils/tauri-commands'
+import { getMangaDetails, jikanMangaDetails, resolveAllanimeId, loadExtension, searchManga, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getBatchReadingProgress, saveReadingProgress, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag, jikanMangaCharacters, jikanMangaStatistics, jikanMangaReviews, jikanMangaPictures, jikanMangaNews, jikanMangaRecommendations, type JikanCharacterEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews } from '@/utils/tauri-commands'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
@@ -48,6 +48,32 @@ import { NewsList } from './NewsCard'
 /** MAL IDs are purely numeric; AllAnime IDs contain letters/hyphens */
 function isMalId(id: string): boolean {
   return /^\d+$/.test(id)
+}
+
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
+
+/**
+ * Returns true if the chapter/episode was released within the last 3 days.
+ * Uses releaseDate if available on the chapter, otherwise back-calculates
+ * from the last-update-end timestamp and broadcast interval.
+ */
+function isChapterRecentlyReleased(
+  chNumber: number,
+  lastChNumber: number,
+  releaseDate: string | undefined,
+  lastUpdateEnd: string | undefined,
+  broadcastInterval: number | undefined,
+): boolean {
+  if (releaseDate) {
+    const age = Date.now() - new Date(releaseDate).getTime()
+    return age >= 0 && age <= THREE_DAYS_MS
+  }
+  if (!lastUpdateEnd || !broadcastInterval) return false
+  const lastMs = new Date(lastUpdateEnd).getTime()
+  if (isNaN(lastMs)) return false
+  const chAirMs = lastMs - (lastChNumber - chNumber) * broadcastInterval
+  const age = Date.now() - chAirMs
+  return age >= 0 && age <= THREE_DAYS_MS
 }
 
 const CHAPTERS_PER_PAGE = 50
@@ -74,6 +100,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const [chapterPage, setChapterPage] = useState(0)
   const [readingProgress, setReadingProgress] = useState<{ chapterId: string; chapterNumber: number; page: number } | null>(null)
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
+  const [chapterReadSet, setChapterReadSet] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
   const [showLibraryMenu, setShowLibraryMenu] = useState(false)
@@ -227,6 +254,14 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
               page: progress.current_page,
             })
           }
+        } catch {
+          // Ignore
+        }
+
+        // Load batch reading history for per-chapter read indicators
+        try {
+          const history = await getBatchReadingProgress(manga.id)
+          setChapterReadSet(new Set(history.filter(h => h.completed).map(h => h.chapter_id)))
         } catch {
           // Ignore
         }
@@ -473,6 +508,34 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const handleContinueReading = () => {
     if (!readingProgress) return
     handleReadNow(readingProgress.chapterId)
+  }
+
+  const handleToggleChapterRead = async (e: React.MouseEvent, chapter: Chapter) => {
+    e.stopPropagation()
+    const mediaId = manga?.id
+    if (!mediaId) return
+    const isRead = chapterReadSet.has(chapter.id)
+    try {
+      if (isRead) {
+        // Mark as unread: save with page 0, not completed
+        await saveReadingProgress(mediaId, chapter.id, chapter.number, 0, undefined, false)
+        setChapterReadSet(prev => { const next = new Set(prev); next.delete(chapter.id); return next })
+        // If this was the latest read chapter, clear/update readingProgress
+        if (readingProgress?.chapterId === chapter.id) {
+          setReadingProgress(null)
+        }
+      } else {
+        // Mark as read: save with completed = true
+        await saveReadingProgress(mediaId, chapter.id, chapter.number, 1, undefined, true)
+        setChapterReadSet(prev => new Set(prev).add(chapter.id))
+        // Update latest reading progress if this is newer
+        if (!readingProgress || chapter.number >= readingProgress.chapterNumber) {
+          setReadingProgress({ chapterId: chapter.id, chapterNumber: chapter.number, page: 1 })
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle chapter read state:', err)
+    }
   }
 
   // Helper to ensure media is saved before library operations
@@ -1176,6 +1239,18 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
                               {isDownloaded && (
                                 <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
                               )}
+                              {chapter.number > (readingProgress?.chapterNumber ?? 0) &&
+                                isChapterRecentlyReleased(
+                                  chapter.number,
+                                  effectiveChapters[effectiveChapters.length - 1]?.number ?? chapter.number,
+                                  chapter.releaseDate,
+                                  details?.last_update_end,
+                                  details?.broadcast_interval,
+                                ) && (
+                                <span className="px-1.5 py-0.5 bg-emerald-500/90 rounded text-[10px] font-bold uppercase tracking-wide text-white">
+                                  NEW
+                                </span>
+                              )}
                             </div>
                             {chapter.title && (
                               <p className="text-xs text-[var(--color-text-muted)] truncate mt-1">
@@ -1206,6 +1281,27 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
                               <Download className="w-4 h-4" />
                             )}
                           </button>
+
+                          {/* Read toggle button */}
+                          {chapterReadSet.has(chapter.id) ? (
+                            <button
+                              onClick={(e) => handleToggleChapterRead(e, chapter)}
+                              className="absolute bottom-2 right-2 px-2 py-0.5 bg-blue-600/90 hover:bg-red-600/90 rounded text-[10px] font-bold flex items-center gap-1 transition-colors z-10"
+                              title="Click to mark as unread"
+                            >
+                              <Check className="w-3 h-3" />
+                              Read
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => handleToggleChapterRead(e, chapter)}
+                              className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 hover:bg-blue-600 rounded text-[10px] font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10"
+                              title="Mark as read"
+                            >
+                              <Check className="w-3 h-3" />
+                              Read
+                            </button>
+                          )}
                         </div>
                       )
                     })}

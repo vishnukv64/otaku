@@ -153,8 +153,18 @@ impl JikanClient {
                     if code == 404 {
                         return Err(last_error);
                     }
-                    if code >= 500 {
-                        std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+                    // Retry on 400 (Jikan sometimes returns 400 under rate limiting)
+                    // and on 5xx server errors
+                    if code == 400 || code >= 500 {
+                        log::warn!(
+                            "Jikan returned {}, retrying after {}ms (attempt {})",
+                            code,
+                            RETRY_DELAY_MS * (attempt as u64 + 1),
+                            attempt + 1
+                        );
+                        std::thread::sleep(Duration::from_millis(
+                            RETRY_DELAY_MS * (attempt as u64 + 1),
+                        ));
                         continue;
                     }
                     return Err(last_error);
