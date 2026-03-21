@@ -1,10 +1,10 @@
 /**
- * ChapterList - Chapter selector sidebar component
- * Styled with Netflix-inspired red and black accents
+ * ChapterList - Chapter sidebar sliding from the right
+ * Matches read.html mock: 300px, right-side, with search + chapter items
  */
 
-import { useEffect, useRef } from 'react'
-import { X, ChevronLeft, ChevronRight, Check, BookOpen } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { X, Search, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Chapter } from '@/types/extension'
 
@@ -15,202 +15,160 @@ interface ChapterListProps {
   onChapterSelect: (chapterId: string) => void
   onClose: () => void
   isOpen: boolean
-  readChapters?: Set<string> // Set of read chapter IDs
+  readChapters?: Set<string>
 }
 
 export function ChapterList({
   chapters,
   currentChapterId,
-  currentChapterNumber,
   onChapterSelect,
   onClose,
   isOpen,
   readChapters = new Set(),
 }: ChapterListProps) {
-  const listContainerRef = useRef<HTMLDivElement>(null)
-  const currentChapterRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const currentRef = useRef<HTMLDivElement>(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
-  // Sort chapters by number
-  const sortedChapters = [...chapters].sort((a, b) => a.number - b.number)
+  // Sort chapters descending (newest first, matching mock)
+  const sortedChapters = [...chapters].sort((a, b) => b.number - a.number)
 
-  // Scroll to current chapter when the list opens
+  // Filter by search
+  const filteredChapters = searchQuery
+    ? sortedChapters.filter(ch => {
+        const q = searchQuery.toLowerCase()
+        return (
+          `ch. ${ch.number}`.includes(q) ||
+          ch.title?.toLowerCase().includes(q) ||
+          `chapter ${ch.number}`.includes(q)
+        )
+      })
+    : sortedChapters
+
+  // Scroll to current chapter when sidebar opens
   useEffect(() => {
-    if (isOpen && currentChapterRef.current && listContainerRef.current) {
-      // Small delay to ensure the DOM is ready
+    if (isOpen && currentRef.current) {
       const timer = setTimeout(() => {
-        currentChapterRef.current?.scrollIntoView({
-          behavior: 'auto',
-          block: 'center',
-        })
-      }, 50)
+        currentRef.current?.scrollIntoView({ behavior: 'auto', block: 'center' })
+      }, 100)
       return () => clearTimeout(timer)
     }
   }, [isOpen])
 
-  if (!isOpen) return null
-
-  // Find current chapter index
-  const currentIndex = sortedChapters.findIndex(ch => ch.id === currentChapterId)
-
-  // Get prev/next chapters
-  const prevChapter = currentIndex > 0 ? sortedChapters[currentIndex - 1] : null
-  const nextChapter = currentIndex < sortedChapters.length - 1 ? sortedChapters[currentIndex + 1] : null
-
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
-      onClick={onClose}
-    >
+    <>
+      {/* Overlay backdrop */}
       <div
-        className="absolute left-0 top-0 h-full w-80 bg-[var(--color-bg-primary)] border-r border-[var(--color-bg-hover)] shadow-2xl flex flex-col animate-in fade-in"
-        onClick={(e) => e.stopPropagation()}
-        style={{ animation: 'slideInLeft 0.2s ease-out' }}
+        className={cn(
+          'fixed inset-0 bg-black/50 z-[299] transition-opacity duration-300',
+          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        )}
+        onClick={onClose}
+      />
+
+      {/* Sidebar */}
+      <div
+        className={cn(
+          'fixed right-0 top-0 bottom-0 w-[300px] z-[300]',
+          'bg-[rgba(14,14,14,0.97)] backdrop-blur-[20px]',
+          'border-l border-white/[0.08]',
+          'flex flex-col',
+          'transition-transform duration-[350ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]',
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[var(--color-bg-hover)] bg-[var(--color-bg-secondary)]">
-          <h2 className="text-lg font-bold flex items-center gap-2 text-white">
-            <BookOpen className="w-5 h-5 text-[var(--color-accent-primary)]" />
-            Chapters
-          </h2>
+        <div className="flex items-center justify-between p-4 border-b border-white/[0.08] flex-shrink-0">
+          <span className="font-display font-bold text-base text-white">Chapters</span>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-[var(--color-text-secondary)] hover:text-white"
+            className="w-8 h-8 rounded-[var(--radius-md)] border border-white/10 bg-white/[0.06] text-white/60 cursor-pointer flex items-center justify-center transition-all duration-[120ms] hover:bg-white/[0.12] hover:text-white"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Quick navigation */}
-        <div className="flex items-center justify-between p-3 border-b border-[var(--color-bg-hover)] bg-[var(--color-bg-secondary)]/50">
-          <button
-            onClick={() => prevChapter && onChapterSelect(prevChapter.id)}
-            disabled={!prevChapter}
-            className={cn(
-              'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all',
-              prevChapter
-                ? 'hover:bg-[var(--color-accent-primary)] hover:text-white text-[var(--color-text-secondary)]'
-                : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
-            )}
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Prev
-          </button>
-
-          <div className="flex flex-col items-center">
-            <span className="text-xs text-[var(--color-text-muted)] uppercase tracking-wide">Current</span>
-            <span className="text-sm font-bold text-[var(--color-accent-primary)]">
-              Ch. {currentChapterNumber || '-'}
-            </span>
+        {/* Search */}
+        <div className="px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)] pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search chapters..."
+              className={cn(
+                'w-full py-2 pl-[34px] pr-3 rounded-[var(--radius-md)]',
+                'border border-white/10 bg-white/[0.05]',
+                'text-white text-[0.8125rem] font-sans',
+                'outline-none transition-all duration-[120ms]',
+                'placeholder:text-[var(--color-text-muted)]',
+                'focus:border-[rgba(229,9,20,0.4)] focus:bg-white/[0.08]'
+              )}
+            />
           </div>
-
-          <button
-            onClick={() => nextChapter && onChapterSelect(nextChapter.id)}
-            disabled={!nextChapter}
-            className={cn(
-              'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all',
-              nextChapter
-                ? 'hover:bg-[var(--color-accent-primary)] hover:text-white text-[var(--color-text-secondary)]'
-                : 'text-[var(--color-text-muted)] cursor-not-allowed opacity-50'
-            )}
-          >
-            Next
-            <ChevronRight className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Chapter list */}
-        <div ref={listContainerRef} className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="p-2 space-y-1">
-            {sortedChapters.map((chapter) => {
-              const isCurrentChapter = chapter.id === currentChapterId
-              const isRead = readChapters.has(chapter.id)
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.1)_transparent]"
+        >
+          {filteredChapters.map((chapter) => {
+            const isCurrent = chapter.id === currentChapterId
+            const isRead = readChapters.has(chapter.id)
 
-              return (
-                <button
-                  key={chapter.id}
-                  ref={isCurrentChapter ? currentChapterRef : undefined}
-                  onClick={() => onChapterSelect(chapter.id)}
-                  className={cn(
-                    'w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all group',
-                    isCurrentChapter
-                      ? 'bg-[var(--color-accent-primary)]/20 border-l-4 border-[var(--color-accent-primary)]'
-                      : 'hover:bg-[var(--color-bg-hover)] border-l-4 border-transparent hover:border-[var(--color-accent-primary)]/50'
-                  )}
-                >
-                  {/* Chapter number badge */}
+            return (
+              <div
+                key={chapter.id}
+                ref={isCurrent ? currentRef : undefined}
+                onClick={() => onChapterSelect(chapter.id)}
+                className={cn(
+                  'flex items-center gap-3 px-4 py-2.5 cursor-pointer',
+                  'transition-[background] duration-[120ms]',
+                  'border-b border-white/[0.04]',
+                  'hover:bg-white/[0.04]',
+                  isCurrent && 'bg-[rgba(229,9,20,0.1)] border-l-[3px] border-l-[#e50914]',
+                  !isCurrent && 'border-l-[3px] border-l-transparent'
+                )}
+              >
+                {/* Chapter info */}
+                <div className="flex-1 min-w-0">
                   <div className={cn(
-                    'flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-colors',
-                    isCurrentChapter
-                      ? 'bg-[var(--color-accent-primary)] text-white'
-                      : 'bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] group-hover:bg-[var(--color-accent-primary)]/30'
+                    'font-semibold text-[0.8125rem] truncate',
+                    isCurrent
+                      ? 'text-[var(--color-accent-light)]'
+                      : isRead
+                        ? 'text-[var(--color-text-muted)]'
+                        : 'text-white'
                   )}>
-                    {chapter.number}
-                  </div>
-
-                  {/* Chapter info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        'font-medium truncate transition-colors',
-                        isCurrentChapter
-                          ? 'text-white'
-                          : isRead
-                            ? 'text-[var(--color-text-muted)]'
-                            : 'text-[var(--color-text-secondary)] group-hover:text-white'
-                      )}>
-                        Chapter {chapter.number}
-                      </span>
-                      {isRead && (
-                        <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
-                      )}
-                      {isCurrentChapter && (
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-[var(--color-accent-primary)] text-white rounded uppercase">
-                          Reading
-                        </span>
-                      )}
-                    </div>
+                    Ch. {chapter.number}
                     {chapter.title && chapter.title !== `Chapter ${chapter.number}` && (
-                      <p className="text-sm text-[var(--color-text-muted)] truncate mt-0.5">
-                        {chapter.title}
-                      </p>
-                    )}
-                    {chapter.releaseDate && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                        {chapter.releaseDate}
-                      </p>
+                      <> - {chapter.title}</>
                     )}
                   </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+                  {chapter.releaseDate && (
+                    <div className="text-[0.65rem] text-[var(--color-text-dim)] mt-0.5">
+                      {chapter.releaseDate}
+                    </div>
+                  )}
+                </div>
 
-        {/* Footer with chapter count */}
-        <div className="p-3 border-t border-[var(--color-bg-hover)] bg-[var(--color-bg-secondary)]/50 text-center">
-          <span className="text-sm text-[var(--color-text-muted)]">
-            {sortedChapters.length} chapters
-          </span>
-          {readChapters.size > 0 && (
-            <span className="text-sm text-[var(--color-text-muted)]">
-              {' '} • {readChapters.size} read
-            </span>
-          )}
+                {/* Status */}
+                <div className="flex-shrink-0 flex items-center gap-1">
+                  {isCurrent ? (
+                    <span className="text-[0.6rem] font-semibold text-[var(--color-accent-light)] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[rgba(229,9,20,0.15)] border border-[rgba(229,9,20,0.25)]">
+                      Reading
+                    </span>
+                  ) : isRead ? (
+                    <Check className="w-3.5 h-3.5 text-[var(--color-green)]" strokeWidth={2.5} />
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
-
-      <style>{`
-        @keyframes slideInLeft {
-          from {
-            transform: translateX(-100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-      `}</style>
-    </div>
+    </>
   )
 }

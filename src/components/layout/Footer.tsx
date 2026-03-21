@@ -1,7 +1,7 @@
 /**
  * Footer Component
  *
- * Global footer displayed on all pages
+ * Compact global footer displayed on all pages
  */
 
 import { useEffect, useState } from 'react'
@@ -19,43 +19,49 @@ export function Footer() {
   }, [])
 
   return (
-    <footer className="border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="max-w-4k mx-auto px-4 3xl:px-12 py-8">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          {/* Branding - matches TopNav */}
+    <footer className="border-t border-[var(--color-glass-border)] bg-[var(--color-void)]">
+      <div className="max-w-4k mx-auto px-4 3xl:px-12 py-3 flex items-center justify-between gap-4 flex-wrap">
+        {/* Left: Branding + copyright */}
+        <div className="flex items-center gap-3">
           <Link
             to="/"
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
           >
-            <img
-              src={logoImage}
-              alt="Otaku Logo"
-              className="h-10 w-10 object-contain bg-black rounded-full"
-            />
-            <span className="text-2xl font-bold text-[var(--color-accent-primary)]">
+            <div
+              className="h-6 w-6 rounded-full flex items-center justify-center shadow-[0_0_12px_rgba(229,9,20,0.2)] overflow-hidden"
+              style={{ background: 'var(--accent-gradient)' }}
+            >
+              <img
+                src={logoImage}
+                alt="Otaku"
+                className="h-6 w-6 object-contain"
+              />
+            </div>
+            <span
+              className="text-sm font-extrabold font-display"
+              style={{
+                background: 'var(--accent-gradient-h)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
               OTAKU
             </span>
           </Link>
-
-          {/* Copyright and Version */}
-          <div className="flex items-center gap-4 text-sm text-[var(--color-text-tertiary)]">
-            <div className="flex items-center gap-1">
-              <span>Made with</span>
-              <Heart size={14} className="text-[var(--color-accent-primary)] fill-current" />
-              <span>&copy; {currentYear} Otaku</span>
-            </div>
-            {appVersion && (
-              <span className="font-mono text-xs opacity-75">v{appVersion}</span>
-            )}
-          </div>
+          <span className="text-[var(--color-glass-border)]">|</span>
+          <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+            Made with <Heart size={10} className="text-[var(--color-accent-primary)] fill-current" /> &copy; {currentYear}
+          </span>
         </div>
 
-        {/* Disclaimer */}
-        <div className="mt-6 pt-6 border-t border-[var(--color-border)]">
-          <p className="text-xs text-[var(--color-text-tertiary)] text-center">
-            Otaku does not store any media files on its servers. All content is provided by third-party extensions.
-            This application is for educational purposes only.
+        {/* Right: Disclaimer + version */}
+        <div className="flex items-center gap-3">
+          <p className="text-[11px] text-[var(--color-text-dim)] max-w-md">
+            Content provided by third-party extensions. For educational purposes only.
           </p>
+          {appVersion && (
+            <span className="font-mono text-[11px] text-[var(--color-text-dim)] opacity-60 whitespace-nowrap">v{appVersion}</span>
+          )}
         </div>
       </div>
     </footer>

@@ -321,6 +321,7 @@ pub async fn notify_download_started(
     pool: Option<&SqlitePool>,
     title: &str,
     episode_number: i32,
+    media_id: &str,
 ) -> Result<()> {
     let notification = NotificationPayload::new(
         NotificationType::Info,
@@ -330,7 +331,8 @@ pub async fn notify_download_started(
     .with_source("download")
     .with_metadata(serde_json::json!({
         "title": title,
-        "episode_number": episode_number
+        "episode_number": episode_number,
+        "media_id": media_id
     }));
 
     emit_notification(app_handle, pool, notification).await
@@ -342,6 +344,7 @@ pub async fn notify_download_complete(
     pool: Option<&SqlitePool>,
     title: &str,
     episode_number: i32,
+    media_id: &str,
 ) -> Result<()> {
     let notification = NotificationPayload::new(
         NotificationType::Success,
@@ -352,7 +355,8 @@ pub async fn notify_download_complete(
     .with_action("Open Downloads", Some("/downloads".to_string()), None)
     .with_metadata(serde_json::json!({
         "title": title,
-        "episode_number": episode_number
+        "episode_number": episode_number,
+        "media_id": media_id
     }));
 
     emit_notification(app_handle, pool, notification).await
@@ -365,6 +369,7 @@ pub async fn notify_download_failed(
     title: &str,
     episode_number: i32,
     error: &str,
+    media_id: &str,
 ) -> Result<()> {
     let notification = NotificationPayload::new(
         NotificationType::Error,
@@ -375,7 +380,8 @@ pub async fn notify_download_failed(
     .with_metadata(serde_json::json!({
         "title": title,
         "episode_number": episode_number,
-        "error": error
+        "error": error,
+        "media_id": media_id
     }));
 
     emit_notification(app_handle, pool, notification).await
@@ -387,6 +393,7 @@ pub async fn notify_chapter_download_complete(
     pool: Option<&SqlitePool>,
     manga_title: &str,
     chapter_number: f64,
+    media_id: &str,
 ) -> Result<()> {
     let notification = NotificationPayload::new(
         NotificationType::Success,
@@ -397,7 +404,8 @@ pub async fn notify_chapter_download_complete(
     .with_action("Open Downloads", Some("/downloads".to_string()), None)
     .with_metadata(serde_json::json!({
         "manga_title": manga_title,
-        "chapter_number": chapter_number
+        "chapter_number": chapter_number,
+        "media_id": media_id
     }));
 
     emit_notification(app_handle, pool, notification).await
@@ -410,6 +418,7 @@ pub async fn notify_chapter_download_failed(
     manga_title: &str,
     chapter_number: f64,
     error: &str,
+    media_id: &str,
 ) -> Result<()> {
     let notification = NotificationPayload::new(
         NotificationType::Error,
@@ -420,7 +429,8 @@ pub async fn notify_chapter_download_failed(
     .with_metadata(serde_json::json!({
         "manga_title": manga_title,
         "chapter_number": chapter_number,
-        "error": error
+        "error": error,
+        "media_id": media_id
     }));
 
     emit_notification(app_handle, pool, notification).await

@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { proxyImageRequest } from '@/utils/tauri-commands'
+import { getCachedImageUrl, preloadImage } from '@/utils/proxyImageCache'
 
 function isLocalUrl(url: string): boolean {
   return (
@@ -58,16 +58,19 @@ export function useProxiedImage(
   }
 
   // Revoke blob URL when source URL changes or on unmount
+  // Only revoke blob URLs we created locally (not from shared cache)
+  const isFromCacheRef = useRef(false)
   useEffect(() => {
     return () => {
-      if (blobUrlRef.current) {
+      if (blobUrlRef.current && !isFromCacheRef.current) {
         URL.revokeObjectURL(blobUrlRef.current)
-        blobUrlRef.current = null
       }
+      blobUrlRef.current = null
+      isFromCacheRef.current = false
     }
   }, [url])
 
-  // Fetch image through proxy
+  // Fetch image through proxy (checks shared preload cache first)
   useEffect(() => {
     if (isLocalUrl(url)) return
     if (blobUrlRef.current) return // Already fetched for this URL
@@ -76,16 +79,28 @@ export function useProxiedImage(
       return
     }
 
+    // Check shared preload cache first (populated by MangaReader preloader)
+    const cached = getCachedImageUrl(url)
+    if (cached) {
+      console.log(`[useProxiedImage] PRELOAD HIT — instant display for ${url.slice(-40)}`)
+      blobUrlRef.current = cached
+      isFromCacheRef.current = true
+      setSrc(cached)
+      setLoading(false)
+      return
+    }
+
+    console.log(`[useProxiedImage] cache miss — fetching ${url.slice(-40)}`)
     let cancelled = false
     setLoading(true)
     setError(false)
 
-    proxyImageRequest(url)
-      .then((buffer) => {
+    // Use shared preloadImage (deduplicates concurrent requests + caches result)
+    preloadImage(url)
+      .then((blobUrl) => {
         if (cancelled) return
-        const blob = new Blob([buffer])
-        const blobUrl = URL.createObjectURL(blob)
         blobUrlRef.current = blobUrl
+        isFromCacheRef.current = true // came from shared cache
         setSrc(blobUrl)
         setLoading(false)
       })

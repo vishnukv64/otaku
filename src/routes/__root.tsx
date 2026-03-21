@@ -9,6 +9,7 @@ import { useSettingsStore } from '@/store/settingsStore'
 import { useReaderStore } from '@/store/readerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import { ReleaseCheckOverlay } from '@/components/notifications/ReleaseCheckOverlay'
+import { MiniPlayer } from '@/components/player/MiniPlayer'
 import { MigrationScreen } from '@/components/MigrationScreen'
 import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow'
 import { checkMigrationNeeded } from '@/utils/tauri-commands'
@@ -134,6 +135,7 @@ function RootComponent() {
           <Outlet />
         </OfflineGuard>
       </AppShell>
+      <MiniPlayer />
       <Toaster
         position={isMobile() ? "top-center" : "bottom-right"}
         toastOptions={{

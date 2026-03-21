@@ -1,20 +1,36 @@
 /**
- * ReaderControls - Bottom/overlay controls for the manga reader
+ * ReaderControls - Top nav bar + bottom controls for the manga reader
+ * Matches read.html mock exactly:
+ *   Top: back button | title + chapter info | action buttons (fullscreen, bookmark, chapters, settings)
+ *   Bottom: progress bar + [prev chapter | page nav + indicator | mode pills | next chapter]
  */
 
 import {
   ChevronLeft,
   ChevronRight,
-  Settings,
-  List,
   Maximize,
   Minimize,
-  Home,
-  SkipBack,
-  SkipForward,
+  Bookmark,
+  List,
+  Settings,
+  BookOpen,
+  AlignVerticalSpaceAround,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { PageSlider } from './PageSlider'
+
+// Icon button style matching mock: 36x36, radius-md, glass border/bg
+const iconBtnClass =
+  'w-9 h-9 rounded-[var(--radius-md)] border border-white/10 bg-white/[0.06] text-white/70 cursor-pointer flex items-center justify-center transition-all duration-[120ms] hover:bg-white/[0.12] hover:text-white flex-shrink-0'
+
+// Control button style for bottom bar: small padded, radius-md, glass
+const ctrlBtnClass =
+  'flex items-center gap-[5px] px-3 py-1.5 rounded-[var(--radius-md)] border border-white/10 bg-white/[0.06] text-white/60 text-xs font-medium cursor-pointer transition-all duration-[120ms] whitespace-nowrap hover:bg-white/[0.12] hover:text-white'
+
+// Icon-only control button for bottom bar: 32x32
+const ctrlBtnIconClass =
+  'w-8 h-8 p-0 flex items-center justify-center rounded-[var(--radius-md)] border border-white/10 bg-white/[0.06] text-white/60 cursor-pointer transition-all duration-[120ms] hover:bg-white/[0.12] hover:text-white'
+
+type ReadingMode = 'single' | 'double' | 'vertical' | 'webtoon'
 
 interface ReaderControlsProps {
   // Page state
@@ -26,21 +42,27 @@ interface ReaderControlsProps {
 
   // Chapter state
   currentChapterNumber?: number
+  chapterTitle?: string
+  mangaTitle?: string
   hasNextChapter: boolean
   hasPreviousChapter: boolean
+  nextChapterNumber?: number
+  previousChapterNumber?: number
   onNextChapter: () => void
   onPreviousChapter: () => void
 
   // UI state
   isFullscreen: boolean
+  isBookmarked?: boolean
   onToggleFullscreen: () => void
+  onToggleBookmark?: () => void
   onOpenSettings: () => void
   onOpenChapterList: () => void
   onGoBack: () => void
 
   // Display options
-  readingMode?: 'single' | 'double' | 'vertical' | 'webtoon'
-  readingDirection?: 'ltr' | 'rtl'
+  readingMode?: ReadingMode
+  onReadingModeChange?: (mode: ReadingMode) => void
   showControls: boolean
   className?: string
 }
@@ -48,181 +70,229 @@ interface ReaderControlsProps {
 export function ReaderControls({
   currentPage,
   totalPages,
-  onPageChange,
   onPreviousPage,
   onNextPage,
   currentChapterNumber,
+  chapterTitle,
+  mangaTitle,
   hasNextChapter,
   hasPreviousChapter,
+  nextChapterNumber,
+  previousChapterNumber,
   onNextChapter,
   onPreviousChapter,
   isFullscreen,
+  isBookmarked = false,
   onToggleFullscreen,
+  onToggleBookmark,
   onOpenSettings,
   onOpenChapterList,
   onGoBack,
-  readingMode = 'single',
-  readingDirection = 'ltr',
-  showControls,
-  className,
+  readingMode = 'vertical',
+  onReadingModeChange,
 }: ReaderControlsProps) {
-  if (!showControls) return null
-
-  // In vertical/webtoon mode, page buttons are disabled (user scrolls instead)
-  const isScrollMode = readingMode === 'vertical' || readingMode === 'webtoon'
-
   return (
     <>
-      {/* Top bar */}
+      {/* ── Top Bar ──────────────────────────────────────── */}
       <div
         className={cn(
-          'absolute top-0 left-0 right-0 z-40',
-          'bg-gradient-to-b from-black/80 to-transparent',
-          'transition-opacity duration-300',
-          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none',
-          className
+          'fixed top-0 left-0 right-0 h-14 z-[200]',
+          'flex items-center px-5 gap-3',
+          'bg-[rgba(10,10,10,0.92)] backdrop-blur-[12px]',
+          'border-b border-white/[0.08]',
+          'transition-all duration-[350ms] ease-out'
         )}
       >
-        <div className="flex items-center justify-between p-4">
-          {/* Left: Back button */}
+        {/* Back button */}
+        <button
+          onClick={onGoBack}
+          className={iconBtnClass}
+          title="Back to details"
+        >
+          <ChevronLeft className="w-[18px] h-[18px]" />
+        </button>
+
+        {/* Title + chapter info */}
+        <div className="flex-1 min-w-0">
+          <div className="font-display font-semibold text-[0.9375rem] text-white truncate">
+            {mangaTitle || 'Manga'}
+          </div>
+          <div className="text-xs text-[var(--color-text-secondary)]">
+            Chapter {currentChapterNumber || '-'}
+            {chapterTitle && (
+              <span className="text-[var(--color-accent-light)]"> &middot; {chapterTitle}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button
-            onClick={onGoBack}
-            className="flex items-center gap-2 px-3 py-2 rounded-md text-white hover:bg-white/20 transition-colors"
+            onClick={onToggleFullscreen}
+            className={iconBtnClass}
+            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           >
-            <Home className="w-5 h-5" />
-            <span className="text-sm font-medium hidden sm:inline">Exit</span>
+            {isFullscreen ? (
+              <Minimize className="w-[18px] h-[18px]" />
+            ) : (
+              <Maximize className="w-[18px] h-[18px]" />
+            )}
           </button>
-
-          {/* Center: Chapter info */}
-          <div className="flex items-center gap-4 text-white">
+          {onToggleBookmark && (
             <button
-              onClick={hasPreviousChapter ? onPreviousChapter : undefined}
-              disabled={!hasPreviousChapter}
+              onClick={onToggleBookmark}
               className={cn(
-                'p-2 rounded-md transition-colors',
-                hasPreviousChapter
-                  ? 'hover:bg-white/20'
-                  : 'opacity-40 cursor-not-allowed'
+                iconBtnClass,
+                isBookmarked && 'text-[var(--color-accent-light)] border-[rgba(229,9,20,0.3)] bg-[rgba(229,9,20,0.1)]'
               )}
-              title={hasPreviousChapter ? 'Previous Chapter' : 'No previous chapter'}
+              title="Bookmark"
             >
-              <SkipBack className="w-5 h-5" />
+              <Bookmark className="w-[18px] h-[18px]" fill={isBookmarked ? 'currentColor' : 'none'} />
             </button>
-            <span className="text-sm font-medium">
-              Chapter {currentChapterNumber || '-'}
-            </span>
-            <button
-              onClick={hasNextChapter ? onNextChapter : undefined}
-              disabled={!hasNextChapter}
-              className={cn(
-                'p-2 rounded-md transition-colors',
-                hasNextChapter
-                  ? 'hover:bg-white/20'
-                  : 'opacity-40 cursor-not-allowed'
-              )}
-              title={hasNextChapter ? 'Next Chapter' : 'No next chapter'}
-            >
-              <SkipForward className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Right: Actions */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onOpenChapterList}
-              className="p-2 rounded-md text-white hover:bg-white/20 transition-colors"
-              title="Chapter List"
-            >
-              <List className="w-5 h-5" />
-            </button>
-            <button
-              onClick={onOpenSettings}
-              className="p-2 rounded-md text-white hover:bg-white/20 transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-            <button
-              onClick={onToggleFullscreen}
-              className="p-2 rounded-md text-white hover:bg-white/20 transition-colors"
-              title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-            >
-              {isFullscreen ? (
-                <Minimize className="w-5 h-5" />
-              ) : (
-                <Maximize className="w-5 h-5" />
-              )}
-            </button>
-          </div>
+          )}
+          <button
+            onClick={onOpenChapterList}
+            className={iconBtnClass}
+            title="Chapter list"
+          >
+            <List className="w-[18px] h-[18px]" />
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className={iconBtnClass}
+            title="Settings"
+          >
+            <Settings className="w-[18px] h-[18px]" />
+          </button>
         </div>
       </div>
 
-      {/* Bottom bar */}
+      {/* ── Bottom Controls Bar ──────────────────────────── */}
       <div
         className={cn(
-          'absolute bottom-0 left-0 right-0 z-40',
-          'bg-gradient-to-t from-black/80 to-transparent',
-          'transition-opacity duration-300',
-          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          'fixed bottom-0 left-0 right-0 z-[200]',
+          'bg-[rgba(10,10,10,0.92)] backdrop-blur-[12px]',
+          'border-t border-white/[0.08]',
+          'transition-all duration-[350ms] ease-out'
         )}
       >
-        <div className="p-4 space-y-3">
-          {/* Page slider - only show in paged modes */}
-          {!isScrollMode && (
-            <PageSlider
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={onPageChange}
-              direction={readingDirection}
-              className="text-white"
-            />
-          )}
+        {/* Controls inner */}
+        <div className="flex items-center px-4 py-2.5 gap-2">
+          {/* Left: Previous chapter + page nav */}
+          <div className="flex items-center gap-1.5 flex-1 justify-start">
+            <button
+              onClick={hasPreviousChapter ? onPreviousChapter : undefined}
+              className={cn(ctrlBtnClass, !hasPreviousChapter && 'opacity-30 pointer-events-none')}
+            >
+              <ChevronLeft className="w-3 h-3" strokeWidth={2.5} />
+              {hasPreviousChapter && previousChapterNumber
+                ? `Ch. ${previousChapterNumber}`
+                : 'Prev'}
+            </button>
+            {(() => {
+              const isScrollMode = readingMode === 'vertical' || readingMode === 'webtoon'
+              return (
+                <>
+                  <button
+                    onClick={onPreviousPage}
+                    disabled={isScrollMode || currentPage <= 1}
+                    className={cn(ctrlBtnIconClass, (isScrollMode || currentPage <= 1) && 'opacity-30 pointer-events-none')}
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className={cn('font-mono-code text-xs whitespace-nowrap px-2', isScrollMode ? 'text-white/30' : 'text-white/50')}>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={onNextPage}
+                    disabled={isScrollMode || currentPage >= totalPages}
+                    className={cn(ctrlBtnIconClass, (isScrollMode || currentPage >= totalPages) && 'opacity-30 pointer-events-none')}
+                    title="Next page"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )
+            })()}
+          </div>
 
-          {/* Page navigation buttons - only show in paged modes */}
-          {!isScrollMode ? (
-            <div className="flex items-center justify-between">
-              <button
-                onClick={readingDirection === 'rtl' ? onNextPage : onPreviousPage}
-                disabled={readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1}
-                className={cn(
-                  'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
-                  (readingDirection === 'rtl' ? currentPage >= totalPages : currentPage <= 1)
-                    ? 'opacity-50 cursor-not-allowed'
-                    : 'hover:bg-white/20'
-                )}
-                title="Previous page"
+          {/* Center: Reading mode pills */}
+          <div className="flex-shrink-0">
+            <div className="flex items-center gap-0.5 bg-white/[0.04] border border-white/[0.08] rounded-[var(--radius-lg)] p-[3px]">
+              <ModePill
+                active={readingMode === 'vertical' || readingMode === 'webtoon'}
+                onClick={() => onReadingModeChange?.('vertical')}
+                title="Vertical Scroll"
               >
-                <ChevronLeft className="w-5 h-5" />
-                <span className="text-sm hidden sm:inline">Previous</span>
-              </button>
-
-              <div className="text-white text-sm font-medium">
-                <span>Page {currentPage} of {totalPages}</span>
-              </div>
-
-              <button
-                onClick={readingDirection === 'rtl' ? onPreviousPage : onNextPage}
-                disabled={readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages}
-                className={cn(
-                  'flex items-center gap-2 px-4 py-2 rounded-md text-white transition-colors',
-                  (readingDirection === 'rtl' ? currentPage <= 1 : currentPage >= totalPages)
-                    ? 'opacity-50 cursor-not-allowed'
-                    : 'hover:bg-white/20'
-                )}
-                title="Next page"
+                <AlignVerticalSpaceAround className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="hidden sm:inline">Vertical</span>
+              </ModePill>
+              <ModePill
+                active={readingMode === 'single'}
+                onClick={() => onReadingModeChange?.('single')}
+                title="Single Page"
               >
-                <span className="text-sm hidden sm:inline">Next</span>
-                <ChevronRight className="w-5 h-5" />
-              </button>
+                {/* Single page icon (rect) */}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                  <rect x="5" y="2" width="14" height="20" rx="2"/>
+                </svg>
+                <span className="hidden sm:inline">Page</span>
+              </ModePill>
+              <ModePill
+                active={readingMode === 'double'}
+                onClick={() => onReadingModeChange?.('double')}
+                title="Double Page"
+              >
+                <BookOpen className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="hidden sm:inline">Double</span>
+              </ModePill>
             </div>
-          ) : (
-            /* Scroll mode indicator */
-            <div className="flex items-center justify-center py-2">
-              <span className="text-white/70 text-sm">{totalPages} pages • Scroll to read</span>
-            </div>
-          )}
+          </div>
+
+          {/* Right: Next chapter */}
+          <div className="flex items-center gap-1.5 flex-1 justify-end">
+            <button
+              onClick={hasNextChapter ? onNextChapter : undefined}
+              className={cn(ctrlBtnClass, !hasNextChapter && 'opacity-30 pointer-events-none')}
+            >
+              {hasNextChapter && nextChapterNumber
+                ? `Ch. ${nextChapterNumber}`
+                : 'Next'}
+              <ChevronRight className="w-3 h-3" strokeWidth={2.5} />
+            </button>
+          </div>
         </div>
       </div>
     </>
+  )
+}
+
+/** Individual reading mode pill button */
+function ModePill({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={cn(
+        'flex items-center gap-[5px] px-2.5 py-[5px] rounded-[var(--radius-md)]',
+        'border border-transparent bg-transparent text-white/45 text-[0.7rem] font-medium',
+        'cursor-pointer transition-all duration-[120ms] whitespace-nowrap',
+        'hover:text-white/80',
+        active && 'bg-[#e50914] text-white border-[#e50914] shadow-[0_0_10px_rgba(229,9,20,0.35)]'
+      )}
+    >
+      {children}
+    </button>
   )
 }

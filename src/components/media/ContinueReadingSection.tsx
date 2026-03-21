@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState, useRef } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, Link } from '@tanstack/react-router'
 import { BookOpen, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
 import { getContinueReadingWithDetails, removeFromContinueReadingManga, type ContinueReadingEntry } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -115,11 +115,8 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
 
   if (loading) {
     return (
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-          <BookOpen className="w-6 h-6 text-[var(--color-accent-primary)]" />
-          Continue Reading
-        </h2>
+      <div className="mb-10">
+        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3">Continue Reading</h2>
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
         </div>
@@ -132,11 +129,17 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
   }
 
   return (
-    <div className="mb-8 overflow-visible">
-      <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-        <BookOpen className="w-6 h-6 text-[var(--color-accent-primary)]" />
-        Continue Reading
-      </h2>
+    <div className="mb-10 overflow-visible">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">Continue Reading</h2>
+        <Link
+          to="/library"
+          className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+        >
+          See all
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+        </Link>
+      </div>
 
       {/* Carousel Container */}
       <div className="relative group/carousel overflow-visible">
@@ -144,10 +147,10 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
         {canScrollLeft && (
           <button
             onClick={() => scroll('left')}
-            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-black/80 hover:bg-black rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/carousel:opacity-100 transition-opacity -ml-2"
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 glass rounded-full flex items-center justify-center shadow-[var(--shadow-md)] opacity-0 group-hover/carousel:opacity-100 transition-opacity -ml-2"
             aria-label="Scroll left"
           >
-            <ChevronLeft className="w-6 h-6" />
+            <ChevronLeft className="w-5 h-5" />
           </button>
         )}
 
@@ -155,10 +158,10 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
         {canScrollRight && (
           <button
             onClick={() => scroll('right')}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-black/80 hover:bg-black rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/carousel:opacity-100 transition-opacity -mr-2"
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 glass rounded-full flex items-center justify-center shadow-[var(--shadow-md)] opacity-0 group-hover/carousel:opacity-100 transition-opacity -mr-2"
             aria-label="Scroll right"
           >
-            <ChevronRight className="w-6 h-6" />
+            <ChevronRight className="w-5 h-5" />
           </button>
         )}
 
@@ -172,7 +175,6 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
           }}
         >
           {continueReading.map((entry) => {
-            // Convert MediaEntry to SearchResult format for MediaCard
             const media: SearchResult = {
               id: entry.media.id,
               title: entry.media.title,
@@ -183,27 +185,21 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
               status: entry.media.status,
             }
 
-            // Calculate page progress for display
             const pageProgress = entry.total_pages
               ? `${entry.current_page}/${entry.total_pages}`
               : `Page ${entry.current_page}`
+            const progressPercent = entry.total_pages ? (entry.current_page / entry.total_pages) * 100 : 0
 
             return (
-              <div key={entry.media.id} className="flex-shrink-0 w-[180px] group/card relative">
-                {/* Invisible spacer that maintains flex position */}
-                <div className="w-full">
-                  <div className="aspect-[2/3]" />
-                  <div className="h-12" /> {/* Space for title */}
-                </div>
-
-                {/* Actual card - positioned absolute so it can scale without affecting layout */}
-                <div className="absolute inset-0 transition-all duration-300 ease-out origin-top group-hover/card:scale-110 group-hover/card:z-50">
-                  {/* Cover Image */}
-                  <button
-                    onClick={() => handleContinueReading(entry)}
-                    className="w-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-md"
-                  >
-                    <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] shadow-lg group-hover/card:shadow-2xl group-hover/card:shadow-black/60 transition-shadow duration-300">
+              <div key={entry.media.id} className="flex-shrink-0 w-[240px] group/card relative">
+                <button
+                  onClick={() => handleContinueReading(entry)}
+                  className="w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-[var(--radius-md)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.6),0_0_20px_var(--color-accent-glow)]"
+                >
+                  {/* Card container */}
+                  <div className="rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-card)] shadow-[var(--shadow-card)]">
+                    {/* 16:9 Thumbnail */}
+                    <div className="relative w-full h-[135px] bg-[var(--color-panel)]">
                       {media.cover_url ? (
                         <img
                           src={media.cover_url}
@@ -212,78 +208,62 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                           loading="lazy"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-4xl">
-                          📖
+                        <div className="w-full h-full flex items-center justify-center">
+                          <BookOpen size={24} className="text-[var(--color-text-dim)]" />
                         </div>
                       )}
 
-                      {/* Progress badge - inside image at bottom */}
-                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent pt-6 pb-2 px-2">
-                        {entry.completed ? (
-                          <>
-                            <div className="flex justify-between items-center text-xs text-white">
-                              <span className="font-semibold">Next: Ch. {entry.chapter_number + 1}</span>
-                              <span className="text-emerald-400 font-medium">Completed</span>
-                            </div>
-                            <div className="mt-1.5 h-1 bg-white/20 rounded-full overflow-hidden">
-                              <div className="h-full bg-emerald-500 rounded-full w-full" />
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="flex justify-between items-center text-xs text-white">
-                              <span className="font-semibold">Ch. {entry.chapter_number}</span>
-                              <span className="text-white/70">{pageProgress}</span>
-                            </div>
-                            {entry.total_pages && (
-                              <div className="mt-1.5 h-1 bg-white/20 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-[var(--color-accent-primary)] rounded-full transition-all"
-                                  style={{ width: `${(entry.current_page / entry.total_pages) * 100}%` }}
-                                />
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      {/* Resume/Next overlay on hover */}
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity bg-black/50">
-                        <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent-primary)] rounded-lg">
-                          <BookOpen className="w-5 h-5" />
-                          <span className="text-sm font-bold">{entry.completed ? 'NEXT CHAPTER' : 'RESUME'}</span>
+                      {/* Hover read overlay */}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-200 bg-[rgba(20,20,20,0.5)]">
+                        <div className="w-[42px] h-[42px] rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center shadow-[0_0_30px_rgba(229,9,20,0.45)]">
+                          <BookOpen size={18} className="text-white" />
                         </div>
                       </div>
                     </div>
-                  </button>
 
-                  {/* Info button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setSelectedManga(media)
-                    }}
-                    className="absolute top-2 left-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
-                    title="View Details"
-                  >
-                    <Info className="w-4 h-4" />
-                  </button>
-                  {/* Remove button */}
-                  <button
-                    onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                    className="absolute top-2 right-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
-                    title="Remove from Continue Reading"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+                    {/* Card info panel */}
+                    <div className="px-3 py-2.5 pb-3">
+                      <h3 className="text-[0.875rem] font-semibold font-display text-white truncate mb-1">
+                        {media.title}
+                      </h3>
+                      <p className="text-xs text-[var(--color-text-muted)] mb-2">
+                        {entry.completed
+                          ? `Next: Ch. ${entry.chapter_number + 1}`
+                          : `Ch. ${entry.chapter_number}${entry.total_pages ? ` · ${pageProgress}` : ''}`
+                        }
+                      </p>
+                      {/* Progress bar inside info panel */}
+                      {!entry.completed && entry.total_pages != null && entry.total_pages > 0 && (
+                        <div className="h-[3px] rounded-full bg-[var(--color-glass-border)] overflow-hidden">
+                          <div
+                            className="h-full rounded-full shadow-[0_0_8px_var(--color-accent-glow)]"
+                            style={{ width: `${progressPercent}%`, background: 'var(--accent-gradient-h)' }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </button>
 
-                {/* Title - Below Image */}
-                <div className="mt-2 px-1">
-                  <h3 className="text-sm font-semibold text-white line-clamp-2 leading-tight">
-                    {media.title}
-                  </h3>
-                </div>
+                {/* Info button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSelectedManga(media)
+                  }}
+                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  title="View Details"
+                >
+                  <Info className="w-4 h-4" />
+                </button>
+                {/* Remove button */}
+                <button
+                  onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
+                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  title="Remove from Continue Reading"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             )
           })}

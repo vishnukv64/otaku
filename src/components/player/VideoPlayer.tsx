@@ -3,26 +3,27 @@
  *
  * Full-featured video player with HLS support, quality selection,
  * server selection, and episode navigation.
+ *
+ * UI matches mocks/watch.html exactly:
+ * - Flex layout: video-area (flex-1) + episode sidebar (320px)
+ * - Gradient overlays, center play button, skip intro
+ * - Top bar with back button + title
+ * - Controls: play, skip±10, volume, time | quality pill, server pill, next, fullscreen, sidebar toggle
+ * - Progress bar with buffered + played + thumb + tooltip
+ * - Episode sidebar with season tabs + thumbnailed list
+ * - Keyboard shortcuts hint (auto-fades)
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
-import {
-  Play,
-  Pause,
-  Volume2,
-  VolumeX,
-  Settings,
-  Loader2,
-  AlertCircle,
-  RotateCcw,
-  SkipForward,
-} from 'lucide-react'
+import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
 import { saveWatchProgress, deleteEpisodeDownload, getVideoServerInfo, type VideoServerUrls } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
+import { usePipStore } from '@/store/pipStore'
 import { notifySuccess } from '@/utils/notify'
 import { isMobile, isAndroid, isIOS } from '@/utils/platform'
 
@@ -42,6 +43,7 @@ interface Episode {
   id: string
   number: number
   title?: string
+  thumbnail?: string
 }
 
 interface VideoPlayerProps {
@@ -81,7 +83,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
-  const currentEpisodeRef = useRef<HTMLButtonElement>(null)
+  const sidebarEpisodeRef = useRef<HTMLDivElement>(null)
 
   // Get settings from stores
   const playerSettings = usePlayerStore((state) => state.settings)
@@ -101,8 +103,6 @@ export function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPiP, setIsPiP] = useState(false)
   const [showControls, setShowControls] = useState(true)
-  const [showSettings, setShowSettings] = useState(false)
-  const [showEpisodes, setShowEpisodes] = useState(false)
   const [loading, setLoading] = useState(true)
   const [buffering, setBuffering] = useState(false)
   const [isSeeking, setIsSeeking] = useState(false)
@@ -146,10 +146,25 @@ export function VideoPlayer({
 
   const fitModeLabel = videoFitMode === 'contain' ? 'FIT' : videoFitMode === 'cover' ? 'FILL' : 'STRETCH'
 
+  // PiP store for entering mini player mode
+  const enterPip = usePipStore((state) => state.enterPip)
+  const closePipStore = usePipStore((state) => state.closePip)
+  const pipIsActive = usePipStore((state) => state.isActive)
+  const navigatePip = useNavigate()
+
   const [selectedServer, setSelectedServer] = useState(0)
   const [selectedQuality, setSelectedQuality] = useState('Auto')
   const [availableQualities, setAvailableQualities] = useState<string[]>(['Auto'])
   const [videoServer, setVideoServer] = useState<VideoServerUrls | null>(null)
+
+  // New mock-matching UI state
+  const [showSidebar, setShowSidebar] = useState(!isMobile()) // Open by default on desktop
+  const [showShortcutsHint, setShowShortcutsHint] = useState(true)
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
+  const [serverMenuOpen, setServerMenuOpen] = useState(false)
+
+  // Progress bar drag state
+  const [isDragging, setIsDragging] = useState(false)
 
   // Group sources by server (memoized to prevent unnecessary recalculations)
   const serverGroups = useMemo(() => {
@@ -444,6 +459,13 @@ export function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServer, sources, videoServer])
 
+  // Close MiniPlayer when VideoPlayer starts playing (user navigated to /watch manually)
+  useEffect(() => {
+    if (pipIsActive) {
+      closePipStore()
+    }
+  }, [sources]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Apply playback speed from settings
   useEffect(() => {
     const video = videoRef.current
@@ -578,6 +600,48 @@ export function VideoPlayer({
     setShowNextEpisodeOverlay(false)
     video.currentTime = 0
     video.play().catch(() => {})
+  }
+
+  // Enter Picture-in-Picture mini player mode
+  const handleEnterPip = () => {
+    const video = videoRef.current
+    console.log('[VideoPlayer] handleEnterPip called:', { video: !!video, mediaId, episodeId, currentEpisode, videoServer: !!videoServer })
+
+    if (!video || !mediaId || !episodeId || typeof currentEpisode !== 'number' || !videoServer) {
+      console.warn('[VideoPlayer] PiP blocked - missing:', { video: !!video, mediaId, episodeId, currentEpisode, videoServer: !!videoServer })
+      return
+    }
+
+    const currentSource = currentServerSources[0]
+    if (!currentSource) {
+      console.warn('[VideoPlayer] PiP blocked - no current source')
+      return
+    }
+
+    const isHls = currentSource.url.toLowerCase().includes('.m3u8')
+    console.log('[VideoPlayer] Entering PiP:', { sourceUrl: currentSource.url, isHls, currentTime: video.currentTime })
+
+    enterPip({
+      sourceUrl: currentSource.url,
+      isHls,
+      sources,
+      selectedServer,
+      videoServer,
+      currentTime: video.currentTime,
+      duration: video.duration || 0,
+      volume: video.volume,
+      isMuted: video.muted,
+      malId: mediaId,
+      episodeId,
+      animeTitle: animeTitle || 'Unknown',
+      episodeNumber: currentEpisode,
+    })
+
+    // Pause video before navigating away to prevent double audio
+    video.pause()
+
+    // Navigate to home (not history.back which might go to another /watch URL)
+    navigatePip({ to: '/' })
   }
 
   // Save watch progress periodically and on unmount
@@ -719,18 +783,26 @@ export function VideoPlayer({
     }
   }, [])
 
-  // Scroll to current episode when episodes dropdown is opened
+  // Scroll to current episode in sidebar when opened
   useEffect(() => {
-    if (showEpisodes && currentEpisodeRef.current) {
-      // Small delay to ensure the dropdown is rendered
+    if (showSidebar && sidebarEpisodeRef.current) {
       requestAnimationFrame(() => {
-        currentEpisodeRef.current?.scrollIntoView({
+        sidebarEpisodeRef.current?.scrollIntoView({
           behavior: 'instant',
           block: 'center',
         })
       })
     }
-  }, [showEpisodes])
+  }, [showSidebar])
+
+  // Auto-fade keyboard shortcuts hint after 4 seconds
+  useEffect(() => {
+    if (!showShortcutsHint) return
+    const timer = setTimeout(() => {
+      setShowShortcutsHint(false)
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [showShortcutsHint])
 
   // Control functions - defined before useEffect that uses them
   const togglePlay = () => {
@@ -1013,6 +1085,10 @@ export function VideoPlayer({
           e.preventDefault()
           onPreviousEpisode?.()
           break
+        case 'i':
+          e.preventDefault()
+          handleEnterPip()
+          break
       }
     }
 
@@ -1030,19 +1106,6 @@ export function VideoPlayer({
     const targetTime = percent * duration
 
     seekToTime(targetTime)
-  }
-
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current
-    if (!video) return
-
-    const newVolume = parseFloat(e.target.value)
-    video.volume = newVolume
-    if (newVolume > 0) {
-      video.muted = false
-    }
-    // Persist volume to store
-    updatePlayerSettings({ volume: newVolume, muted: newVolume === 0 })
   }
 
   // Handle progress bar hover (time preview only)
@@ -1081,12 +1144,12 @@ export function VideoPlayer({
       }
     }
 
-    setShowSettings(false)
+    setQualityMenuOpen(false)
   }
 
   const changeServer = (serverIndex: number) => {
     setSelectedServer(serverIndex)
-    setShowSettings(false)
+    setServerMenuOpen(false)
   }
 
   const formatTime = (seconds: number) => {
@@ -1179,15 +1242,85 @@ export function VideoPlayer({
     }
   }, [isPlaying, isPiP])
 
+  // Close pill menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.ctrl-pill')) {
+        setQualityMenuOpen(false)
+        setServerMenuOpen(false)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [])
+
+  // Progress bar drag handling
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const progressBar = progressBarRef.current
+      if (!progressBar) return
+      const rect = progressBar.getBoundingClientRect()
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      const time = pct * duration
+
+      // Update visual position during drag
+      setCurrentTime(time)
+      setHoverPreview({ visible: true, x: e.clientX - rect.left, time })
+    }
+
+    const handleMouseUp = (e: MouseEvent) => {
+      setIsDragging(false)
+      const progressBar = progressBarRef.current
+      if (!progressBar) return
+      const rect = progressBar.getBoundingClientRect()
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      seekToTime(pct * duration)
+      setHoverPreview(prev => ({ ...prev, visible: false }))
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDragging, duration])
+
   const mobile = isMobile()
+
+  // Compute progress percentage
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  // Season tab logic: group episodes into seasons of 26
+  const seasonCount = episodes ? Math.ceil(episodes.length / 26) : 0
+  const [activeSeason, setActiveSeason] = useState(0)
+  const seasonEpisodes = useMemo(() => {
+    if (!episodes || seasonCount <= 1) return episodes || []
+    const start = activeSeason * 26
+    return episodes.slice(start, start + 26)
+  }, [episodes, activeSeason, seasonCount])
+
+  // Auto-set active season based on current episode
+  useEffect(() => {
+    if (!episodes || seasonCount <= 1 || typeof currentEpisode !== 'number') return
+    const epIndex = episodes.findIndex(ep => ep.number === currentEpisode)
+    if (epIndex >= 0) {
+      const season = Math.floor(epIndex / 26)
+      setActiveSeason(season)
+    }
+  }, [currentEpisode, episodes, seasonCount])
+
+  // ─── JSX ───────────────────────────────────────────────────────────────────────
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-black group"
+      className="relative w-full h-full flex overflow-hidden"
       style={{
-        // Hide cursor when controls are hidden (immersive mode)
-        cursor: !showControls && !isPiP ? 'none' : 'default',
         // Mobile (Android/iOS): CSS fullscreen since we bypass the browser Fullscreen API
         // Native bridge hides system bars, but we still need to fill the viewport
         ...((isAndroid() || isIOS()) && isFullscreen ? {
@@ -1199,476 +1332,806 @@ export function VideoPlayer({
         } : {}),
       }}
     >
-      {/* Video Element */}
-      <video
-        ref={videoRef}
-        className="w-full h-full"
-        onClick={togglePlay}
-        preload="auto"
-        playsInline
-        style={{
-          objectFit: videoFitMode,
-          willChange: 'transform',
-          contain: 'layout style paint',
-          transform: 'translateZ(0)',
-        }}
-      />
-
-      {/* Skip Zones - Left (Rewind) and Right (Forward) */}
-      <div className="absolute inset-0 flex pointer-events-none">
-        {/* Left Skip Zone - Rewind */}
-        <div
-          className="w-1/3 h-full flex items-center justify-center pointer-events-auto cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation()
-            handleSkip('backward')
-          }}
-        >
-          {skipAmount?.direction === 'backward' && (
-            <div className="flex flex-col items-center animate-in fade-in zoom-in duration-200">
-              <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
-                <div className="flex items-center gap-1">
-                  {/* Rewind arrows */}
-                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
-                  </svg>
-                </div>
-              </div>
-              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
-                {skipAmount.amount} seconds
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Center Zone - Play/Pause (transparent, lets clicks through to video) */}
-        <div className="w-1/3 h-full pointer-events-none" />
-
-        {/* Right Skip Zone - Forward */}
-        <div
-          className="w-1/3 h-full flex items-center justify-center pointer-events-auto cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation()
-            handleSkip('forward')
-          }}
-        >
-          {skipAmount?.direction === 'forward' && (
-            <div className="flex flex-col items-center animate-in fade-in zoom-in duration-200">
-              <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
-                <div className="flex items-center gap-1">
-                  {/* Forward arrows */}
-                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
-                  </svg>
-                </div>
-              </div>
-              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
-                {skipAmount.amount} seconds
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Volume Indicator Overlay */}
-      {volumeIndicator && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-          <div className="flex flex-col items-center animate-in fade-in zoom-in duration-200">
-            <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
-              <div className="flex items-center gap-3">
-                {/* Volume icon */}
-                {volumeIndicator.level === 0 ? (
-                  <VolumeX className="w-8 h-8" />
-                ) : (
-                  <Volume2 className="w-8 h-8" />
-                )}
-                {/* Volume bar */}
-                <div className="w-24 h-2 bg-white/30 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-white rounded-full transition-all duration-100"
-                    style={{ width: `${volumeIndicator.level * 100}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-            <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
-              {Math.round(volumeIndicator.level * 100)}%
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Loading/Buffering/Seeking Overlay */}
-      {(loading || buffering || isSeeking) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 pointer-events-none">
-          <Loader2 className="w-16 h-16 animate-spin text-[var(--color-accent-primary)]" />
-          <p className="mt-4 text-sm text-white/80">
-            {loading ? 'Loading video...' : isSeeking ? 'Seeking...' : 'Buffering...'}
-          </p>
-        </div>
-      )}
-
-      {/* Error Overlay */}
-      {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 text-white p-8">
-          <AlertCircle className="w-16 h-16 mb-4 text-red-500" />
-          <h3 className="text-xl font-bold mb-2">Playback Error</h3>
-          <p className="text-[var(--color-text-secondary)]">{error}</p>
-        </div>
-      )}
-
-      {/* Episode End Overlay - Centered */}
-      {showNextEpisodeOverlay && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="flex flex-col items-center gap-6">
-            {/* Play Again button — always visible */}
-            <button
-              onClick={handlePlayAgain}
-              className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-6 rounded-xl transition-colors backdrop-blur-sm border border-white/10"
-            >
-              <RotateCcw size={20} />
-              Play Again
-            </button>
-
-            {/* Next Episode section — only when autoPlayNext is ON and next episode exists */}
-            {playerSettings.autoPlayNext && hasNextEpisode && (
-              <div className="flex flex-col items-center gap-3">
-                <p className="text-sm text-white/70">
-                  Episode {episodes?.[currentEpisodeIndex + 1]?.number ?? (currentEpisode != null ? currentEpisode + 1 : '?')} in {countdown}s
-                </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      setShowNextEpisodeOverlay(false)
-                      onNextEpisode?.()
-                    }}
-                    className="flex items-center gap-2 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white font-medium py-3 px-6 rounded-xl transition-colors"
-                  >
-                    <SkipForward size={20} />
-                    Play Next Episode
-                  </button>
-                  <button
-                    onClick={() => setShowNextEpisodeOverlay(false)}
-                    className="py-3 px-4 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors text-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Simple dismiss when no autoplay */}
-            {(!playerSettings.autoPlayNext || !hasNextEpisode) && (
-              <button
-                onClick={() => setShowNextEpisodeOverlay(false)}
-                className="text-sm text-white/50 hover:text-white/80 transition-colors"
-              >
-                Dismiss
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Title Overlay - Shows when paused or controls visible */}
+      {/* ── Video Area ────────────────────────────────────────────── */}
       <div
-        className={`absolute top-0 left-0 right-0 bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${
-          mobile ? 'p-3 px-[max(12px,env(safe-area-inset-left))]' : 'p-6'
-        } ${
-          showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
-        }`}
+        className="flex-1 relative bg-black overflow-hidden"
+        style={{ cursor: !showControls && !isPiP ? 'none' : 'default' }}
+        onClick={togglePlay}
+        onMouseMove={() => {/* handled by document-level listener */}}
       >
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0 pr-4">
-            {animeTitle && (
-              <>
-                <h1 className={`font-bold truncate ${mobile ? 'text-base mb-1' : 'text-2xl mb-2'}`}>{animeTitle}</h1>
-                {currentEpisode && (
-                  <p className={`text-white/80 ${mobile ? 'text-xs' : 'text-base'}`}>
-                    Episode {currentEpisode}
-                    {episodeTitle && !episodeTitle.toLowerCase().startsWith('episode') && ` - ${episodeTitle}`}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
+        {/* Video Element */}
+        <video
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full"
+          preload="auto"
+          playsInline
+          style={{
+            objectFit: videoFitMode,
+            willChange: 'transform',
+            contain: 'layout style paint',
+            transform: 'translateZ(0)',
+          }}
+        />
 
+        {/* ── Overlay Gradients ─────────────────────────────────── */}
+        <div
+          className="absolute top-0 left-0 right-0 h-[120px] z-[8] pointer-events-none transition-opacity duration-[400ms]"
+          style={{
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, transparent 100%)',
+            opacity: showControls || !isPlaying ? 1 : 0,
+          }}
+        />
+        <div
+          className="absolute bottom-0 left-0 right-0 h-[200px] z-[8] pointer-events-none transition-opacity duration-[400ms]"
+          style={{
+            background: 'linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.5) 50%, transparent 100%)',
+            opacity: showControls || !isPlaying ? 1 : 0,
+          }}
+        />
+
+        {/* ── Center Play Button ────────────────────────────────── */}
+        <div
+          className={`absolute top-1/2 left-1/2 z-[5] flex items-center justify-center w-[72px] h-[72px] rounded-full cursor-pointer transition-all duration-200 ${
+            isPlaying ? 'opacity-0 pointer-events-none scale-[0.8]' : 'opacity-100 scale-100'
+          }`}
+          style={{
+            transform: `translate(-50%, -50%)${isPlaying ? ' scale(0.8)' : ''}`,
+            background: 'rgba(229, 9, 20, 0.85)',
+            boxShadow: '0 0 60px rgba(229, 9, 20, 0.4), 0 0 120px rgba(229, 9, 20, 0.15)',
+          }}
+          onClick={(e) => { e.stopPropagation(); togglePlay() }}
+          onMouseEnter={(e) => {
+            const el = e.currentTarget
+            el.style.background = '#e50914'
+            el.style.boxShadow = '0 0 80px rgba(229, 9, 20, 0.5), 0 0 140px rgba(229, 9, 20, 0.2)'
+          }}
+          onMouseLeave={(e) => {
+            const el = e.currentTarget
+            el.style.background = 'rgba(229, 9, 20, 0.85)'
+            el.style.boxShadow = '0 0 60px rgba(229, 9, 20, 0.4), 0 0 120px rgba(229, 9, 20, 0.15)'
+          }}
+        >
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="white" stroke="none" className="ml-[3px]">
+            <polygon points="6,3 20,12 6,21" />
+          </svg>
+        </div>
+
+        {/* ── Skip Intro Button ─────────────────────────────────── */}
+        {currentTime > 0 && currentTime < 90 && (
+          <div
+            className={`absolute bottom-[100px] right-6 z-10 flex items-center gap-2 py-[10px] px-5 rounded cursor-pointer transition-all duration-150 ${
+              showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.25)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              fontFamily: "'Inter', sans-serif",
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              color: 'white',
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              // Skip to 90 seconds
+              seekToTime(90)
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)'
+            }}
+          >
+            Skip Intro
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="13 17 18 12 13 7" />
+              <polyline points="6 17 11 12 6 7" />
+            </svg>
+          </div>
+        )}
+
+        {/* ── Top Bar ───────────────────────────────────────────── */}
+        <div
+          className={`absolute top-0 left-0 right-0 z-10 flex items-center gap-4 transition-opacity duration-[400ms] ${
+            mobile ? 'p-3 px-[max(12px,env(safe-area-inset-left))]' : 'py-[18px] px-6'
+          } ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {onGoBack && (
             <button
               onClick={onGoBack}
-              className={`flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors backdrop-blur-sm ${
-                mobile ? 'px-2.5 py-1.5' : 'px-4 py-2 gap-2'
-              }`}
-            >
-              <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span className={`font-medium ${mobile ? 'text-xs' : 'text-sm'}`}>Back</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Controls */}
-      <div
-        className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/80 to-transparent transition-opacity duration-300 ${
-          mobile ? 'p-3 px-[max(12px,env(safe-area-inset-left))] pb-[max(8px,env(safe-area-inset-bottom))]' : 'p-6'
-        } ${
-          showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        {/* Progress Bar with Hover Preview */}
-        <div className={`relative ${mobile ? 'mb-2' : 'mb-4'}`}>
-          {/* Hover Time Preview Tooltip */}
-          {hoverPreview.visible && (
-            <div
-              className="absolute bottom-full mb-3 transform -translate-x-1/2 pointer-events-none z-50"
+              className="flex-shrink-0 flex items-center justify-center w-[38px] h-[38px] rounded-full transition-all duration-150"
               style={{
-                left: `${Math.max(30, Math.min(hoverPreview.x, (progressBarRef.current?.clientWidth || 0) - 30))}px`,
+                background: 'rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                color: 'white',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)'
               }}
             >
-              <div className="bg-black/95 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-xl border border-white/10">
-                <span className="text-sm font-medium text-white">
-                  {formatTime(hoverPreview.time)}
-                </span>
-              </div>
-              {/* Arrow pointing to progress bar */}
-              <div className="absolute left-1/2 transform -translate-x-1/2 -bottom-1">
-                <div className="w-2 h-2 bg-black/95 border-r border-b border-white/10 transform rotate-45" />
-              </div>
-            </div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5" /><polyline points="12 19 5 12 12 5" />
+              </svg>
+            </button>
           )}
-
-          {/* Progress Bar Track */}
-          <div
-            ref={progressBarRef}
-            className="w-full h-1.5 bg-white/20 rounded-full cursor-pointer hover:h-2 transition-all relative overflow-visible"
-            onClick={handleSeek}
-            onMouseMove={handleProgressHover}
-            onMouseLeave={handleProgressLeave}
-          >
-            {/* Buffer Bar */}
-            <div
-              className="absolute inset-y-0 left-0 bg-white/30 rounded-full transition-all"
-              style={{ width: `${bufferedPercentage}%` }}
-            />
-            {/* Progress Bar */}
-            <div
-              className="absolute inset-y-0 left-0 bg-[var(--color-accent-primary)] rounded-full"
-              style={{ width: `${(currentTime / duration) * 100}%` }}
-            >
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-            {/* Hover Position Indicator */}
-            {hoverPreview.visible && (
-              <div
-                className="absolute top-1/2 -translate-y-1/2 w-1 h-4 bg-white/60 rounded-full pointer-events-none"
-                style={{ left: `${hoverPreview.x}px` }}
-              />
+          <div className="flex flex-col gap-[2px] min-w-0">
+            {animeTitle && (
+              <div className="font-display font-bold text-[0.9375rem] text-white/95 truncate">{animeTitle}</div>
+            )}
+            {currentEpisode && (
+              <div className="text-xs text-white/50" style={{ fontFamily: "'Inter', sans-serif" }}>
+                E{currentEpisode}{episodeTitle && !episodeTitle.toLowerCase().startsWith('episode') ? ` \u00B7 ${episodeTitle}` : ''}
+              </div>
             )}
           </div>
         </div>
 
-        <div className={`flex items-center ${mobile ? 'gap-1' : 'gap-2'}`}>
-          {/* Rewind 10s */}
-          <button
-            onClick={() => handleSkip('backward')}
-            className={`${mobile ? 'w-7 h-7' : 'w-9 h-9'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
-            title="Rewind 10 seconds"
+        {/* ── Bottom Controls ───────────────────────────────────── */}
+        <div
+          className={`absolute bottom-0 left-0 right-0 z-10 transition-opacity duration-[400ms] ${
+            mobile ? 'px-[max(12px,env(safe-area-inset-left))] pb-[max(8px,env(safe-area-inset-bottom))]' : 'px-6 pb-[18px]'
+          } ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* ── Progress Bar ──────────────────────────────────── */}
+          <div
+            ref={progressBarRef}
+            className="relative cursor-pointer mb-[14px] group/progress select-none"
+            style={{ height: '3px', padding: '8px 0', boxSizing: 'content-box' }}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setIsDragging(true)
+              // Seek to clicked position immediately
+              const rect = e.currentTarget.getBoundingClientRect()
+              const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+              setCurrentTime(pct * duration)
+            }}
+            onMouseMove={handleProgressHover}
+            onMouseLeave={handleProgressLeave}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!isDragging) handleSeek(e)
+            }}
           >
-            <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12.5 3C17.15 3 21.08 6.03 22.47 10.22L20.1 11C19.05 7.81 16.04 5.5 12.5 5.5C10.54 5.5 8.77 6.22 7.38 7.38L10 10H3V3L5.6 5.6C7.45 4 9.85 3 12.5 3M10 12V22H8V14H6V12H10M18 14V20C18 21.11 17.11 22 16 22H14C12.9 22 12 21.1 12 20V14C12 12.9 12.9 12 14 12H16C17.11 12 18 12.9 18 14M14 14V20H16V14H14Z" />
-            </svg>
-          </button>
-
-          {/* Play/Pause */}
-          <button
-            onClick={togglePlay}
-            className={`${mobile ? 'w-8 h-8' : 'w-10 h-10'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
-          >
-            {isPlaying ? <Pause size={mobile ? 18 : 24} fill="white" /> : <Play size={mobile ? 18 : 24} fill="white" />}
-          </button>
-
-          {/* Forward 10s */}
-          <button
-            onClick={() => handleSkip('forward')}
-            className={`${mobile ? 'w-7 h-7' : 'w-9 h-9'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
-            title="Forward 10 seconds"
-          >
-            <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M10 3V5.5C5.86 5.5 2.5 8.86 2.5 13S5.86 20.5 10 20.5C12.93 20.5 15.5 18.84 16.77 16.39L14.57 15.27C13.67 16.91 11.96 18 10 18C7.24 18 5 15.76 5 13S7.24 8 10 8V10.5L14 6.5L10 3M18 14V20C18 21.11 17.11 22 16 22H14C12.9 22 12 21.1 12 20V14C12 12.9 12.9 12 14 12H16C17.11 12 18 12.9 18 14M14 14V20H16V14H14Z" />
-            </svg>
-          </button>
-
-          {/* Spacer */}
-          <div className={mobile ? 'w-1' : 'w-2'} />
-
-          {/* Time */}
-          <span className={`font-medium ${mobile ? 'text-xs' : 'text-sm'}`}>
-            {formatTime(currentTime)} / {formatTime(duration)}
-          </span>
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Episode Selector Dropdown */}
-          {episodes && episodes.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => setShowEpisodes(!showEpisodes)}
-                className={`flex items-center gap-1 hover:bg-white/20 rounded transition-colors font-medium ${
-                  mobile ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm gap-2'
-                }`}
-                title="Select Episode"
+            {/* Background track */}
+            <div className="absolute left-0 right-0 top-[8px] h-[3px] group-hover/progress:h-[5px] rounded-sm transition-[height] duration-[120ms]" style={{ background: 'rgba(255, 255, 255, 0.2)' }} />
+            {/* Buffered */}
+            <div
+              className="absolute left-0 top-[8px] h-[3px] group-hover/progress:h-[5px] rounded-sm transition-[height] duration-[120ms] pointer-events-none"
+              style={{ width: `${bufferedPercentage}%`, background: 'rgba(255, 255, 255, 0.25)' }}
+            />
+            {/* Played */}
+            <div
+              className="absolute left-0 top-[8px] h-[3px] group-hover/progress:h-[5px] rounded-sm transition-[height] duration-[120ms] pointer-events-none"
+              style={{ width: `${progressPercent}%`, background: '#e50914' }}
+            />
+            {/* Thumb */}
+            <div
+              className={`absolute top-1/2 pointer-events-none transition-transform duration-[120ms] ${isDragging ? '' : 'scale-0 group-hover/progress:scale-100'}`}
+              style={{
+                left: `${progressPercent}%`,
+                transform: `translate(-50%, -50%)${isDragging ? ' scale(1)' : ''}`,
+                width: '14px',
+                height: '14px',
+                borderRadius: '50%',
+                background: '#e50914',
+                boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)',
+                cursor: isDragging ? 'grabbing' : 'grab',
+              }}
+            />
+            {/* Tooltip */}
+            {hoverPreview.visible && (
+              <div
+                className="absolute pointer-events-none transition-opacity duration-[120ms]"
+                style={{
+                  top: '-28px',
+                  left: `${Math.max(20, Math.min(hoverPreview.x, (progressBarRef.current?.clientWidth || 0) - 20))}px`,
+                  transform: 'translateX(-50%)',
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  background: 'rgba(0, 0, 0, 0.92)',
+                  color: 'white',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '0.7rem',
+                  whiteSpace: 'nowrap',
+                }}
               >
-                <span>{mobile ? `EP ${currentEpisode || 1}` : `Episode ${currentEpisode || 1}`}</span>
-                <svg className={mobile ? 'w-3 h-3' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                {formatTime(hoverPreview.time)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Controls Row ──────────────────────────────────── */}
+          <div className="flex items-center justify-between">
+            {/* Left group */}
+            <div className="flex items-center gap-[6px]">
+              {/* Play/Pause */}
+              <button
+                className="flex items-center justify-center w-[42px] h-[42px] rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                onClick={togglePlay}
+                title="Play/Pause (K)"
+              >
+                {isPlaying ? (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="none">
+                    <rect x="5" y="3" width="4" height="18" rx="1" />
+                    <rect x="15" y="3" width="4" height="18" rx="1" />
+                  </svg>
+                ) : (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="none">
+                    <polygon points="6,3 20,12 6,21" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Rewind 10s */}
+              <button
+                className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                onClick={() => handleSkip('backward')}
+                title="Rewind 10s"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 19a8 8 0 1 0 0-14.4" /><polyline points="11 4 4 4 4 11" />
+                  <text x="11.5" y="15.5" fill="currentColor" stroke="none" fontSize="7" fontFamily="sans-serif" fontWeight="700" textAnchor="middle">10</text>
                 </svg>
               </button>
 
-              {showEpisodes && (
-                <>
-                  {/* Backdrop to close dropdown */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowEpisodes(false)}
-                  />
-
-                  {/* Episodes Dropdown */}
-                  <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl max-h-[min(50vh,300px)] overflow-y-auto z-50 min-w-[180px] sm:min-w-[250px] max-w-[70vw] sm:max-w-[80vw]">
-                    <div className="p-1.5 sm:p-2">
-                      <h4 className="text-xs sm:text-sm font-semibold mb-1.5 sm:mb-2 px-2 text-[var(--color-text-muted)]">Episodes</h4>
-                      <div className="space-y-0.5 sm:space-y-1">
-                        {episodes.map((episode) => (
-                          <button
-                            key={episode.id}
-                            ref={currentEpisode === episode.number ? currentEpisodeRef : null}
-                            onClick={() => {
-                              onEpisodeSelect?.(episode.id)
-                              setShowEpisodes(false)
-                            }}
-                            className={`w-full text-left px-2 sm:px-3 py-1.5 sm:py-2 rounded hover:bg-white/10 transition-colors text-xs sm:text-sm flex items-center justify-between ${
-                              currentEpisode === episode.number
-                                ? 'bg-[var(--color-accent-primary)] font-semibold'
-                                : ''
-                            }`}
-                          >
-                            <span>
-                              {episode.number}. {episode.title || `Episode ${episode.number}`}
-                            </span>
-                            {currentEpisode === episode.number && (
-                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Volume (desktop only — mobile uses hardware buttons) */}
-          {!isMobile() && (
-            <div className="flex items-center gap-2 group/volume">
+              {/* Forward 10s */}
               <button
-                onClick={toggleMute}
-                className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+                className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                onClick={() => handleSkip('forward')}
+                title="Forward 10s"
               >
-                {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M13 5a8 8 0 1 1 0 14.4" /><polyline points="13 4 20 4 20 11" />
+                  <text x="12.5" y="15.5" fill="currentColor" stroke="none" fontSize="7" fontFamily="sans-serif" fontWeight="700" textAnchor="middle">10</text>
+                </svg>
               </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={isMuted ? 0 : volume}
-                onChange={handleVolumeChange}
-                className="w-0 group-hover/volume:w-20 transition-all opacity-0 group-hover/volume:opacity-100"
-              />
+
+              {/* Volume group (desktop only) */}
+              {!mobile && (
+                <div className="flex items-center gap-[2px] group/volume">
+                  <button
+                    className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                    onClick={toggleMute}
+                    title="Mute (M)"
+                  >
+                    {isMuted || volume === 0 ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                    )}
+                  </button>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={isMuted ? 0 : Math.round(volume * 100)}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value) / 100
+                      const video = videoRef.current
+                      if (video) {
+                        video.volume = v
+                        if (v > 0) video.muted = false
+                        updatePlayerSettings({ volume: v, muted: v === 0 })
+                      }
+                    }}
+                    className="w-0 opacity-0 group-hover/volume:w-[72px] group-hover/volume:opacity-100 transition-all duration-200 h-1 cursor-pointer"
+                    style={{ accentColor: '#e50914' }}
+                  />
+                </div>
+              )}
+
+              {/* Separator */}
+              <div className="w-px h-[18px] mx-1 flex-shrink-0" style={{ background: 'rgba(255, 255, 255, 0.12)' }} />
+
+              {/* Time display */}
+              <span className="whitespace-nowrap ml-1" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                {formatTime(currentTime)} <span style={{ opacity: 0.4 }}>/</span> {formatTime(duration)}
+              </span>
             </div>
-          )}
 
-          {/* Download */}
-          {animeTitle && currentEpisode && mediaId && episodeId && (
-            <DownloadButton
-              sources={sources}
-              mediaId={mediaId}
-              episodeId={episodeId}
-              animeTitle={animeTitle}
-              episodeNumber={currentEpisode}
-            />
-          )}
-
-          {/* Settings */}
-          <div className="relative">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className={`${mobile ? 'w-8 h-8' : 'w-10 h-10'} flex items-center justify-center hover:bg-white/20 rounded-full transition-colors`}
-            >
-              <Settings size={mobile ? 16 : 20} />
-            </button>
-
-            {showSettings && (
-              <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl p-4 min-w-[200px]">
-                {/* Quality Selection */}
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold mb-2 text-[var(--color-text-muted)]">Quality</h4>
-                  <div className="space-y-1">
+            {/* Right group */}
+            <div className="flex items-center gap-[6px]">
+              {/* Quality pill */}
+              <div className="ctrl-pill relative">
+                <button
+                  className="flex items-center gap-1 py-1 px-3 rounded transition-all duration-[120ms] whitespace-nowrap"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: 'rgba(255, 255, 255, 0.85)',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                  }}
+                  onClick={() => { setQualityMenuOpen(!qualityMenuOpen); setServerMenuOpen(false) }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'; e.currentTarget.style.color = 'white' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)' }}
+                >
+                  {selectedQuality}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {qualityMenuOpen && (
+                  <div
+                    className="absolute bottom-[calc(100%+8px)] right-0 min-w-[120px] rounded-lg overflow-hidden z-50"
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.92)',
+                      backdropFilter: 'blur(16px)',
+                      WebkitBackdropFilter: 'blur(16px)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                    }}
+                  >
                     {availableQualities.map((quality) => (
                       <button
                         key={quality}
+                        className="w-full text-left flex items-center justify-between transition-all duration-[120ms] hover:bg-white/[0.08]"
+                        style={{
+                          padding: '9px 14px',
+                          fontFamily: "'Inter', sans-serif",
+                          fontSize: '0.8125rem',
+                          color: selectedQuality === quality ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
+                          cursor: 'pointer',
+                        }}
                         onClick={() => changeQuality(quality)}
-                        className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm ${
-                          selectedQuality === quality ? 'bg-[var(--color-accent-primary)]' : ''
-                        }`}
+                        onMouseEnter={(e) => { if (selectedQuality !== quality) e.currentTarget.style.color = 'white' }}
+                        onMouseLeave={(e) => { if (selectedQuality !== quality) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)' }}
                       >
                         {quality}
+                        {selectedQuality === quality && (
+                          <span className="w-[6px] h-[6px] rounded-full" style={{ background: '#e50914', boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)' }} />
+                        )}
                       </button>
                     ))}
                   </div>
-                </div>
+                )}
+              </div>
 
-                {/* Server Selection */}
-                {servers.length > 1 && (
-                  <div>
-                    <h4 className="text-sm font-semibold mb-2 text-[var(--color-text-muted)]">Server</h4>
-                    <div className="space-y-1">
+              {/* Server pill */}
+              {servers.length > 1 && (
+                <div className="ctrl-pill relative">
+                  <button
+                    className="flex items-center gap-1 py-1 px-3 rounded transition-all duration-[120ms] whitespace-nowrap"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: 'rgba(255, 255, 255, 0.85)',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                    }}
+                    onClick={() => { setServerMenuOpen(!serverMenuOpen); setQualityMenuOpen(false) }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'; e.currentTarget.style.color = 'white' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)' }}
+                  >
+                    {servers[selectedServer]}
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  {serverMenuOpen && (
+                    <div
+                      className="absolute bottom-[calc(100%+8px)] right-0 min-w-[120px] rounded-lg overflow-hidden z-50"
+                      style={{
+                        background: 'rgba(0, 0, 0, 0.92)',
+                        backdropFilter: 'blur(16px)',
+                        WebkitBackdropFilter: 'blur(16px)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                      }}
+                    >
                       {servers.map((server, index) => (
                         <button
                           key={server}
+                          className="w-full text-left flex items-center justify-between transition-all duration-[120ms] hover:bg-white/[0.08]"
+                          style={{
+                            padding: '9px 14px',
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: '0.8125rem',
+                            color: selectedServer === index ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
+                            cursor: 'pointer',
+                          }}
                           onClick={() => changeServer(index)}
-                          className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm ${
-                            selectedServer === index ? 'bg-[var(--color-accent-primary)]' : ''
-                          }`}
+                          onMouseEnter={(e) => { if (selectedServer !== index) e.currentTarget.style.color = 'white' }}
+                          onMouseLeave={(e) => { if (selectedServer !== index) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)' }}
                         >
                           {server}
+                          {selectedServer === index && (
+                            <span className="w-[6px] h-[6px] rounded-full" style={{ background: '#e50914', boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)' }} />
+                          )}
                         </button>
                       ))}
                     </div>
-                  </div>
+                  )}
+                </div>
+              )}
+
+              {/* Separator */}
+              <div className="w-px h-[18px] mx-1 flex-shrink-0" style={{ background: 'rgba(255, 255, 255, 0.12)' }} />
+
+              {/* Video Fit Mode */}
+              <button
+                className="flex items-center justify-center h-9 px-2 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms] font-bold tracking-wide text-[10px]"
+                onClick={cycleVideoFit}
+                title={`Video fit: ${fitModeLabel}`}
+              >
+                {fitModeLabel}
+              </button>
+
+              {/* Download */}
+              {animeTitle && currentEpisode && mediaId && episodeId && (
+                <DownloadButton
+                  sources={sources}
+                  mediaId={mediaId}
+                  episodeId={episodeId}
+                  animeTitle={animeTitle}
+                  episodeNumber={currentEpisode}
+                />
+              )}
+
+              {/* Picture-in-Picture */}
+              {mediaId && episodeId && (
+                <button
+                  className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                  onClick={handleEnterPip}
+                  title="Mini Player"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <rect x="12" y="10" width="9" height="6" rx="1" fill="currentColor" fillOpacity="0.4" stroke="none" />
+                  </svg>
+                </button>
+              )}
+
+              {/* Next episode */}
+              {hasNextEpisode && (
+                <button
+                  className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                  onClick={() => onNextEpisode?.()}
+                  title="Next Episode (N)"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="5 4 15 12 5 20 5 4" fill="currentColor" opacity="0.85" /><line x1="19" y1="5" x2="19" y2="19" />
+                  </svg>
+                </button>
+              )}
+
+              {/* Fullscreen */}
+              <button
+                className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                onClick={toggleFullscreen}
+                title="Fullscreen (F)"
+              >
+                {isFullscreen ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                  </svg>
                 )}
+              </button>
+
+              {/* Separator */}
+              {!mobile && episodes && episodes.length > 0 && (
+                <div className="w-px h-[18px] mx-1 flex-shrink-0" style={{ background: 'rgba(255, 255, 255, 0.12)' }} />
+              )}
+
+              {/* Sidebar toggle (desktop only) */}
+              {!mobile && episodes && episodes.length > 0 && (
+                <button
+                  className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
+                  onClick={() => setShowSidebar(!showSidebar)}
+                  title="Episodes"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Keyboard Shortcuts Hint ───────────────────────────── */}
+        {showShortcutsHint && !mobile && (
+          <div
+            className="absolute bottom-[18px] left-1/2 z-10 flex items-center gap-4 py-[6px] px-4 rounded-full pointer-events-none transition-opacity duration-300"
+            style={{
+              transform: 'translateX(-50%)',
+              background: 'rgba(0, 0, 0, 0.7)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+            }}
+          >
+            {[
+              { key: 'K', label: 'Play' },
+              { key: 'F', label: 'Fullscreen' },
+              { key: 'M', label: 'Mute' },
+              { keys: ['\u2190', '\u2192'], label: 'Seek' },
+              { key: 'N', label: 'Next' },
+              { key: 'I', label: 'Mini' },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-[5px] text-[0.65rem] text-white/35 whitespace-nowrap">
+                {'keys' in item ? (
+                  item.keys!.map((k, j) => (
+                    <span key={j} className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[3px] text-[0.6rem] text-white/50" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', fontFamily: "'JetBrains Mono', monospace" }}>{k}</span>
+                  ))
+                ) : (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[3px] text-[0.6rem] text-white/50" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', fontFamily: "'JetBrains Mono', monospace" }}>{item.key}</span>
+                )}
+                <span>{item.label}</span>
               </div>
-            )}
+            ))}
+          </div>
+        )}
+
+        {/* ── Skip Amount Indicator ─────────────────────────────── */}
+        {skipAmount && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+            <div className={`flex flex-col items-center ${skipAmount.direction === 'forward' ? 'translate-x-24' : '-translate-x-24'}`}>
+              <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
+                <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                  {skipAmount.direction === 'backward'
+                    ? <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                    : <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                  }
+                </svg>
+              </div>
+              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">{skipAmount.amount}s</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Volume Indicator Overlay ──────────────────────────── */}
+        {volumeIndicator && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+            <div className="flex flex-col items-center">
+              <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
+                <div className="flex items-center gap-3">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {volumeIndicator.level === 0 ? (
+                      <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>
+                    ) : (
+                      <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></>
+                    )}
+                  </svg>
+                  <div className="w-24 h-2 bg-white/30 rounded-full overflow-hidden">
+                    <div className="h-full bg-white rounded-full transition-all duration-100" style={{ width: `${volumeIndicator.level * 100}%` }} />
+                  </div>
+                </div>
+              </div>
+              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">{Math.round(volumeIndicator.level * 100)}%</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Loading/Buffering/Seeking Overlay ─────────────────── */}
+        {(loading || buffering || isSeeking) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 pointer-events-none z-[15]">
+            <Loader2 className="w-16 h-16 animate-spin text-[#e50914]" />
+            <p className="mt-4 text-sm text-white/80">
+              {loading ? 'Loading video...' : isSeeking ? 'Seeking...' : 'Buffering...'}
+            </p>
+          </div>
+        )}
+
+        {/* ── Error Overlay ──────────────────────────────────────── */}
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 text-white p-8 z-[15]">
+            <svg className="w-16 h-16 mb-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <h3 className="text-xl font-bold mb-2">Playback Error</h3>
+            <p className="text-white/60">{error}</p>
+          </div>
+        )}
+
+        {/* ── Episode End Overlay ─────────────────────────────── */}
+        {showNextEpisodeOverlay && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center gap-6">
+              {/* Play Again button */}
+              <button
+                onClick={handlePlayAgain}
+                className="flex items-center gap-3 text-white font-medium py-3 px-6 rounded-full transition-all duration-150 hover:bg-white/[0.12]"
+                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+              >
+                <RotateCcw size={20} />
+                Play Again
+              </button>
+
+              {/* Next Episode section */}
+              {playerSettings.autoPlayNext && hasNextEpisode && (
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-sm text-white/70">
+                    Episode {episodes?.[currentEpisodeIndex + 1]?.number ?? (currentEpisode != null ? currentEpisode + 1 : '?')} in {countdown}s
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => { setShowNextEpisodeOverlay(false); onNextEpisode?.() }}
+                      className="flex items-center gap-2 text-white font-semibold py-3 px-6 rounded-full transition-all duration-150"
+                      style={{ background: 'linear-gradient(135deg, #e50914, #b20710)', boxShadow: '0 0 20px rgba(229,9,20,0.3)' }}
+                    >
+                      <SkipForward size={20} />
+                      Play Next Episode
+                    </button>
+                    <button
+                      onClick={() => setShowNextEpisodeOverlay(false)}
+                      className="py-3 px-4 text-white rounded-full transition-all duration-150 hover:bg-white/[0.12] text-sm"
+                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {(!playerSettings.autoPlayNext || !hasNextEpisode) && (
+                <button
+                  onClick={() => setShowNextEpisodeOverlay(false)}
+                  className="text-sm text-white/50 hover:text-white/80 transition-colors"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Episode Sidebar ──────────────────────────────────────── */}
+      {!mobile && episodes && episodes.length > 0 && (
+        <div
+          className="flex-shrink-0 flex flex-col overflow-hidden transition-[width] duration-300"
+          style={{
+            width: showSidebar ? '320px' : '0px',
+            background: 'rgba(12, 12, 12, 0.97)',
+            borderLeft: '1px solid rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between flex-shrink-0 min-w-[320px]" style={{ padding: '18px 16px 14px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <span className="font-display font-bold text-base text-white/95">Episodes</span>
+            <button
+              className="flex items-center justify-center w-[30px] h-[30px] rounded-full transition-all duration-[120ms] hover:bg-white/[0.12]"
+              style={{ background: 'rgba(255, 255, 255, 0.06)', border: 'none', color: 'rgba(255, 255, 255, 0.5)' }}
+              onClick={() => setShowSidebar(false)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </div>
 
-          {/* Video Fit Mode */}
-          <button
-            onClick={cycleVideoFit}
-            className={`flex items-center justify-center hover:bg-white/20 rounded-full transition-colors font-bold tracking-wide ${
-              mobile ? 'px-2 h-8 text-[10px]' : 'px-2.5 h-10 text-xs'
-            }`}
-            title={`Video fit: ${fitModeLabel}`}
-          >
-            {fitModeLabel}
-          </button>
+          {/* Season tabs (only if >26 episodes) */}
+          {seasonCount > 1 && (
+            <div className="flex gap-1 flex-shrink-0 min-w-[320px] overflow-x-auto" style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', scrollbarWidth: 'none' }}>
+              {Array.from({ length: seasonCount }, (_, i) => (
+                <button
+                  key={i}
+                  className={`py-[5px] px-[14px] rounded-full whitespace-nowrap transition-all duration-[120ms] text-xs font-semibold ${
+                    activeSeason === i ? '' : 'hover:text-white hover:bg-white/[0.08]'
+                  }`}
+                  style={activeSeason === i
+                    ? { background: '#e50914', borderColor: '#e50914', color: 'white', border: '1px solid #e50914', boxShadow: '0 0 12px rgba(229, 9, 20, 0.3)' }
+                    : { background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.08)', color: 'rgba(255, 255, 255, 0.5)' }
+                  }
+                  onClick={() => setActiveSeason(i)}
+                >
+                  S{i + 1}
+                </button>
+              ))}
+            </div>
+          )}
 
+          {/* Episode list */}
+          <div className="flex-1 overflow-y-auto p-2 min-w-[320px]" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
+            {seasonEpisodes.map((ep) => {
+              const isActive = currentEpisode === ep.number
+              return (
+                <div
+                  key={ep.id}
+                  ref={isActive ? sidebarEpisodeRef : null}
+                  className={`flex items-center gap-[10px] rounded-lg cursor-pointer transition-all duration-[120ms] mb-[2px] ${
+                    isActive ? '' : 'hover:bg-white/[0.04]'
+                  }`}
+                  style={{
+                    padding: '8px',
+                    border: isActive ? '1px solid rgba(229, 9, 20, 0.25)' : '1px solid transparent',
+                    background: isActive ? 'rgba(229, 9, 20, 0.1)' : undefined,
+                  }}
+                  onClick={() => onEpisodeSelect?.(ep.id)}
+                >
+                  {/* Thumbnail */}
+                  <div className="w-[110px] h-[62px] rounded-md overflow-hidden flex-shrink-0 relative" style={{ background: '#1a1a1a' }}>
+                    {ep.thumbnail ? (
+                      <img src={ep.thumbnail} alt="" className="w-full h-full object-cover block" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">EP {ep.number}</div>
+                    )}
+                    {/* Now-playing bars */}
+                    {isActive && (
+                      <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0, 0, 0, 0.55)' }}>
+                        <div className="flex items-end gap-[2px] h-4">
+                          {[8, 14, 10, 6].map((h, i) => (
+                            <span
+                              key={i}
+                              className="block w-[3px] rounded-[1px]"
+                              style={{
+                                background: '#e50914',
+                                height: `${h}px`,
+                                animation: `barBounce 0.8s ease-in-out infinite`,
+                                animationDelay: `${i * 0.15}s`,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="mb-[2px] uppercase tracking-[0.05em]"
+                      style={{
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: '0.65rem',
+                        color: isActive ? '#e50914' : 'rgba(255, 255, 255, 0.35)',
+                      }}
+                    >
+                      Episode {ep.number}
+                    </div>
+                    <div
+                      className="font-semibold leading-[1.3] line-clamp-2"
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: '0.8125rem',
+                        color: 'rgba(255, 255, 255, 0.85)',
+                      }}
+                    >
+                      {ep.title || `Episode ${ep.number}`}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Global keyframe animation for now-playing bars */}
+      <style>{`
+        @keyframes barBounce {
+          0%, 100% { transform: scaleY(0.5); }
+          50% { transform: scaleY(1); }
+        }
+      `}</style>
     </div>
   )
 }

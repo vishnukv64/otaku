@@ -8,7 +8,7 @@ export function SettingSection({ title, description, children }: SettingSectionP
   return (
     <div className="mb-8">
       <div className="mb-4">
-        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] border-l-[3px] border-[var(--color-accent-primary)] pl-3">
           {title}
         </h2>
         {description && (

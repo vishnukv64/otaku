@@ -135,7 +135,7 @@ export function SchedulePage(): JSX.Element {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Calendar className="w-5 h-5 text-[#e50914]" />
-              <h1 className="text-xl font-bold text-white">Schedule</h1>
+              <h1 className="text-xl font-bold text-white border-l-[3px] border-[var(--color-accent-primary)] pl-3">Schedule</h1>
             </div>
             <div className="relative">
               <select
@@ -143,9 +143,9 @@ export function SchedulePage(): JSX.Element {
                 onChange={(e) => setFilterMode(e.target.value as FilterMode)}
                 className="appearance-none bg-[rgba(255,255,255,0.06)] text-white text-sm pl-3 pr-8 py-1.5 rounded-lg border border-[rgba(255,255,255,0.1)] cursor-pointer focus:outline-none focus:border-[#e50914]"
               >
-                <option value="all">All Anime</option>
-                <option value="library">My Library</option>
-                <option value="watching">Watching Only</option>
+                <option value="all" className="bg-[#1a1a1a] text-white">All Anime</option>
+                <option value="library" className="bg-[#1a1a1a] text-white">My Library</option>
+                <option value="watching" className="bg-[#1a1a1a] text-white">Watching Only</option>
               </select>
               <Filter className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[rgba(255,255,255,0.4)] pointer-events-none" />
             </div>

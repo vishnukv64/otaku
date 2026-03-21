@@ -213,6 +213,7 @@ fn jikan_episode_to_episode(anime_mal_id: i64, ep: &JikanEpisode) -> Episode {
         number: ep.mal_id as f32,
         title: ep.title.clone(),
         thumbnail: None,
+        aired: ep.aired.clone(),
     }
 }
 
@@ -379,6 +380,7 @@ pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
                     number: n as f32,
                     title: Some(format!("Episode {}", n)),
                     thumbnail: None,
+                    aired: None,
                 })
                 .collect();
         }
@@ -448,6 +450,7 @@ fn fill_synthetic_episodes(
             number: n as f32,
             title: Some(format!("Episode {}", n)),
             thumbnail: None,
+            aired: Some(ep_date.to_rfc3339()),
         });
     }
 }
@@ -567,7 +570,7 @@ pub fn genres_anime() -> Result<TagsResult, String> {
 pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResults, String> {
     let page_str = page.to_string();
     let path = "/schedules";
-    let mut params = vec![("page", page_str.as_str()), ("limit", "30")];
+    let mut params = vec![("page", page_str.as_str()), ("limit", "25")];
     let day_owned = day.map(|d| d.to_string());
     if let Some(ref d) = day_owned {
         params.push(("filter", d.as_str()));

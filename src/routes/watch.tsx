@@ -15,6 +15,7 @@ import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
 import { isAndroid } from '@/utils/platform'
+import { usePipStore } from '@/store/pipStore'
 
 interface WatchSearch {
   malId: string
@@ -46,6 +47,13 @@ function WatchPage() {
   const [allanimeId, setAllanimeId] = useState<string | null>(null)
   const shownResumeToastRef = useRef<string | null>(null)
   const shownOfflineToastRef = useRef<string | null>(null)
+  /** When expanding from PiP, skip the DB resume time (pip time takes priority) */
+  const pipResumeOverrideRef = useRef(false)
+
+  // Check if we're expanding from PiP mini player
+  const pipExpandTime = usePipStore((s) => s.expandTime)
+  const pipData = usePipStore((s) => s.data)
+  const clearPipExpandTime = usePipStore((s) => s.clearExpandTime)
 
   // Load video server info on mount
   useEffect(() => {
@@ -53,6 +61,17 @@ function WatchPage() {
       .then(setVideoServerInfo)
       .catch((err) => console.error('Failed to get video server info:', err))
   }, [])
+
+  // Consume PiP expand time: when returning from mini player, use its time position
+  useEffect(() => {
+    if (pipExpandTime !== null && pipData) {
+      setResumeTime(pipExpandTime)
+      pipResumeOverrideRef.current = true
+      // Suppress the resume toast since user is already aware they're resuming from PiP
+      shownResumeToastRef.current = pipData.episodeId
+      clearPipExpandTime()
+    }
+  }, [pipExpandTime, pipData, clearPipExpandTime])
 
   // Load anime details from Jikan API
   useEffect(() => {
@@ -268,8 +287,12 @@ function WatchPage() {
 
       let didComplete = false
       try {
-        // Step 1: Load watch progress FIRST
+        // Step 1: Load watch progress FIRST (skip if PiP already set the time)
         try {
+          if (pipResumeOverrideRef.current) {
+            // PiP expand already set the resume time — don't overwrite with DB value
+            pipResumeOverrideRef.current = false
+          } else {
           const progress = await getWatchProgress(currentEpisodeId)
 
           if (progress && progress.progress_seconds > 0) {
@@ -286,6 +309,7 @@ function WatchPage() {
           } else {
             setResumeTime(0)
           }
+          } // close else (pip override check)
         } catch {
           setResumeTime(0)
         }
@@ -518,52 +542,47 @@ function WatchPage() {
   }
 
   // Desktop / landscape fullscreen layout
+  // VideoPlayer handles its own top bar (back button, title) and episode sidebar
   return (
     <div className="fixed inset-0 bg-black z-50">
-      <div className="w-full h-full">
-        <div className="w-full h-full">
-          {loading && (
-            <div className="w-full h-full flex items-center justify-center bg-black">
-              <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
-            </div>
-          )}
-
-          {error && (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
-              <p className="text-lg font-semibold mb-2">Error Loading Video</p>
-              <p className="text-[var(--color-text-secondary)]">{error}</p>
-            </div>
-          )}
-
-          {!loading && !error && sources && sources.sources.length > 0 && (
-            <VideoPlayer
-              sources={sources.sources}
-              mediaId={malId}
-              episodeId={currentEpisodeId}
-              animeTitle={details?.title}
-              episodeTitle={currentEpisode?.title}
-              currentEpisode={currentEpisode?.number}
-              totalEpisodes={details?.episodes.length}
-              episodes={details?.episodes}
-              onEpisodeSelect={handleEpisodeSelect}
-              onNextEpisode={handleNextEpisode}
-              onPreviousEpisode={handlePreviousEpisode}
-              onGoBack={handleGoBack}
-              initialTime={resumeTime}
-              autoPlay
-            />
-          )}
-
-          {!loading && !error && sources && sources.sources.length === 0 && (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
-              <p className="text-lg font-semibold mb-2">No Video Sources Available</p>
-              <p className="text-[var(--color-text-secondary)]">
-                This episode does not have any available streaming sources.
-              </p>
-            </div>
-          )}
+      {loading && (
+        <div className="w-full h-full flex items-center justify-center">
+          <Loader2 className="w-12 h-12 animate-spin text-[#e50914]" />
         </div>
-      </div>
+      )}
+
+      {error && (
+        <div className="w-full h-full flex flex-col items-center justify-center text-white">
+          <p className="text-lg font-semibold mb-2">Error Loading Video</p>
+          <p className="text-white/60">{error}</p>
+        </div>
+      )}
+
+      {!loading && !error && sources && sources.sources.length > 0 && (
+        <VideoPlayer
+          sources={sources.sources}
+          mediaId={malId}
+          episodeId={currentEpisodeId}
+          animeTitle={details?.title}
+          episodeTitle={currentEpisode?.title}
+          currentEpisode={currentEpisode?.number}
+          totalEpisodes={details?.episodes.length}
+          episodes={details?.episodes}
+          onEpisodeSelect={handleEpisodeSelect}
+          onNextEpisode={handleNextEpisode}
+          onPreviousEpisode={handlePreviousEpisode}
+          onGoBack={handleGoBack}
+          initialTime={resumeTime}
+          autoPlay
+        />
+      )}
+
+      {!loading && !error && sources && sources.sources.length === 0 && (
+        <div className="w-full h-full flex flex-col items-center justify-center text-white">
+          <p className="text-lg font-semibold mb-2">No Video Sources Available</p>
+          <p className="text-white/60">This episode does not have any available streaming sources.</p>
+        </div>
+      )}
     </div>
   )
 }

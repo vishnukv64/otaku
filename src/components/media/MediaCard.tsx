@@ -86,198 +86,169 @@ export function MediaCard({ media, onClick, progress, status, rank }: MediaCardP
 
   return (
     <div className="relative w-full group/card">
-      {/* Invisible spacer that maintains grid position */}
-      <div className="w-full">
-        <div className="aspect-[2/3]" />
-        <div className="h-12" /> {/* Space for title */}
-      </div>
-
-      {/* Actual card - positioned absolute so it can scale without affecting layout */}
-      <div className="absolute inset-0 transition-all duration-300 ease-out origin-top group-hover/card:scale-110 group-hover/card:z-50">
-        <button
-          className="w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-md"
-          onClick={onClick}
+      <button
+        className="w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-[var(--radius-md)] transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02]"
+        onClick={onClick}
+        style={{
+          filter: 'drop-shadow(0 4px 24px rgba(0,0,0,0.5))',
+        }}
+      >
+        <div
+          className="relative w-full aspect-[2/3] rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-card)] transition-shadow duration-300 group-hover/card:shadow-[0_16px_60px_rgba(0,0,0,0.6),0_0_30px_rgba(229,9,20,0.25),0_0_0_1px_rgba(255,255,255,0.16)]"
         >
-          <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-[var(--color-bg-secondary)] shadow-lg group-hover/card:shadow-2xl group-hover/card:shadow-black/60 transition-shadow duration-300">
-            {/* Cover Image */}
-            {media.cover_url ? (
-              <img
-                src={media.cover_url}
-                alt={media.title}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-4xl">
-                📺
-              </div>
-            )}
-
-            {/* Status Badge - Top Right Corner (single badge with priority) */}
-            <div className="absolute top-1.5 right-1.5 pointer-events-auto">
-              {rightBadge === 'favorite' && (
-                <div
-                  className="p-1.5 bg-red-500/90 rounded-md shadow-lg"
-                  title="Favorite"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Heart size={14} className="text-white fill-white" />
-                </div>
-              )}
-
-              {rightBadge === 'watching' && (
-                <div
-                  className="px-2 py-1 bg-blue-500/90 text-white text-[10px] font-semibold rounded-md shadow-lg"
-                  title={status?.isWatching ? 'Currently Watching' : 'Currently Reading'}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {status?.isWatching ? 'Watching' : 'Reading'}
-                </div>
-              )}
-
-              {rightBadge === 'library' && status?.libraryStatus && (
-                <div
-                  className={`px-2 py-1 ${getStatusColor(status.libraryStatus)} text-white text-[10px] font-semibold rounded-md flex items-center gap-1 shadow-lg`}
-                  title={`In Library: ${getShortStatusLabel(status.libraryStatus)}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <BookmarkCheck size={10} />
-                  <span className="hidden sm:inline">{getShortStatusLabel(status.libraryStatus)}</span>
-                </div>
-              )}
-
-              {rightBadge === 'tracking' && (
-                <div
-                  className="p-1.5 bg-indigo-500/90 rounded-md shadow-lg"
-                  title="Tracking for new episodes"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Bell size={14} className="text-white" />
-                </div>
-              )}
+          {/* Cover Image */}
+          {media.cover_url ? (
+            <img
+              src={media.cover_url}
+              alt={media.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-[var(--color-panel)]">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-dim)" strokeWidth="1.5">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+                <polyline points="17 2 12 7 7 2" />
+              </svg>
             </div>
+          )}
 
-            {/* Progress Bar (only for partially watched, not for next episode) */}
-            {progress && !progress.isNextEpisode && progress.total > 0 && (
-              <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60">
-                <div
-                  className="h-full bg-[var(--color-accent-primary)]"
-                  style={{ width: `${(progress.current / progress.total) * 100}%` }}
-                />
-              </div>
-            )}
-
-            {/* NEW Episode Badge (takes priority over latest episode) */}
-            {showNewBadge && (
+          {/* Status Badge - Top Right Corner */}
+          <div className="absolute top-1.5 right-1.5 pointer-events-auto">
+            {rightBadge === 'favorite' && (
               <div
-                className="absolute top-1.5 left-1.5 px-2 py-1 bg-emerald-500/20 border border-emerald-500/60 text-emerald-300 text-[10px] font-semibold rounded-md backdrop-blur-sm flex items-center gap-1"
-                title={`New Episode ${media.latest_episode} Available!`}
+                className="p-1.5 bg-red-500/90 rounded-md shadow-lg backdrop-blur-sm"
+                title="Favorite"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
               >
-                <span className="w-1 h-1 bg-emerald-400 rounded-full" />
-                <span>NEW</span>
+                <Heart size={14} className="text-white fill-white" />
               </div>
             )}
 
-            {/* Latest Episode Badge (for airing anime) */}
-            {showLatestEpisode && (
+            {rightBadge === 'watching' && (
               <div
-                className="absolute top-1.5 left-1.5 px-2 py-1 bg-emerald-500/90 text-white text-[10px] font-semibold rounded-md shadow-lg"
-                title={`Latest: Episode ${media.latest_episode}`}
+                className="px-2 py-1 bg-blue-500/90 text-white text-[10px] font-semibold rounded-md shadow-lg backdrop-blur-sm"
+                title={status?.isWatching ? 'Currently Watching' : 'Currently Reading'}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
               >
-                EP {media.latest_episode} • {formatEpisodeDate(media.latest_episode_date!)}
+                {status?.isWatching ? 'Watching' : 'Reading'}
               </div>
             )}
 
-            {/* Continue Watching Badge */}
-            {progress && (
-              <>
-                <div className={`absolute top-2 left-2 px-2 py-1 text-white text-xs font-semibold rounded ${
-                  progress.isNextEpisode ? 'bg-green-500' : 'bg-[var(--color-accent-primary)]'
-                }`}>
-                  {progress.isNextEpisode ? `Next: EP ${progress.episodeNumber}` : `EP ${progress.episodeNumber}`}
-                </div>
-                {/* Resume/Play indicator on hover */}
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity bg-black/50">
-                  <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-                    progress.isNextEpisode ? 'bg-green-500' : 'bg-[var(--color-accent-primary)]'
-                  }`}>
-                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    <span className="text-sm font-bold">{progress.isNextEpisode ? 'PLAY NEXT' : 'RESUME'}</span>
-                  </div>
-                </div>
-              </>
+            {rightBadge === 'library' && status?.libraryStatus && (
+              <div
+                className={`px-2 py-1 ${getStatusColor(status.libraryStatus)} text-white text-[10px] font-semibold rounded-md flex items-center gap-1 shadow-lg backdrop-blur-sm`}
+                title={`In Library: ${getShortStatusLabel(status.libraryStatus)}`}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <BookmarkCheck size={10} />
+                <span className="hidden sm:inline">{getShortStatusLabel(status.libraryStatus)}</span>
+              </div>
             )}
 
-            {/* Hover Overlay with Additional Info */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-300">
-              <div className="absolute bottom-0 left-0 right-0 p-4">
-                {/* Metadata on hover */}
-                <div className="flex items-center gap-3 text-sm text-[var(--color-text-secondary)] mb-2">
-                  {media.rating && (
-                    <span className="flex items-center gap-1 text-yellow-400 font-semibold">
-                      ★ {media.rating.toFixed(1)}
-                    </span>
-                  )}
-                  {media.rank && (
-                    <>
-                      {media.rating && <span>•</span>}
-                      <span className="text-blue-300 font-semibold">#{media.rank}</span>
-                    </>
-                  )}
-                  {media.year && (
-                    <>
-                      {(media.rating || media.rank) && <span>•</span>}
-                      <span>{media.year}</span>
-                    </>
-                  )}
-                  {media.status && media.status.toLowerCase() !== 'unknown' && (
-                    <>
-                      <span>•</span>
-                      <span className="capitalize">{media.status.toLowerCase()}</span>
-                    </>
-                  )}
-                </div>
-
-                {/* Description (if available) */}
-                {media.description && (
-                  <p className="text-xs text-[var(--color-text-secondary)] line-clamp-3">
-                    {media.description}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Rank Number Overlay (for Top 10 carousel) */}
-            {rank != null && (
-              <div className="absolute -left-2 bottom-0 z-[5] pointer-events-none select-none">
-                <span
-                  className="text-[80px] font-black leading-none"
-                  style={{
-                    color: 'transparent',
-                    WebkitTextStroke: '2px rgba(255,255,255,0.7)',
-                    textShadow: '0 0 20px rgba(0,0,0,0.8)',
-                  }}
-                >
-                  {rank}
-                </span>
+            {rightBadge === 'tracking' && (
+              <div
+                className="p-1.5 bg-indigo-500/90 rounded-md shadow-lg backdrop-blur-sm"
+                title="Tracking for new episodes"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Bell size={14} className="text-white" />
               </div>
             )}
           </div>
 
-          {/* Title - Always Visible Below Image */}
-          <div className="mt-2 px-1">
-            <h3 className="text-sm font-semibold text-white line-clamp-2 leading-tight">
+          {/* NEW Episode Badge */}
+          {showNewBadge && (
+            <div
+              className="absolute top-1.5 left-1.5 px-2 py-1 bg-emerald-500/20 border border-emerald-500/60 text-emerald-300 text-[10px] font-semibold rounded-md backdrop-blur-sm flex items-center gap-1"
+              title={`New Episode ${media.latest_episode} Available!`}
+            >
+              <span className="w-1 h-1 bg-emerald-400 rounded-full" />
+              <span>NEW</span>
+            </div>
+          )}
+
+          {/* Latest Episode Badge (for airing anime) */}
+          {showLatestEpisode && (
+            <div
+              className="absolute top-1.5 left-1.5 px-2 py-1 bg-emerald-500/90 text-white text-[10px] font-semibold rounded-md shadow-lg backdrop-blur-sm"
+              title={`Latest: Episode ${media.latest_episode}`}
+            >
+              EP {media.latest_episode} • {formatEpisodeDate(media.latest_episode_date!)}
+            </div>
+          )}
+
+          {/* Continue Watching Badge */}
+          {progress && (
+            <div className={`absolute top-2 left-2 px-2 py-1 text-white text-xs font-semibold rounded backdrop-blur-sm ${
+              progress.isNextEpisode ? 'bg-green-500/90' : 'bg-[var(--color-accent-primary)]/90'
+            }`}>
+              {progress.isNextEpisode ? `Next: EP ${progress.episodeNumber}` : `EP ${progress.episodeNumber}`}
+            </div>
+          )}
+
+          {/* Circular Play Button Overlay (on hover) */}
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-200 bg-[rgba(20,20,20,0.5)]">
+            <div className="w-[42px] h-[42px] rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center shadow-[0_0_30px_rgba(229,9,20,0.45)] transition-transform duration-200 hover:scale-110">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            </div>
+          </div>
+
+          {/* Bottom Gradient Overlay with Title & Score */}
+          <div className="absolute bottom-0 left-0 right-0 p-3 pt-10 bg-gradient-to-t from-[rgba(20,20,20,0.98)] via-[rgba(20,20,20,0.7)] to-transparent pointer-events-none">
+            <h3 className="text-sm font-semibold font-display text-white line-clamp-2 leading-tight mb-1.5">
               {media.title}
             </h3>
+            <div className="flex items-center gap-2">
+              {media.rating != null && media.rating > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-semibold font-mono text-[var(--color-gold)] bg-[rgba(245,197,24,0.08)] border border-[rgba(245,197,24,0.2)]">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--color-gold)" stroke="none">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  {media.rating.toFixed(1)}
+                </span>
+              )}
+              {media.media_type && (
+                <span className="text-[0.7rem] text-[var(--color-text-muted)] uppercase">
+                  {media.media_type === 'anime' ? 'TV' : media.media_type}
+                </span>
+              )}
+            </div>
           </div>
-        </button>
-      </div>
+
+          {/* Progress Bar */}
+          {progress && !progress.isNextEpisode && progress.total > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/60 z-[2]">
+              <div
+                className="h-full bg-[var(--color-accent-primary)]"
+                style={{ width: `${(progress.current / progress.total) * 100}%` }}
+              />
+            </div>
+          )}
+
+          {/* Rank Number Overlay (for Top 10 carousel) */}
+          {rank != null && (
+            <div className="absolute -left-2 bottom-0 z-[5] pointer-events-none select-none">
+              <span
+                className="text-[80px] font-extrabold font-display leading-none"
+                style={{
+                  color: 'transparent',
+                  WebkitTextStroke: '2px rgba(255,255,255,0.7)',
+                  textShadow: '0 0 20px rgba(0,0,0,0.8)',
+                }}
+              >
+                {rank}
+              </span>
+            </div>
+          )}
+        </div>
+      </button>
     </div>
   )
 }
@@ -288,17 +259,13 @@ export function MediaCard({ media, onClick, progress, status, rank }: MediaCardP
 export function MediaCardSkeleton() {
   return (
     <div className="relative w-full">
-      <div className="w-full">
-        <div className="aspect-[2/3] rounded-md bg-[var(--color-bg-secondary)]">
-          <div className="absolute inset-0 shimmer-bg rounded-md" />
+      <div className="aspect-[2/3] rounded-[var(--radius-md)] bg-[var(--color-card)] overflow-hidden">
+        <div className="w-full h-full shimmer-bg" />
+        {/* Title skeleton in overlay position */}
+        <div className="absolute bottom-0 left-0 right-0 p-3 pt-10 bg-gradient-to-t from-[rgba(20,20,20,0.98)] to-transparent">
+          <div className="h-3.5 bg-[var(--color-surface)] rounded w-3/4 mb-2" />
+          <div className="h-3 bg-[var(--color-surface)] rounded w-1/3" />
         </div>
-        <div className="h-12" />
-      </div>
-
-      {/* Title skeleton */}
-      <div className="absolute bottom-0 left-0 right-0 px-1 space-y-2">
-        <div className="h-3 bg-[var(--color-bg-secondary)] rounded shimmer-bg w-full" />
-        <div className="h-3 bg-[var(--color-bg-secondary)] rounded shimmer-bg w-2/3" />
       </div>
     </div>
   )

@@ -63,6 +63,8 @@ export interface Episode {
   number: number
   title?: string
   thumbnail?: string
+  /** ISO 8601 air date. If in the future, the episode hasn't aired yet. */
+  aired?: string
 }
 
 export interface MediaDetails {

@@ -18,6 +18,7 @@ import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import type { ChapterImage, Chapter } from '@/types/extension'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
 import { useMobileLayout } from '@/hooks/useMobileLayout'
+import { preloadImage, clearProxyImageCache } from '@/utils/proxyImageCache'
 
 import { PageView } from './PageView'
 import { VerticalScrollView } from './VerticalScrollView'
@@ -75,10 +76,9 @@ interface MangaReaderProps {
   images: ChapterImage[]
   mangaId?: string
   chapterId?: string
-  _mangaTitle?: string // For display purposes (future use)
-  _chapterTitle?: string // For display purposes (future use)
+  mangaTitle?: string
+  chapterTitle?: string
   currentChapter?: number
-  _totalChapters?: number
   hasNextChapter?: boolean
   hasPreviousChapter?: boolean
   chapters?: Chapter[]
@@ -94,8 +94,9 @@ export function MangaReader({
   images,
   mangaId,
   chapterId,
+  mangaTitle,
+  chapterTitle,
   currentChapter,
-  // _totalChapters - intentionally unused, kept for API compatibility
   hasNextChapter = false,
   hasPreviousChapter = false,
   chapters = [],
@@ -149,6 +150,7 @@ export function MangaReader({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chapterListOpen, setChapterListOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isBookmarked, setIsBookmarked] = useState(false)
 
   // Check if we can navigate to adjacent chapters (use props passed from parent)
   const canGoToPreviousChapter = !!(onPreviousChapter && hasPreviousChapter)
@@ -275,10 +277,30 @@ export function MangaReader({
   // Check if current mode is vertical scroll (webtoon or vertical)
   const isVerticalScrollMode = effectiveReadingMode === 'vertical' || effectiveReadingMode === 'webtoon'
 
-  // Note: Image preloading for single/double page modes is handled by the
-  // useProxiedImage hook in each component. The hook proxies remote images
-  // through the Rust backend (adding required Referer headers), so native
-  // browser preloading via `new Image()` would not work for remote URLs.
+  // Clear image preload cache when chapter changes
+  useEffect(() => {
+    clearProxyImageCache()
+  }, [chapterId])
+
+  // Preload upcoming pages ahead of current position (all reading modes)
+  useEffect(() => {
+    if (images.length === 0) return
+
+    const pagesToPreload: string[] = []
+    const count = settings.preloadPages
+
+    for (let i = 1; i <= count; i++) {
+      const targetPage = currentPage + i
+      const img = images.find(im => im.page === targetPage) || images[targetPage - 1]
+      if (img?.url) pagesToPreload.push(img.url)
+    }
+
+    // Fire-and-forget preload
+    console.log(`[MangaReader] preloading ${pagesToPreload.length} pages ahead of page ${currentPage}`)
+    pagesToPreload.forEach(url => {
+      preloadImage(url).catch(() => {})
+    })
+  }, [currentPage, images, settings.preloadPages])
 
   // Keyboard navigation
   useEffect(() => {
@@ -584,32 +606,38 @@ export function MangaReader({
       {renderContent()}
 
       {/* Controls overlay */}
-      <ReaderControls
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={setCurrentPage}
-        onPreviousPage={previousPage}
-        onNextPage={nextPage}
-        currentChapterNumber={currentChapter}
-        hasNextChapter={hasNextChapter}
-        hasPreviousChapter={hasPreviousChapter}
-        onNextChapter={() => onNextChapter?.()}
-        onPreviousChapter={() => onPreviousChapter?.()}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        onOpenSettings={() => {
-          setSettingsOpen(true)
-          setShowControls(true)
-        }}
-        onOpenChapterList={() => {
-          setChapterListOpen(true)
-          setShowControls(true)
-        }}
-        onGoBack={() => onGoBack?.()}
-        readingMode={settings.readingMode}
-        readingDirection={settings.readingDirection}
-        showControls={showControls}
-      />
+      {showControls && (
+        <ReaderControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          onPreviousPage={previousPage}
+          onNextPage={nextPage}
+          currentChapterNumber={currentChapter}
+          chapterTitle={chapterTitle}
+          mangaTitle={mangaTitle}
+          hasNextChapter={hasNextChapter}
+          hasPreviousChapter={hasPreviousChapter}
+          onNextChapter={() => onNextChapter?.()}
+          onPreviousChapter={() => onPreviousChapter?.()}
+          isFullscreen={isFullscreen}
+          isBookmarked={isBookmarked}
+          onToggleFullscreen={toggleFullscreen}
+          onToggleBookmark={() => setIsBookmarked(!isBookmarked)}
+          onOpenSettings={() => {
+            setSettingsOpen(true)
+            setShowControls(true)
+          }}
+          onOpenChapterList={() => {
+            setChapterListOpen(true)
+            setShowControls(true)
+          }}
+          onGoBack={() => onGoBack?.()}
+          readingMode={settings.readingMode}
+          onReadingModeChange={(mode) => useReaderStore.getState().setReadingMode(mode)}
+          showControls={showControls}
+        />
+      )}
 
       {/* Settings panel */}
       <ReaderSettings
@@ -631,11 +659,11 @@ export function MangaReader({
         readChapters={readChapters}
       />
 
-      {/* Progress bar at very bottom */}
-      {settings.showProgressBar && !showControls && totalPages > 0 && (
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-muted/30">
+      {/* Scroll progress bar — fixed 2px accent bar at top (mock: always visible) */}
+      {totalPages > 0 && (
+        <div className="fixed top-0 left-0 right-0 h-[2px] z-[999]">
           <div
-            className="h-full bg-primary transition-all duration-200"
+            className="h-full bg-[#e50914] shadow-[0_0_8px_rgba(229,9,20,0.6)] transition-[width] duration-[60ms] linear"
             style={{ width: `${(currentPage / totalPages) * 100}%` }}
           />
         </div>

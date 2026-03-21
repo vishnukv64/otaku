@@ -9,7 +9,7 @@
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useCallback } from 'react'
-import { Loader2, AlertCircle, BookMarked, Download, Tv, BookOpen, CheckSquare, Square } from 'lucide-react'
+import { Loader2, AlertCircle, Download, Tv, BookOpen, CheckSquare, Square } from 'lucide-react'
 import { getLibraryWithMedia, loadExtension, getDownloadsWithMedia, getDownloadedMangaWithMedia, getLibraryTagsWithCounts, getLibraryByTag, type LibraryEntryWithMedia, type LibraryStatus, type DownloadWithMedia, type DownloadedMangaWithMedia, type LibraryTagWithCount } from '@/utils/tauri-commands'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from '@/components/media/MediaCard'
@@ -349,39 +349,41 @@ function LibraryScreen() {
     <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2 flex items-center gap-3">
-          <BookMarked className="w-8 h-8 text-[var(--color-accent-primary)]" />
+        <h1 className="text-[2.5rem] font-extrabold font-display mb-1.5 bg-gradient-to-br from-[var(--color-text-primary)] to-[var(--color-text-secondary)] bg-clip-text text-transparent">
           My Library
         </h1>
-        <p className="text-[var(--color-text-secondary)]">
-          Your collection organized by status
+        <p className="text-[var(--color-text-muted)] text-[0.9375rem]">
+          {library.length + downloadedAnime.length + downloadedManga.length} titles
         </p>
       </div>
 
       {/* Media Type Filter and Tag Filter */}
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setMediaFilter('anime')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-            mediaFilter === 'anime'
-              ? 'bg-[var(--color-accent-primary)] text-white'
-              : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
-          }`}
-        >
-          <Tv className="w-4 h-4" />
-          Anime
-        </button>
-        <button
-          onClick={() => setMediaFilter('manga')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-            mediaFilter === 'manga'
-              ? 'bg-[var(--color-accent-primary)] text-white'
-              : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          Manga
-        </button>
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        {/* Pill-group toggle matching mock: glass bg, compact, rounded */}
+        <div className="flex gap-1 p-1 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)]">
+          <button
+            onClick={() => setMediaFilter('anime')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-[var(--radius-md)] text-sm font-medium transition-all ${
+              mediaFilter === 'anime'
+                ? 'bg-[var(--color-accent-primary)] text-white shadow-[0_0_16px_var(--color-accent-glow)]'
+                : 'bg-transparent text-[var(--color-text-secondary)]'
+            }`}
+          >
+            <Tv className="w-3.5 h-3.5" />
+            Anime
+          </button>
+          <button
+            onClick={() => setMediaFilter('manga')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-[var(--radius-md)] text-sm font-medium transition-all ${
+              mediaFilter === 'manga'
+                ? 'bg-[var(--color-accent-primary)] text-white shadow-[0_0_16px_var(--color-accent-glow)]'
+                : 'bg-transparent text-[var(--color-text-secondary)]'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            Manga
+          </button>
+        </div>
 
         {/* Tag Filter Dropdown */}
         <div className="ml-auto">
@@ -401,21 +403,39 @@ function LibraryScreen() {
       </div>
 
       {/* Status Tabs */}
-      <div className="mb-8 border-b border-[var(--color-bg-hover)]">
-        <div className="flex gap-1 overflow-x-auto scrollbar-hide">
-          {currentTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-3 font-semibold whitespace-nowrap transition-all ${
-                activeTab === tab.id
-                  ? 'text-white border-b-2 border-[var(--color-accent-primary)]'
-                  : 'text-[var(--color-text-secondary)] hover:text-white hover:bg-[var(--color-bg-hover)] rounded-t-lg'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <div className="mb-6 border-b border-[var(--color-glass-border)]">
+        <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
+          {currentTabs.map((tab) => {
+            // Count items for this tab
+            const tabCount = tab.id === 'downloaded'
+              ? (mediaFilter === 'manga' ? downloadedManga.length : downloadedAnime.length)
+              : tab.id === 'all'
+                ? library.length
+                : library.filter(e => e.library_entry.status === tab.id).length
+
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-all border-b-2 -mb-px ${
+                  activeTab === tab.id
+                    ? 'text-[var(--color-accent-light)] border-[var(--color-accent-mid)]'
+                    : 'text-[var(--color-text-muted)] border-transparent hover:text-[var(--color-text-secondary)]'
+                }`}
+              >
+                {tab.label}
+                {!loading && tabCount > 0 && (
+                  <span className={`text-[0.7rem] px-1.5 py-0.5 rounded-full ${
+                    activeTab === tab.id
+                      ? 'bg-[rgba(229,9,20,0.15)] text-[var(--color-accent-light)]'
+                      : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)]'
+                  }`}>
+                    {tabCount}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -639,6 +659,21 @@ function LibraryScreen() {
                     media={media}
                     onClick={selectionMode ? undefined : () => handleMediaClick(entry)}
                   />
+                  {/* Status badge */}
+                  {!selectionMode && entry.library_entry.status && (
+                    <div className={`absolute top-2 left-2 z-[2] px-2 py-0.5 rounded-full text-[0.6rem] font-bold border ${
+                      entry.library_entry.status === 'watching' || entry.library_entry.status === 'reading'
+                        ? 'bg-[rgba(70,211,105,0.2)] text-[var(--color-green)] border-[rgba(70,211,105,0.3)]'
+                        : entry.library_entry.status === 'completed'
+                          ? 'bg-[rgba(229,9,20,0.15)] text-[var(--color-accent-light)] border-[rgba(229,9,20,0.3)]'
+                          : entry.library_entry.status === 'on_hold'
+                            ? 'bg-[rgba(245,197,24,0.15)] text-[var(--color-gold)] border-[rgba(245,197,24,0.3)]'
+                            : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] border-[var(--color-glass-border)]'
+                    }`}>
+                      {entry.library_entry.status === 'plan_to_watch' ? 'Plan' : entry.library_entry.status === 'plan_to_read' ? 'Plan' : entry.library_entry.status === 'on_hold' ? 'On Hold' : entry.library_entry.status.charAt(0).toUpperCase() + entry.library_entry.status.slice(1)}
+                    </div>
+                  )}
+                  {/* Progress bar placeholder - shown for active statuses */}
                   {/* Selection checkbox */}
                   {selectionMode && (
                     <div className="absolute top-2 left-2 z-10">

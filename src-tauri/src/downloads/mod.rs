@@ -424,6 +424,7 @@ impl DownloadManager {
                                     db_pool.as_ref().map(|p| p.as_ref()),
                                     &title,
                                     progress.episode_number,
+                                    &progress.media_id,
                                 ).await;
                             }
                         }
@@ -449,6 +450,7 @@ impl DownloadManager {
                                         &title,
                                         progress.episode_number,
                                         &e.to_string(),
+                                        &progress.media_id,
                                     ).await;
                                 }
                             } else if progress.status == DownloadStatus::Cancelled {

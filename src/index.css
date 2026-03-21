@@ -1,20 +1,74 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
 @theme {
-  /* Netflix-inspired color scheme */
+  /* ── Backgrounds — pure black, no blue tint ── */
   --color-bg-primary: #141414;
   --color-bg-secondary: #1a1a1a;
   --color-bg-hover: #2a2a2a;
+  --color-void: #141414;
+  --color-deep: #1a1a1a;
+  --color-panel: #222222;
+  --color-card: #1c1c1c;
+  --color-surface: #2a2a2a;
+  --color-overlay: rgba(0, 0, 0, 0.85);
+
+  /* ── Accent — Netflix Red ── */
   --color-accent-primary: #e50914;
   --color-accent-hover: #f40612;
+  --color-accent: #e50914;
+  --color-accent-mid: #ff1a1a;
+  --color-accent-light: #ff6b6b;
+  --color-accent-glow: rgba(229, 9, 20, 0.25);
+  --color-accent-glow-strong: rgba(229, 9, 20, 0.45);
+  --color-cta: #e50914;
+  --color-cta-hover: #ff0a16;
+  --color-cta-glow: rgba(229, 9, 20, 0.35);
+
+  /* ── Semantic colors ── */
+  --color-gold: #f5c518;
+  --color-gold-light: #ffd93d;
+  --color-green: #46d369;
+  --color-cyan: #22d3ee;
+  --color-info: #3b82f6;
+  --color-warn: #f59e0b;
+
+  /* ── Glass panels ── */
+  --color-glass-bg: rgba(255, 255, 255, 0.05);
+  --color-glass-bg-hover: rgba(255, 255, 255, 0.08);
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-glass-border-hover: rgba(255, 255, 255, 0.16);
+
+  /* ── Text — Netflix-warm whites ── */
   --color-text-primary: #ffffff;
+  --color-text: #e5e5e5;
   --color-text-secondary: #b3b3b3;
   --color-text-muted: #808080;
+  --color-text-dim: #404040;
 
-  /* Font family */
+  /* ── Font families ── */
   --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-family-display: 'Space Grotesk', 'Inter', sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
+  /* ── Shadows ── */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 40px rgba(229, 9, 20, 0.25);
+  --shadow-glow-strong: 0 0 60px rgba(229, 9, 20, 0.45);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
+
+  /* ── Border radii ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
+
+  /* ── Layout ── */
+  --nav-height: 68px;
   --bottom-tab-height: 64px;
 }
 
@@ -22,6 +76,16 @@
   :root {
     --sat: env(safe-area-inset-top, 0px);
     --sab: env(safe-area-inset-bottom, 0px);
+
+    /* Gradients (can't be in @theme — not simple values) */
+    --accent-gradient: linear-gradient(135deg, #e50914 0%, #b20710 50%, #8b0000 100%);
+    --accent-gradient-h: linear-gradient(90deg, #e50914, #ff1a1a, #ff4d4d);
+
+    /* Transitions */
+    --t-micro: 150ms ease-out;
+    --t-std: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    --t-page: 500ms cubic-bezier(0.16, 1, 0.3, 1);
+    --t-dramatic: 700ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   * {
@@ -30,12 +94,19 @@
     box-sizing: border-box;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     font-family: var(--font-family-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background-color: var(--color-bg-primary);
-    color: var(--color-text-primary);
+    color: var(--color-text);
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: hidden;
   }
 }
 
@@ -199,6 +270,44 @@
     margin: 1em 0;
   }
 
+  /* Detail page chip variants */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+  }
+
+  .chip-gold {
+    color: var(--color-gold);
+    border-color: rgba(245, 158, 11, 0.2);
+    background: rgba(245, 158, 11, 0.08);
+  }
+
+  .chip-cyan {
+    color: var(--color-cyan);
+    border-color: rgba(6, 182, 212, 0.2);
+    background: rgba(6, 182, 212, 0.08);
+  }
+
+  .chip-green {
+    color: var(--color-green);
+    border-color: rgba(16, 185, 129, 0.2);
+    background: rgba(16, 185, 129, 0.08);
+  }
+
+  .chip-accent {
+    color: var(--color-accent-light);
+    border-color: rgba(229, 9, 20, 0.2);
+    background: rgba(229, 9, 20, 0.08);
+  }
+
   /* Mobile: bottom padding for content above BottomTabBar */
   .pb-safe {
     padding-bottom: calc(var(--bottom-tab-height) + var(--sab));
@@ -277,5 +386,128 @@
 
   .animate-onboarding-glow-pulse {
     animation: onboarding-glow-pulse 2s ease-in-out infinite;
+  }
+
+  /* ── Abyss Design System Animations ── */
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+
+  @keyframes glow-pulse {
+    0%, 100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 0.8;
+    }
+  }
+
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes spotlight-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes spotlight-slide {
+    from {
+      opacity: 0;
+      transform: translateY(-8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes orb-float {
+    0%, 100% {
+      transform: translate(0, 0) scale(1);
+    }
+    33% {
+      transform: translate(30px, -20px) scale(1.05);
+    }
+    66% {
+      transform: translate(-20px, 15px) scale(0.95);
+    }
+  }
+
+  @keyframes dot-pulse {
+    0%, 100% {
+      opacity: 0.3;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.6;
+      transform: scale(1.5);
+    }
+  }
+
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  .animate-glow-pulse {
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+
+  .animate-scale-in {
+    animation: scale-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .animate-spotlight-fade {
+    animation: spotlight-fade 0.2s ease-out forwards;
+  }
+
+  .animate-spotlight-slide {
+    animation: spotlight-slide 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* ── Glass Morphism Utilities ── */
+  .glass {
+    background: var(--color-glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-glass-border);
+  }
+
+  .glass:hover {
+    background: var(--color-glass-bg-hover);
+    border-color: var(--color-glass-border-hover);
+  }
+
+  .glass-panel {
+    background: var(--color-glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* ── Font Display Utility ── */
+  .font-display {
+    font-family: var(--font-family-display);
+  }
+
+  .font-mono-code {
+    font-family: var(--font-family-mono);
   }
 }

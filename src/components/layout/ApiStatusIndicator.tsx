@@ -35,7 +35,7 @@ const initialEndpointStatus: EndpointStatus = {
   error: null,
 }
 
-export function ApiStatusIndicator() {
+export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
   const [status, setStatus] = useState<ApiStatusState>({
     anime: initialEndpointStatus,
     manga: initialEndpointStatus,
@@ -331,6 +331,68 @@ export function ApiStatusIndicator() {
       </div>
     </div>
   )
+
+  if (inline) {
+    return (
+      <div className="space-y-3">
+        {/* Header */}
+        <div className="flex items-center gap-2.5">
+          <span className={`w-2.5 h-2.5 rounded-full ${getStatusColor()}`} />
+          <span className="text-sm font-medium">{getStatusLabel()}</span>
+          <button
+            onClick={checkAllApis}
+            className="ml-auto text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {/* Anime endpoint */}
+        <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)]">
+          <div className="flex items-center gap-2.5">
+            {getStatusIcon(status.anime.status)}
+            <span className="text-sm">Anime API</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+            {status.anime.responseTime !== null && (
+              <span className="font-mono">{status.anime.responseTime}ms</span>
+            )}
+            {status.anime.resultCount !== null && status.anime.resultCount > 0 && (
+              <span className="text-green-500 font-mono">{status.anime.resultCount} results</span>
+            )}
+          </div>
+        </div>
+
+        {/* Manga endpoint */}
+        <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)]">
+          <div className="flex items-center gap-2.5">
+            {getStatusIcon(status.manga.status)}
+            <span className="text-sm">Manga API</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+            {status.manga.responseTime !== null && (
+              <span className="font-mono">{status.manga.responseTime}ms</span>
+            )}
+            {status.manga.resultCount !== null && status.manga.resultCount > 0 && (
+              <span className="text-green-500 font-mono">{status.manga.resultCount} results</span>
+            )}
+          </div>
+        </div>
+
+        {/* Error message */}
+        {(status.anime.error || status.manga.error) && (
+          <div className="text-xs text-red-400 px-1">
+            {status.anime.error || status.manga.error}
+          </div>
+        )}
+
+        {/* Last checked */}
+        <div className="text-[11px] text-[var(--color-text-muted)] px-1">
+          Last checked: {formatTime(status.anime.lastChecked || status.manga.lastChecked)}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>

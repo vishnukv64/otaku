@@ -6,12 +6,11 @@
  */
 
 import { useEffect, useState, useRef } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, Link } from '@tanstack/react-router'
 import { Play, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
 import { getContinueWatchingWithDetails, removeFromContinueWatching, loadExtension, type ContinueWatchingEntry } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
-import { MediaCard } from './MediaCard'
 import { MediaDetailModal } from './MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
@@ -126,9 +125,8 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
 
   if (loading) {
     return (
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-          <Play className="w-6 h-6 text-[var(--color-accent-primary)]" fill="currentColor" />
+      <div className="mb-10">
+        <h2 className="text-xl font-bold font-display mb-4 flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
           Continue Watching
         </h2>
         <div className="flex items-center justify-center py-12">
@@ -143,11 +141,19 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   }
 
   return (
-    <div className="mb-8 overflow-visible">
-      <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-        <Play className="w-6 h-6 text-[var(--color-accent-primary)]" fill="currentColor" />
-        Continue Watching
-      </h2>
+    <div className="mb-10 overflow-visible">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">
+          Continue Watching
+        </h2>
+        <Link
+          to="/library"
+          className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+        >
+          See all
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+        </Link>
+      </div>
 
       {/* Carousel Container */}
       <div className="relative group/carousel overflow-visible">
@@ -155,10 +161,10 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
         {canScrollLeft && (
           <button
             onClick={() => scroll('left')}
-            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-black/80 hover:bg-black rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/carousel:opacity-100 transition-opacity -ml-2"
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 glass rounded-full flex items-center justify-center shadow-[var(--shadow-md)] opacity-0 group-hover/carousel:opacity-100 transition-opacity -ml-2"
             aria-label="Scroll left"
           >
-            <ChevronLeft className="w-6 h-6" />
+            <ChevronLeft className="w-5 h-5" />
           </button>
         )}
 
@@ -166,10 +172,10 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
         {canScrollRight && (
           <button
             onClick={() => scroll('right')}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-black/80 hover:bg-black rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/carousel:opacity-100 transition-opacity -mr-2"
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 glass rounded-full flex items-center justify-center shadow-[var(--shadow-md)] opacity-0 group-hover/carousel:opacity-100 transition-opacity -mr-2"
             aria-label="Scroll right"
           >
-            <ChevronRight className="w-6 h-6" />
+            <ChevronRight className="w-5 h-5" />
           </button>
         )}
 
@@ -183,7 +189,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
           }}
         >
           {continueWatching.map((entry) => {
-            // Convert MediaEntry to SearchResult format for MediaCard
+            // Convert MediaEntry to SearchResult format
             const media: SearchResult = {
               id: entry.media.id,
               title: entry.media.title,
@@ -194,33 +200,71 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
               status: entry.media.status,
             }
 
+            const totalEpisodes = entry.media.episode_count
+            const progressPercent = entry.duration ? (entry.progress_seconds / entry.duration) * 100 : 0
+
             return (
-              <div key={entry.media.id} className="flex-shrink-0 w-[180px] relative group/card">
-                <MediaCard
-                  media={media}
+              <div key={entry.media.id} className="flex-shrink-0 w-[240px] group/card relative">
+                <button
                   onClick={() => handleContinueWatching(entry)}
-                  progress={entry.completed
-                    ? {
-                        // Show next episode info for completed entries
-                        current: 0,
-                        total: 0,
-                        episodeNumber: entry.episode_number + 1,
-                        isNextEpisode: true,
-                      }
-                    : {
-                        current: entry.progress_seconds,
-                        total: entry.duration || 0,
-                        episodeNumber: entry.episode_number,
-                      }
-                  }
-                />
+                  className="w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-[var(--radius-md)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.6),0_0_20px_var(--color-accent-glow)]"
+                >
+                  {/* Card container */}
+                  <div className="rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-card)] shadow-[var(--shadow-card)]">
+                    {/* 16:9 Thumbnail */}
+                    <div className="relative w-full h-[135px] bg-[var(--color-panel)]">
+                      {media.cover_url ? (
+                        <img
+                          src={media.cover_url}
+                          alt={media.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Play size={24} className="text-[var(--color-text-dim)]" />
+                        </div>
+                      )}
+
+                      {/* Hover play overlay */}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-200 bg-[rgba(20,20,20,0.5)]">
+                        <div className="w-[42px] h-[42px] rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center shadow-[0_0_30px_rgba(229,9,20,0.45)]">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card info panel */}
+                    <div className="px-3 py-2.5 pb-3">
+                      <h3 className="text-[0.875rem] font-semibold font-display text-white truncate mb-1">
+                        {media.title}
+                      </h3>
+                      <p className="text-xs text-[var(--color-text-muted)] mb-2">
+                        {entry.completed
+                          ? `Next: EP ${entry.episode_number + 1}`
+                          : `EP ${entry.episode_number}${totalEpisodes ? ` of ${totalEpisodes}` : ''}`
+                        }
+                      </p>
+                      {/* Progress bar inside info panel */}
+                      {!entry.completed && entry.duration != null && entry.duration > 0 && (
+                        <div className="h-[3px] rounded-full bg-[var(--color-glass-border)] overflow-hidden">
+                          <div
+                            className="h-full rounded-full shadow-[0_0_8px_var(--color-accent-glow)]"
+                            style={{ width: `${progressPercent}%`, background: 'var(--accent-gradient-h)' }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
                 {/* Info button */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedMedia(media)
                   }}
-                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-[var(--color-accent-primary)] text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                   title="View Details"
                 >
                   <Info className="w-4 h-4" />
@@ -228,7 +272,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full bg-black/70 hover:bg-red-600 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                   title="Remove from Continue Watching"
                 >
                   <X className="w-4 h-4" />

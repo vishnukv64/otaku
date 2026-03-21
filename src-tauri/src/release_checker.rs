@@ -91,6 +91,7 @@ pub struct ReleaseCheckResult {
     pub new_releases: i32,
     pub extension_id: String,
     pub detection_signal: String,  // "number", "id", "count"
+    pub cover_url: Option<String>,
 }
 
 /// Progress update during release checking
@@ -167,6 +168,7 @@ struct EligibleMedia {
     #[allow(dead_code)]
     consecutive_failures: i32,
     user_notified_up_to: Option<f32>,
+    cover_url: Option<String>,
 }
 
 /// Extracted episode info for comparison
@@ -565,7 +567,8 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             rt.last_known_latest_id,
             COALESCE(rt.normalized_status, 'unknown') as normalized_status,
             COALESCE(rt.consecutive_failures, 0) as consecutive_failures,
-            rt.user_notified_up_to
+            rt.user_notified_up_to,
+            m.cover_url
         FROM media m
         INNER JOIN library l ON m.id = l.media_id
         LEFT JOIN release_tracking_v2 rt ON m.id = rt.media_id
@@ -602,6 +605,7 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             normalized_status: NormalizedStatus::from_str(&status_str),
             consecutive_failures: row.try_get("consecutive_failures")?,
             user_notified_up_to: row.try_get("user_notified_up_to")?,
+            cover_url: row.try_get("cover_url")?,
         });
     }
 
@@ -912,6 +916,7 @@ async fn check_single_media(
                 new_releases: new_count,
                 extension_id: media.extension_id.clone(),
                 detection_signal: signal,
+                cover_url: media.cover_url.clone(),
             }));
         }
     } else {
@@ -1099,6 +1104,7 @@ async fn emit_release_notification(
             "media_id": result.media_id,
             "media_title": result.media_title,
             "media_type": result.media_type,
+            "thumbnail": result.cover_url,
             "new_releases": result.new_releases,
             "current_number": result.current_number,
             "current_count": result.current_count,

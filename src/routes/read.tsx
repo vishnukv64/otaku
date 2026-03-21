@@ -455,10 +455,9 @@ function ReadPage() {
             images={chapterImages.images}
             mangaId={trackingId}
             chapterId={currentChapterId}
-            _mangaTitle={details?.title}
-            _chapterTitle={chapterImages.title}
+            mangaTitle={details?.title}
+            chapterTitle={currentChapter?.title || chapterImages.title}
             currentChapter={currentChapter?.number}
-            _totalChapters={details?.chapters.length}
             hasNextChapter={currentChapterIndex >= 0 && currentChapterIndex < (details?.chapters.length ?? 0) - 1}
             hasPreviousChapter={currentChapterIndex > 0}
             chapters={details?.chapters}

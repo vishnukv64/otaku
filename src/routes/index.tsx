@@ -5,9 +5,11 @@ import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { MobileHeroSection } from '@/components/media/MobileHeroSection'
 import { HeroSectionSkeleton } from '@/components/media/HeroSectionSkeleton'
+import { Top10Section } from '@/components/media/Top10Section'
 import { isMobile } from '@/utils/platform'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
+import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
@@ -87,7 +89,7 @@ function HomeScreen() {
         setFeaturedAnime(trending.data[nextIndex])
         return nextIndex
       })
-    }, 10000)
+    }, 5000)
 
     return () => clearInterval(interval)
   }, [trending.data])
@@ -125,15 +127,21 @@ function HomeScreen() {
 
   // Carousel sections config — maps hook results to titles
   const carousels = [
-    { title: 'Most Popular', hook: mostPopular },
-    { title: 'This Season', hook: thisSeason },
-    { title: 'Top Rated', hook: topRated },
-    { title: 'Upcoming', hook: upcoming },
+    { title: 'Most Popular', hook: mostPopular, seeAllHref: '/anime', seeAllText: 'Browse all' },
+    { title: 'This Season', hook: thisSeason, seeAllHref: '/anime' },
+    { title: 'Top Rated', hook: topRated, seeAllHref: '/anime' },
+    { title: 'Upcoming', hook: upcoming, seeAllHref: '/anime' },
   ]
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
-      <div className="px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto overflow-visible">
+    <div className="relative min-h-[calc(100vh-4rem)] pb-12 overflow-visible">
+      {/* Background Orbs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute rounded-full opacity-[0.12] animate-orb-float" style={{ width: 400, height: 400, background: '#e50914', filter: 'blur(80px)', top: '-10%', left: '-5%' }} />
+        <div className="absolute rounded-full opacity-[0.12] animate-orb-float" style={{ width: 300, height: 300, background: '#b20710', filter: 'blur(80px)', top: '40%', right: '-8%', animationDelay: '-3s' }} />
+        <div className="absolute rounded-full opacity-[0.12] animate-orb-float" style={{ width: 250, height: 250, background: '#8b0000', filter: 'blur(80px)', bottom: '-5%', left: '30%', animationDelay: '-5s' }} />
+      </div>
+      <div className="relative z-[1] px-4 sm:px-6 lg:px-8 3xl:px-12 pt-6 max-w-4k mx-auto overflow-visible">
         {/* Hero Section */}
         {featuredAnime ? (
           isMobile() ? (
@@ -165,29 +173,30 @@ function HomeScreen() {
         {/* Continue Watching Section */}
         <ContinueWatchingSection extensionId={allanimeExtensionId || undefined} />
 
-        {/* Top 10 Anime */}
-        {trending.data.length >= 10 && (
-          <MediaCarousel
-            title="Top 10 Anime"
-            items={trending.data.slice(0, 10)}
-            loading={false}
-            onItemClick={handleMediaClick}
-            showRank
-          />
+        {/* Continue Reading Section */}
+        {allanimeExtensionId && (
+          <ContinueReadingSection extensionId={allanimeExtensionId} />
         )}
 
+        {/* Top 10 Anime */}
+        <Top10Section
+          items={trending.data}
+          onItemClick={handleMediaClick}
+        />
+
         {/* Content Carousels */}
-        <div className="space-y-8 overflow-visible">
-          {carousels.map(({ title, hook }) => (
+        <div className="space-y-2 overflow-visible">
+          {carousels.map(({ title, hook, seeAllHref, seeAllText }) => (
             <MediaCarousel
               key={title}
               title={title}
               items={hook.data}
               loading={hook.loading}
               onItemClick={handleMediaClick}
+              seeAllHref={seeAllHref}
+              seeAllText={seeAllText}
             />
           ))}
-
         </div>
       </div>
 

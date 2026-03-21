@@ -107,6 +107,8 @@ pub struct Episode {
     pub number: f32,
     pub title: Option<String>,
     pub thumbnail: Option<String>,
+    /// ISO 8601 air date. If in the future, the episode hasn't aired yet.
+    pub aired: Option<String>,
 }
 
 /// Season information

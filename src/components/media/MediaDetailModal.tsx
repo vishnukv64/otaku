@@ -10,7 +10,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Plus, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Library, Tv, Clock, XCircle, Heart, Radio, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info } from 'lucide-react'
+import { X, Play, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Heart, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info, Clock } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
 import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, saveWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
@@ -19,20 +19,18 @@ import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useDownloadEvents } from '@/hooks/useDownloadEvents'
-import { useMediaStatusContext, getStatusLabel } from '@/contexts/MediaStatusContext'
+import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { useSettingsStore } from '@/store/settingsStore'
-import { MediaCard } from './MediaCard'
+// MediaCard still available for future use
+// import { MediaCard } from './MediaCard'
 import { Description } from '@/components/ui/Description'
 import { NextEpisodeCountdown } from './NextEpisodeCountdown'
 import { BottomSheet } from '@/components/ui/BottomSheet'
 import { isMobile } from '@/utils/platform'
 import { DetailTabBar } from './DetailTabBar'
 import { CharacterGrid } from './CharacterGrid'
-import { StaffList } from './StaffList'
-import { ScoreDistribution } from './ScoreDistribution'
 import { ReviewList } from './ReviewCard'
-import { GalleryGrid } from './GalleryGrid'
-import { NewsList } from './NewsCard'
+import { LibraryDropdown } from './LibraryDropdown'
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
 
@@ -55,8 +53,8 @@ function isRecentlyAired(
   return ageMs >= 0 && ageMs <= THREE_DAYS_MS
 }
 
-/** Format episode date for display */
-function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
+/** Format episode date for display (used by NextEpisodeCountdown / episode badges) */
+function _formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
   const now = new Date()
   const episodeDate = new Date(epDate.year, epDate.month, epDate.date)
   const diffTime = now.getTime() - episodeDate.getTime()
@@ -66,30 +64,10 @@ function formatEpisodeDate(epDate: { year: number; month: number; date: number }
   if (diffDays === 1) return 'Yesterday'
   if (diffDays < 7) return `${diffDays} days ago`
 
-  // Format as "Jan 22, 2026"
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${months[epDate.month]} ${epDate.date}, ${epDate.year}`
 }
-
-/** Format ISO timestamp for relative display (e.g., "2 days ago") */
-function formatRelativeTime(isoTimestamp: string): string {
-  const now = new Date()
-  const date = new Date(isoTimestamp)
-  const diffTime = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
-  const diffHours = Math.floor(diffTime / (1000 * 60 * 60))
-  const diffMinutes = Math.floor(diffTime / (1000 * 60))
-
-  if (diffMinutes < 60) return `${diffMinutes} minutes ago`
-  if (diffHours < 24) return `${diffHours} hours ago`
-  if (diffDays === 0) return 'Today'
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return `${diffDays} days ago`
-
-  // Format as "Jan 22, 2026"
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
-}
+void _formatEpisodeDate
 
 /** Check if anime is currently airing */
 function isAiring(status?: string): boolean {
@@ -126,7 +104,7 @@ export function MediaDetailModal({
   const [isFavorite, setIsFavorite] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(false)
-  const [showLibraryMenu, setShowLibraryMenu] = useState(false)
+
   const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
@@ -138,19 +116,23 @@ export function MediaDetailModal({
   const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
 
   // Enrichment tab state
-  const [activeTab, setActiveTab] = useState('episodes')
+  const [activeTab, setActiveTab] = useState('overview')
   const [characters, setCharacters] = useState<JikanCharacterEntry[] | null>(null)
   const [charactersLoading, setCharactersLoading] = useState(false)
-  const [staffData, setStaffData] = useState<JikanStaffEntry[] | null>(null)
-  const [staffLoading, setStaffLoading] = useState(false)
-  const [statistics, setStatistics] = useState<JikanStatistics | null>(null)
-  const [statisticsLoading, setStatisticsLoading] = useState(false)
+  // Staff/Stats/Gallery/News data still loaded lazily for potential future use
+  const [_staffData, setStaffData] = useState<JikanStaffEntry[] | null>(null); void _staffData
+  const [_staffLoading, setStaffLoading] = useState(false); void _staffLoading
+  const [_statistics, setStatistics] = useState<JikanStatistics | null>(null); void _statistics
+  const [_statisticsLoading, setStatisticsLoading] = useState(false); void _statisticsLoading
   const [reviews, setReviews] = useState<JikanReview[] | null>(null)
   const [reviewsLoading, setReviewsLoading] = useState(false)
-  const [pictures, setPictures] = useState<JikanPicture[] | null>(null)
-  const [picturesLoading, setPicturesLoading] = useState(false)
-  const [newsData, setNewsData] = useState<JikanNews[] | null>(null)
-  const [newsLoading, setNewsLoading] = useState(false)
+  const [reviewPage, setReviewPage] = useState(1)
+  const [reviewHasMore, setReviewHasMore] = useState(true)
+  const [reviewLoadingMore, setReviewLoadingMore] = useState(false)
+  const [_pictures, setPictures] = useState<JikanPicture[] | null>(null); void _pictures
+  const [_picturesLoading, setPicturesLoading] = useState(false); void _picturesLoading
+  const [_newsData, setNewsData] = useState<JikanNews[] | null>(null); void _newsData
+  const [_newsLoading, setNewsLoading] = useState(false); void _newsLoading
   const loadedTabsRef = useRef<Set<string>>(new Set())
 
   // Episode info overlay
@@ -366,7 +348,7 @@ export function MediaDetailModal({
 
       // Start download with custom path if set
       await startDownload(media.id, episodeId, episodeNumber, videoUrl, filename, customDownloadLocation || undefined)
-      notifySuccess(media.title, `Started downloading Episode ${episodeNumber}`)
+      notifySuccess(media.title, `Started downloading Episode ${episodeNumber}`, { source: 'download', metadata: { media_id: media.id } })
     } catch (error) {
       console.error(`Failed to download episode ${episodeNumber}:`, error)
       notifyError('Download Failed', `Failed to download Episode ${episodeNumber}`)
@@ -421,9 +403,9 @@ export function MediaDetailModal({
       }
 
       if (successCount > 0) {
-        notifySuccess(details.title, `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
+        notifySuccess(details.title, `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`, { source: 'download', metadata: { media_id: media.id } })
       } else if (skippedCount > 0) {
-        notifyInfo(details.title, `All ${skippedCount} episodes are already downloaded`)
+        notifyInfo(details.title, `All ${skippedCount} episodes are already downloaded`, { source: 'download', metadata: { media_id: media.id } })
       }
       if (failCount > 0) {
         notifyError(details.title, `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
@@ -492,9 +474,9 @@ export function MediaDetailModal({
       }
 
       if (successCount > 0) {
-        notifySuccess(details.title, `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`)
+        notifySuccess(details.title, `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`, { source: 'download', metadata: { media_id: media.id } })
       } else if (skippedCount > 0) {
-        notifyInfo(details.title, `All ${skippedCount} selected episodes are already downloaded`)
+        notifyInfo(details.title, `All ${skippedCount} selected episodes are already downloaded`, { source: 'download', metadata: { media_id: media.id } })
       }
       if (failCount > 0) {
         notifyError(details.title, `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
@@ -595,11 +577,13 @@ export function MediaDetailModal({
   // Reset episode page and enrichment state when modal opens for a different anime
   useEffect(() => {
     setEpisodePage(0)
-    setActiveTab('episodes')
+    setActiveTab('overview')
     setCharacters(null)
     setStaffData(null)
     setStatistics(null)
     setReviews(null)
+    setReviewPage(1)
+    setReviewHasMore(true)
     setPictures(null)
     setNewsData(null)
     setRelatedAnime([])
@@ -609,7 +593,7 @@ export function MediaDetailModal({
   // If anime has no episodes, default to characters tab
   useEffect(() => {
     if (details && details.episodes.length === 0 && activeTab === 'episodes') {
-      setActiveTab('characters')
+      setActiveTab('overview')
     }
   }, [details, activeTab])
 
@@ -942,8 +926,11 @@ export function MediaDetailModal({
       loadedTabsRef.current.add('reviews')
       setReviewsLoading(true)
       jikanAnimeReviews(malId, 1)
-        .then(setReviews)
-        .catch(() => setReviews([]))
+        .then(data => {
+          setReviews(data)
+          setReviewHasMore(data.length >= 10)
+        })
+        .catch(() => { setReviews([]); setReviewHasMore(false) })
         .finally(() => setReviewsLoading(false))
     } else if (activeTab === 'gallery') {
       loadedTabsRef.current.add('gallery')
@@ -975,6 +962,34 @@ export function MediaDetailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isOpen, details, media.id])
 
+  // Load sidebar data (statistics + related) eagerly when modal opens
+  useEffect(() => {
+    if (!isOpen || !details) return
+    const malId = parseInt(media.id)
+
+    if (!loadedTabsRef.current.has('stats')) {
+      loadedTabsRef.current.add('stats')
+      setStatisticsLoading(true)
+      jikanAnimeStatistics(malId)
+        .then(setStatistics)
+        .catch(() => setStatistics({} as JikanStatistics))
+        .finally(() => setStatisticsLoading(false))
+    }
+
+    if (!loadedTabsRef.current.has('related')) {
+      loadedTabsRef.current.add('related')
+      setRelatedLoading(true)
+      const searchTitle = media.title.split(/[:\-–—]/)[0].trim()
+      jikanSearchAnime(searchTitle, 1, true)
+        .then(results => {
+          setRelatedAnime(results.results.filter(item => item.id !== media.id).slice(0, 12))
+        })
+        .catch(() => setRelatedAnime([]))
+        .finally(() => setRelatedLoading(false))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, details, media.id])
+
   // Keyboard shortcuts
   useKeyboardShortcut(
     {
@@ -991,17 +1006,6 @@ export function MediaDetailModal({
 
   const modalContent = (
     <>
-      {/* Close Button (desktop only — mobile uses drag-to-dismiss) */}
-      {!mobile && (
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 z-10 w-12 h-12 rounded-full bg-black/80 backdrop-blur-sm hover:bg-[var(--color-accent-primary)] flex items-center justify-center transition-all hover:scale-110 border border-white/20"
-          aria-label="Close"
-        >
-          <X size={24} strokeWidth={2.5} />
-        </button>
-      )}
-
           {loading ? (
             <div className="flex items-center justify-center py-32">
               <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
@@ -1079,159 +1083,60 @@ export function MediaDetailModal({
                 </div>
               )}
 
-              {/* Hero Banner */}
-              <div className="relative rounded-t-xl overflow-hidden">
-                {/* Background Image (blurred) */}
+              {/* Banner */}
+              <div className="relative h-[280px] overflow-hidden rounded-t-xl">
                 {details.cover_url && (
-                  <>
-                    <img
-                      src={details.cover_url}
-                      alt={details.title}
-                      className="absolute inset-0 w-full h-full object-cover blur-3xl scale-110 opacity-40"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-black/80 to-black/40" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent" />
-                  </>
+                  <img
+                    src={details.cover_url}
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-deep)] via-[var(--color-deep)]/80 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-r from-[var(--color-deep)] to-transparent" style={{ opacity: 0.5 }} />
+
+                {/* Close button */}
+                {!mobile && (
+                  <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-black/60 backdrop-blur-sm hover:bg-white/20 flex items-center justify-center transition-all border border-white/10"
+                    aria-label="Close"
+                  >
+                    <X size={18} strokeWidth={2.5} />
+                  </button>
                 )}
 
-                {/* Content */}
-                <div className={`relative ${mobile ? 'p-5' : 'p-10'}`}>
-                  <div className={`${mobile ? 'flex flex-col items-center text-center gap-4' : 'flex gap-8 w-full items-start'}`}>
-                    {/* Poster */}
-                    {details.cover_url && (
-                      <div className="relative flex-shrink-0 group">
-                        <img
-                          src={details.cover_url}
-                          alt={details.title}
-                          className={`object-cover rounded-xl shadow-2xl ring-1 ring-white/10 ${mobile ? 'w-full h-48' : 'w-48 sm:w-56 h-72 sm:h-80 transform group-hover:scale-105 transition-transform duration-300'}`}
-                        />
-                        <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-black/20 to-transparent" />
-                      </div>
+                {/* Banner content */}
+                <div className="absolute bottom-0 left-0 right-0 px-7 pb-5">
+                  <h1
+                    className="font-['Space_Grotesk',sans-serif] text-2xl md:text-[2rem] font-extrabold text-white mb-2.5 leading-tight"
+                    style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}
+                  >
+                    {details.english_name || details.title}
+                  </h1>
+                  {details.english_name && details.title !== details.english_name && (
+                    <p className="text-sm text-white/70 mb-2">{details.title}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {details.type && <span className="chip">{details.type}</span>}
+                    {details.year && <span className="chip">{details.year}</span>}
+                    {details.rating && <span className="chip chip-gold">★ {details.rating.toFixed(2)}</span>}
+                    {details.status && details.status.toLowerCase() !== 'unknown' && (
+                      <span className={`chip ${isAiring(details.status) ? 'chip-green' : ''}`}>{details.status}</span>
                     )}
+                    {details.episodes.length > 0 && <span className="chip">{details.episodes.length} EP</span>}
+                    {showNewBadge && media.latest_episode && (
+                      <span className="chip chip-green">NEW EP {media.latest_episode}</span>
+                    )}
+                    {details.genres.map(genre => (
+                      <span key={genre} className="chip">{genre}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-                    {/* Info */}
-                    <div className="flex-1 min-w-0 pt-4">
-                      <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black mb-3 drop-shadow-2xl leading-tight tracking-tight">
-                        {details.english_name || details.title}
-                      </h1>
-                      {details.english_name && details.title !== details.english_name && (
-                        <h2 className="text-base sm:text-lg text-[var(--color-text-secondary)] mb-2 font-medium">
-                          {details.title}
-                        </h2>
-                      )}
-                      {details.native_name && (
-                        <h3 className="text-sm text-[var(--color-text-muted)] mb-3">
-                          {details.native_name}
-                        </h3>
-                      )}
-
-                      {/* Metadata Row 1 - Key Info */}
-                      <div className="flex items-center gap-3 text-base mb-4 flex-wrap">
-                        {details.rating && (
-                          <span className="flex items-center gap-1 text-yellow-400 font-bold text-lg">
-                            ★ {details.rating.toFixed(2)}
-                          </span>
-                        )}
-                        {details.year && (
-                          <>
-                            <span className="text-[var(--color-text-muted)]">•</span>
-                            <span className="text-white font-medium">{details.year}</span>
-                          </>
-                        )}
-                        {details.status && details.status.toLowerCase() !== 'unknown' && (
-                          <>
-                            <span className="text-[var(--color-text-muted)]">•</span>
-                            <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium capitalize">
-                              {details.status.toLowerCase()}
-                            </span>
-                          </>
-                        )}
-                        {details.episodes.length > 0 && (
-                          <>
-                            <span className="text-[var(--color-text-muted)]">•</span>
-                            <span className="text-white font-medium">
-                              {details.episodes.length} Episodes
-                            </span>
-                          </>
-                        )}
-                        {/* NEW Episode Badge (takes priority) */}
-                        {showNewBadge && media.latest_episode && (
-                          <>
-                            <span className="text-[var(--color-text-muted)]">•</span>
-                            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-sm font-semibold flex items-center gap-1.5 border border-emerald-500/40">
-                              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
-                              NEW EP {media.latest_episode}
-                            </span>
-                          </>
-                        )}
-                        {/* Latest Episode Badge for airing anime (hide if showing NEW) */}
-                        {!showNewBadge && isAiring(details.status) && media.latest_episode && media.latest_episode_date && (
-                          <>
-                            <span className="text-[var(--color-text-muted)]">•</span>
-                            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-full text-sm font-medium flex items-center gap-1.5">
-                              <Radio className="w-3 h-3" />
-                              EP {media.latest_episode} • {formatEpisodeDate(media.latest_episode_date)}
-                            </span>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Metadata Row 2 - Additional Details */}
-                      <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)] mb-6 flex-wrap">
-                        {details.type && (
-                          <span className="flex items-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                            </svg>
-                            <span>{details.type}</span>
-                          </span>
-                        )}
-                        {details.episode_duration && (
-                          <span className="flex items-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span>{Math.round(details.episode_duration / 60000)} min/ep</span>
-                          </span>
-                        )}
-                        {details.season && (
-                          <span className="flex items-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span>{details.season.quarter} {details.season.year}</span>
-                          </span>
-                        )}
-                        {details.aired_start && (
-                          <span className="flex items-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
-                            </svg>
-                            <span>
-                              Aired: {details.aired_start.month && details.aired_start.date
-                                ? `${details.aired_start.month}/${details.aired_start.date}/`
-                                : ''}{details.aired_start.year}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Genres */}
-                      {details.genres.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-6">
-                          {details.genres.map((genre) => (
-                            <span
-                              key={genre}
-                              className="px-4 py-1.5 bg-white/10 hover:bg-white/20 rounded-full text-sm font-medium transition-colors cursor-pointer"
-                            >
-                              {genre}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              {/* Action Bar */}
+              <div className="flex items-center gap-2.5 px-5 md:px-7 py-3.5 bg-[var(--color-deep)] border-b border-[var(--color-glass-border)] relative flex-wrap">
                         {details.episodes.length > 0 && (() => {
                           // Determine which episode to play and button text
                           let episodeToPlay = details.episodes[0]
@@ -1282,132 +1187,62 @@ export function MediaDetailModal({
                           return (
                             <button
                               onClick={() => handleWatch(episodeToPlay.id)}
-                              className={`flex items-center gap-1.5 sm:gap-2 px-4 sm:px-8 py-2.5 sm:py-3.5 text-white font-bold rounded-lg transition-all transform hover:scale-105 shadow-lg whitespace-nowrap text-sm sm:text-base ${
+                              className={`flex items-center gap-2 px-5 py-2.5 text-white font-semibold rounded-[var(--radius-md)] transition-all duration-150 shadow-[0_0_20px_rgba(229,9,20,0.3)] hover:shadow-[0_0_30px_rgba(229,9,20,0.45)] whitespace-nowrap text-sm ${
                                 isNewEpisode
-                                  ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-emerald-500/50'
-                                  : 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 shadow-[var(--color-accent-primary)]/50'
+                                  ? 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 shadow-emerald-500/30'
+                                  : 'bg-[var(--color-accent-gradient)]'
                               }`}
                             >
-                              {isNewEpisode && <Sparkles size={18} className="sm:w-5 sm:h-5" />}
-                              <Play size={18} fill="currentColor" className="sm:w-[22px] sm:h-[22px]" />
+                              {isNewEpisode && <Sparkles size={16} />}
+                              <Play size={16} fill="currentColor" />
                               <span>{buttonText}</span>
                             </button>
                           )
                         })()}
-                        {/* Library button with dropdown - key forces re-render to prevent visual artifacts */}
-                        {inLibrary ? (() => {
+                        {/* Library dropdown */}
+                        {(() => {
                           // Smart status display: Show "Watching" if user hasn't watched all episodes
-                          let displayStatus = libraryStatus
+                          let smartDisplayStatus = libraryStatus
                           let isOnTrack = false
 
                           if (details && libraryStatus) {
-                            // Count how many episodes have been watched
                             const watchedCount = Array.from(episodeWatchHistory.values()).filter(
                               progress => progress.completed
                             ).length
 
-                            // If not all episodes are watched, override display to "Watching"
                             if (watchedCount < details.episodes.length && libraryStatus !== 'dropped') {
-                              displayStatus = 'watching'
+                              smartDisplayStatus = 'watching'
                             } else if (
                               isAiring(details.status) &&
                               watchedCount >= details.episodes.length &&
                               details.episode_count != null &&
                               details.episodes.length < details.episode_count
                             ) {
-                              // Caught up on all available episodes, but more are coming
-                              displayStatus = 'watching'
+                              smartDisplayStatus = 'watching'
                               isOnTrack = true
                             }
                           }
 
                           return (
-                            <button
-                              key="in-library-btn"
-                              onClick={handleRemoveFromLibrary}
-                              disabled={libraryLoading}
-                              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all border disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base ${
-                                isOnTrack
-                                  ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
-                                  : 'bg-green-600 text-white border-green-500 hover:bg-green-700'
-                              }`}
-                            >
-                              {libraryLoading ? (
-                                <Loader2 size={18} className="animate-spin sm:w-[22px] sm:h-[22px]" />
-                              ) : isOnTrack ? (
-                                <CheckCircle size={18} className="sm:w-[22px] sm:h-[22px]" />
-                              ) : (
-                                <Check size={18} className="sm:w-[22px] sm:h-[22px]" />
-                              )}
-                              <span>{isOnTrack ? 'On Track' : displayStatus ? getStatusLabel(displayStatus) : 'In My List'}</span>
-                            </button>
+                            <LibraryDropdown
+                              inLibrary={inLibrary}
+                              currentStatus={libraryStatus}
+                              loading={libraryLoading}
+                              onAdd={handleAddToLibrary}
+                              onRemove={handleRemoveFromLibrary}
+                              displayStatus={smartDisplayStatus}
+                              isOnTrack={isOnTrack}
+                              mediaType="anime"
+                            />
                           )
-                        })() : (
-                          <div key="add-library-btn" className="relative">
-                            <button
-                              onClick={() => setShowLibraryMenu(!showLibraryMenu)}
-                              disabled={libraryLoading}
-                              className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2.5 sm:py-3.5 font-bold rounded-lg transition-all border bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base"
-                            >
-                              {libraryLoading ? (
-                                <Loader2 size={18} className="animate-spin sm:w-[22px] sm:h-[22px]" />
-                              ) : (
-                                <Plus size={18} className="sm:w-[22px] sm:h-[22px]" />
-                              )}
-                              <span>My List</span>
-                            </button>
-                            {/* Dropdown menu — click-based for mobile support */}
-                            {showLibraryMenu && (
-                              <>
-                                <div className="fixed inset-0 z-10" onClick={() => setShowLibraryMenu(false)} />
-                                <div className="absolute bottom-full left-0 mb-1 bg-[var(--color-bg-secondary)] rounded-lg shadow-xl z-20 min-w-[180px] border border-white/10">
-                                  <button
-                                    onClick={() => { handleAddToLibrary('watching'); setShowLibraryMenu(false) }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-t-lg"
-                                  >
-                                    <Tv className="w-4 h-4" />
-                                    Watching
-                                  </button>
-                                  <button
-                                    onClick={() => { handleAddToLibrary('plan_to_watch'); setShowLibraryMenu(false) }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                                  >
-                                    <Library className="w-4 h-4" />
-                                    Plan to Watch
-                                  </button>
-                                  <button
-                                    onClick={() => { handleAddToLibrary('completed'); setShowLibraryMenu(false) }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                                  >
-                                    <Check className="w-4 h-4" />
-                                    Completed
-                                  </button>
-                                  <button
-                                    onClick={() => { handleAddToLibrary('on_hold'); setShowLibraryMenu(false) }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm"
-                                  >
-                                    <Clock className="w-4 h-4" />
-                                    On Hold
-                                  </button>
-                                  <button
-                                    onClick={() => { handleAddToLibrary('dropped'); setShowLibraryMenu(false) }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-bg-hover)] text-left text-sm rounded-b-lg"
-                                  >
-                                    <XCircle className="w-4 h-4" />
-                                    Dropped
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )}
+                        })()}
                         {/* Favorite button */}
                         <button
                           onClick={handleToggleFavorite}
-                          className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all border ${
+                          className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
                             isFavorite
-                              ? 'bg-red-500 text-white border-red-500 hover:bg-red-600'
-                              : 'bg-white/10 backdrop-blur-sm text-white border-white/20 hover:bg-white/20'
+                              ? 'bg-[rgba(229,9,20,0.15)] text-[var(--color-accent-light)] border-[var(--color-accent-mid)]'
+                              : 'glass text-[var(--color-text-muted)] hover:text-white'
                           }`}
                           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
                         >
@@ -1422,135 +1257,209 @@ export function MediaDetailModal({
                             <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
                           </div>
                         )}
-                      </div>
+                {/* Next episode timer */}
+                {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
+                  <div className="ml-auto hidden md:flex items-center">
+                    <NextEpisodeCountdown
+                      latestEpisodeDate={media.latest_episode_date}
+                      lastUpdateEnd={details.last_update_end}
+                      broadcastInterval={details.broadcast_interval}
+                      status={details.status}
+                    />
+                  </div>
+                )}
+              </div>
 
-                      {/* Tags Section */}
-                      {inLibrary && (
-                        <div className="mt-4 flex items-center gap-3 flex-wrap">
-                          <TagChips
-                            tags={mediaTags}
-                            onRemove={handleRemoveTag}
-                          />
-                          <div className="relative">
-                            <button
-                              ref={tagButtonRef}
-                              onClick={() => setShowTagSelector(!showTagSelector)}
-                              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20"
-                            >
-                              <Tags className="w-4 h-4" />
-                              <span>{mediaTags.length > 0 ? 'Edit Tags' : 'Add Tags'}</span>
-                            </button>
-                            <TagSelector
-                              mediaId={media.id}
-                              isOpen={showTagSelector}
-                              onClose={() => setShowTagSelector(false)}
-                              onTagsChange={loadMediaTags}
-                              anchorRef={tagButtonRef}
+              {/* Two-Column Body */}
+              <div className="flex flex-col md:flex-row">
+                {/* Sidebar */}
+                <div className="hidden md:block w-[220px] shrink-0 p-5 border-r border-[var(--color-glass-border)]">
+                  {/* Poster */}
+                  {details.cover_url && (
+                    <img
+                      src={details.cover_url}
+                      alt={details.title}
+                      className="w-full aspect-[2/3] rounded-lg object-cover shadow-xl"
+                    />
+                  )}
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 gap-2.5 mt-4">
+                    <div className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-lg p-2.5 text-center">
+                      <div className="font-['Space_Grotesk',sans-serif] font-bold text-[1.1rem] text-[var(--color-gold)]">
+                        {details.rating ? details.rating.toFixed(2) : 'N/A'}
+                      </div>
+                      <div className="text-[0.65rem] text-[var(--color-text-muted)] uppercase tracking-[0.08em] mt-0.5">Score</div>
+                    </div>
+                    {details.rank && (
+                      <div className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-lg p-2.5 text-center">
+                        <div className="font-['Space_Grotesk',sans-serif] font-bold text-[1.1rem] text-[var(--color-cyan)]">
+                          #{details.rank}
+                        </div>
+                        <div className="text-[0.65rem] text-[var(--color-text-muted)] uppercase tracking-[0.08em] mt-0.5">Ranked</div>
+                      </div>
+                    )}
+                    {details.popularity && (
+                      <div className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-lg p-2.5 text-center">
+                        <div className="font-['Space_Grotesk',sans-serif] font-bold text-[1.1rem]">
+                          #{details.popularity}
+                        </div>
+                        <div className="text-[0.65rem] text-[var(--color-text-muted)] uppercase tracking-[0.08em] mt-0.5">Popular</div>
+                      </div>
+                    )}
+                    <div className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-lg p-2.5 text-center">
+                      <div className="font-['Space_Grotesk',sans-serif] font-bold text-[1.1rem]">
+                        {details.episodes.length || '?'}
+                      </div>
+                      <div className="text-[0.65rem] text-[var(--color-text-muted)] uppercase tracking-[0.08em] mt-0.5">Episodes</div>
+                    </div>
+                  </div>
+
+                  {/* Related */}
+                  {relatedAnime.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-[0.7rem] uppercase tracking-[0.08em] text-[var(--color-text-muted)] font-semibold mb-3">Related</h3>
+                      {relatedAnime.slice(0, 3).map((anime) => (
+                        <div
+                          key={anime.id}
+                          className="flex gap-3 py-2 cursor-pointer hover:bg-white/[0.03] rounded-md px-1"
+                          onClick={() => onMediaChange?.(anime)}
+                        >
+                          {anime.cover_url && (
+                            <img
+                              src={anime.cover_url}
+                              alt={anime.title}
+                              className="w-12 h-16 rounded object-cover shrink-0"
                             />
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-[0.8rem] font-semibold text-white line-clamp-2 leading-snug">{anime.title}</p>
+                            {anime.year && <p className="text-[0.7rem] text-[var(--color-text-muted)] mt-0.5">{anime.year}</p>}
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {relatedLoading && (
+                    <div className="mt-6">
+                      <h3 className="text-[0.7rem] uppercase tracking-[0.08em] text-[var(--color-text-muted)] font-semibold mb-3">Related</h3>
+                      {[...Array(3)].map((_, i) => (
+                        <div key={i} className="flex gap-3 py-2">
+                          <div className="w-12 h-16 rounded bg-[var(--color-bg-secondary)] animate-pulse shrink-0" />
+                          <div className="flex-1 space-y-2 py-1">
+                            <div className="h-3 bg-[var(--color-bg-secondary)] rounded animate-pulse w-3/4" />
+                            <div className="h-2 bg-[var(--color-bg-secondary)] rounded animate-pulse w-1/2" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tags */}
+                  {inLibrary && (
+                    <div className="mt-6">
+                      <h3 className="text-[0.7rem] uppercase tracking-[0.08em] text-[var(--color-text-muted)] font-semibold mb-2">Tags</h3>
+                      <TagChips
+                        tags={mediaTags}
+                        onRemove={handleRemoveTag}
+                      />
+                      <div className="relative mt-2">
+                        <button
+                          ref={tagButtonRef}
+                          onClick={() => setShowTagSelector(!showTagSelector)}
+                          className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/20"
+                        >
+                          <Tags className="w-3 h-3" />
+                          <span>{mediaTags.length > 0 ? 'Edit' : 'Add Tags'}</span>
+                        </button>
+                        <TagSelector
+                          mediaId={media.id}
+                          isOpen={showTagSelector}
+                          onClose={() => setShowTagSelector(false)}
+                          onTagsChange={loadMediaTags}
+                          anchorRef={tagButtonRef}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  {/* Detail Tabs */}
+                  <DetailTabBar
+                    tabs={[
+                      { id: 'overview', label: 'Overview' },
+                      ...(details.episodes.length > 0 ? [{ id: 'episodes', label: 'Episodes', count: details.episodes.length }] : []),
+                      { id: 'characters', label: 'Characters' },
+                      { id: 'reviews', label: 'Reviews' },
+                    ]}
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                  />
+
+                <div className="p-5">
+                {/* Overview Tab */}
+                {activeTab === 'overview' && (
+                  <div>
+                    {details.description && (
+                      <Description content={details.description} className="text-[0.9375rem] leading-[1.75] text-[var(--color-text-secondary)] mb-5" />
+                    )}
+                    {/* Info Grid */}
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mb-5">
+                      {details.type && (
+                        <div>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Type</div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.type}</div>
+                        </div>
+                      )}
+                      {(details.episodes.length > 0 || details.episode_count) && (
+                        <div>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Episodes</div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                            {details.episode_count || details.episodes.length}
+                          </div>
+                        </div>
+                      )}
+                      {details.status && details.status.toLowerCase() !== 'unknown' && (
+                        <div>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Status</div>
+                          <div className="text-sm font-medium capitalize" style={{ color: details.status.toLowerCase().includes('finished') ? 'var(--color-green, #22c55e)' : 'var(--color-text-primary)' }}>
+                            {details.status}
+                          </div>
+                        </div>
+                      )}
+                      {details.aired_start && (
+                        <div>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Aired</div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                            {details.aired_start.month && details.aired_start.date
+                              ? `${details.aired_start.month}/${details.aired_start.date}/`
+                              : ''}{details.aired_start.year}
+                          </div>
+                        </div>
+                      )}
+                      {details.season && (
+                        <div>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Season</div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.season.quarter} {details.season.year}</div>
+                        </div>
+                      )}
+                      {details.studios && details.studios.length > 0 && (
+                        <div>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Studio</div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.studios.map(s => s.name).join(' / ')}</div>
                         </div>
                       )}
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Description & Episodes */}
-              <div className="p-4 sm:p-8">
-                {/* Stats Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                  <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                    <div className="text-[var(--color-text-muted)] text-sm mb-1">Score</div>
-                    <div className="text-2xl font-bold text-yellow-400">
-                      {details.rating ? details.rating.toFixed(2) : 'N/A'}
-                    </div>
-                  </div>
-                  <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                    <div className="text-[var(--color-text-muted)] text-sm mb-1">Episodes</div>
-                    <div className="text-2xl font-bold">
-                      {details.episodes.length}
-                      {details.episode_count && details.episode_count !== details.episodes.length && (
-                        <span className="text-sm text-[var(--color-text-muted)] ml-1">/ {details.episode_count}</span>
-                      )}
-                    </div>
-                  </div>
-                  {details.status && details.status.toLowerCase() !== 'unknown' && (
-                    <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                      <div className="text-[var(--color-text-muted)] text-sm mb-1">Status</div>
-                      <div className="text-2xl font-bold capitalize">{details.status.toLowerCase()}</div>
-                    </div>
-                  )}
-                  <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                    <div className="text-[var(--color-text-muted)] text-sm mb-1">Year</div>
-                    <div className="text-2xl font-bold">{details.year || 'N/A'}</div>
-                  </div>
-                  {/* Last Aired - show for currently airing anime with episode date */}
-                  {isAiring(details.status) && media.latest_episode_date && (
-                    <div className="bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                      <div className="text-[var(--color-text-muted)] text-sm mb-1 flex items-center gap-1">
-                        <Radio className="w-3 h-3 text-emerald-400" />
-                        Last Aired
-                      </div>
-                      <div className="text-lg font-bold text-emerald-400">
-                        EP {media.latest_episode}
-                      </div>
-                      <div className="text-sm text-[var(--color-text-secondary)]">
-                        {media.latest_episode_date
-                          ? formatEpisodeDate(media.latest_episode_date)
-                          : details.last_update_end
-                            ? formatRelativeTime(details.last_update_end)
-                            : 'Recently'}
-                      </div>
-                    </div>
-                  )}
-                  {/* Next Episode Countdown - spans full width for readable countdown */}
-                  {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
-                    <div className="col-span-2 md:col-span-4 bg-[var(--color-bg-secondary)] p-4 rounded-lg">
-                      <NextEpisodeCountdown
-                        latestEpisodeDate={media.latest_episode_date}
-                        lastUpdateEnd={details.last_update_end}
-                        broadcastInterval={details.broadcast_interval}
-                        status={details.status}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Description */}
-                {details.description && (
-                  <div className="mb-8">
-                    <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-                      <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      Synopsis
-                    </h2>
-                    <Description content={details.description} className="text-lg" />
-                  </div>
                 )}
 
-                {/* Detail Tabs */}
-                <DetailTabBar
-                  tabs={[
-                    ...(details.episodes.length > 0 ? [{ id: 'episodes', label: 'Episodes', count: details.episodes.length }] : []),
-                    { id: 'characters', label: 'Characters' },
-                    { id: 'staff', label: 'Staff' },
-                    { id: 'stats', label: 'Stats' },
-                    { id: 'reviews', label: 'Reviews' },
-                    { id: 'gallery', label: 'Gallery' },
-                    { id: 'news', label: 'News' },
-                    { id: 'related', label: 'Related' },
-                  ]}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-
-                <div className="mt-4">
                 {/* Episodes */}
                 {activeTab === 'episodes' && details.episodes.length > 0 && (
                   <div>
                     <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
-                      <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
+                      <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
                         <svg className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1636,26 +1545,31 @@ export function MediaDetailModal({
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                       {details.episodes.slice(
                         episodePage * EPISODES_PER_PAGE,
                         (episodePage + 1) * EPISODES_PER_PAGE
-                      ).map((episode) => (
+                      ).map((episode) => {
+                        const isUnaired = episode.aired ? new Date(episode.aired) > new Date() : false
+                        return (
                         <div
                           key={episode.id}
-                          className={`group relative aspect-video rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] transition-all transform ${
-                            bridgeFailed
-                              ? 'opacity-60 grayscale cursor-not-allowed'
-                              : selectionMode
-                                ? `hover:ring-2 hover:scale-105 cursor-pointer ${selectedEpisodes.has(episode.id)
-                                    ? 'ring-2 ring-[var(--color-accent-primary)]'
-                                    : 'hover:ring-white/30'
-                                  }`
-                                : 'hover:ring-2 hover:scale-105 hover:ring-[var(--color-accent-primary)]'
+                          className={`group relative rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-card)] border border-[var(--color-glass-border)] transition-all duration-150 ${
+                            isUnaired
+                              ? 'opacity-50 cursor-default'
+                              : bridgeFailed
+                                ? 'opacity-60 grayscale cursor-not-allowed'
+                                : selectionMode
+                                  ? `hover:border-[var(--color-accent-mid)] cursor-pointer ${selectedEpisodes.has(episode.id)
+                                      ? 'border-[var(--color-accent-primary)] shadow-[0_0_12px_rgba(229,9,20,0.2)]'
+                                      : 'hover:border-white/30'
+                                    }`
+                                  : 'hover:border-[var(--color-accent-mid)] hover:shadow-[0_0_12px_rgba(229,9,20,0.15)]'
                           }`}
-                          onClick={bridgeFailed ? undefined : selectionMode ? () => toggleEpisodeSelection(episode.id) : undefined}
+                          onClick={bridgeFailed || isUnaired ? undefined : selectionMode ? () => toggleEpisodeSelection(episode.id) : undefined}
                         >
                           {/* Thumbnail or placeholder */}
+                          <div className="relative aspect-video">
                           {episode.thumbnail || details.cover_url ? (
                             <img
                               src={(episode.thumbnail || details.cover_url)!}
@@ -1664,12 +1578,12 @@ export function MediaDetailModal({
                               loading="lazy"
                             />
                           ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-[var(--color-bg-secondary)] to-[var(--color-bg-hover)]">
-                              <svg className="w-8 h-8 text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-card)]">
+                              <svg className="w-8 h-8 text-[var(--color-text-dim)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
-                              <span className="text-xs text-[var(--color-text-muted)]">Episode {episode.number}</span>
+                              <span className="text-xs text-[var(--color-text-dim)]">Episode {episode.number}</span>
                             </div>
                           )}
 
@@ -1681,8 +1595,21 @@ export function MediaDetailModal({
                             </div>
                           )}
 
+                          {/* Unaired overlay */}
+                          {isUnaired && !selectionMode && (
+                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-20">
+                              <Clock className="w-5 h-5 text-blue-400 mb-1" />
+                              <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide">Yet to be released</span>
+                              {episode.aired && (
+                                <span className="text-[10px] text-white/60 mt-0.5">
+                                  {new Date(episode.aired).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
                           {/* Play button overlay on hover (only in normal mode, and bridge resolved) */}
-                          {!selectionMode && !bridgeFailed && (
+                          {!selectionMode && !bridgeFailed && !isUnaired && (
                             <div
                               className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
                               onClick={() => handleWatch(episode.id)}
@@ -1695,8 +1622,8 @@ export function MediaDetailModal({
                             </div>
                           )}
 
-                          {/* Small download/delete button at top right on hover (only in normal mode, not downloading, bridge resolved) */}
-                          {!selectionMode && !bridgeFailed && !downloadingEpisodes.has(episode.number) && (
+                          {/* Small download/delete button at top right on hover (only in normal mode, not downloading, bridge resolved, already aired) */}
+                          {!selectionMode && !bridgeFailed && !isUnaired && !downloadingEpisodes.has(episode.number) && (
                             <>
                               {/* Download button (only for non-downloaded episodes) */}
                               {!downloadedEpisodes.has(episode.number) && (
@@ -1842,8 +1769,17 @@ export function MediaDetailModal({
                               </p>
                             </div>
                           )}
+                          </div>
+                          {/* Episode info below thumbnail */}
+                          <div className="px-2.5 py-2">
+                            <p className="font-mono text-[0.75rem] font-semibold text-[var(--color-text-muted)]">EP {String(episode.number).padStart(2, '0')}</p>
+                            {episode.title && (
+                              <p className="text-[0.875rem] font-semibold text-white line-clamp-1 mt-0.5" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{episode.title}</p>
+                            )}
+                          </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -1851,11 +1787,11 @@ export function MediaDetailModal({
                 {/* Episode info overlay */}
                 {episodeInfoTarget && (
                   <div
-                    className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm"
+                    className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-xl"
                     onClick={() => setEpisodeInfoTarget(null)}
                   >
                     <div
-                      className="relative w-full max-w-lg max-h-[80vh] overflow-y-auto bg-[var(--color-bg-modal)] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl"
+                      className="relative w-full max-w-lg max-h-[80vh] overflow-y-auto bg-[var(--color-panel)] border border-[var(--color-glass-border)] rounded-t-2xl sm:rounded-[var(--radius-lg)] p-5 shadow-[var(--shadow-lg)]"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Mobile grab handle */}
@@ -1932,76 +1868,34 @@ export function MediaDetailModal({
                   <CharacterGrid characters={characters || []} loading={charactersLoading || !characters} />
                 )}
 
-                {/* Staff Tab */}
-                {activeTab === 'staff' && (
-                  <StaffList staff={staffData || []} loading={staffLoading || !staffData} />
-                )}
-
-                {/* Stats Tab */}
-                {activeTab === 'stats' && (
-                  <ScoreDistribution statistics={statistics || {} as JikanStatistics} loading={statisticsLoading || !statistics} mediaType="anime" />
-                )}
-
                 {/* Reviews Tab */}
                 {activeTab === 'reviews' && (
-                  <ReviewList reviews={reviews || []} loading={reviewsLoading || !reviews} />
+                  <ReviewList
+                    reviews={reviews || []}
+                    loading={reviewsLoading || !reviews}
+                    hasMore={reviewHasMore}
+                    loadingMore={reviewLoadingMore}
+                    onLoadMore={async () => {
+                      if (reviewLoadingMore || !reviewHasMore) return
+                      setReviewLoadingMore(true)
+                      try {
+                        const nextPage = reviewPage + 1
+                        const moreReviews = await jikanAnimeReviews(parseInt(media.id), nextPage)
+                        setReviews(prev => [...(prev || []), ...moreReviews])
+                        setReviewPage(nextPage)
+                        setReviewHasMore(moreReviews.length >= 10)
+                      } catch {
+                        setReviewHasMore(false)
+                      } finally {
+                        setReviewLoadingMore(false)
+                      }
+                    }}
+                  />
                 )}
 
-                {/* Gallery Tab */}
-                {activeTab === 'gallery' && (
-                  <GalleryGrid pictures={pictures || []} loading={picturesLoading || !pictures} />
-                )}
-
-                {/* News Tab */}
-                {activeTab === 'news' && (
-                  <NewsList news={newsData || []} loading={newsLoading || !newsData} />
-                )}
-
-                {/* Related Anime */}
-                {activeTab === 'related' && (
-                  <>
-                {relatedLoading && (
-                  <div>
-                    <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-                      <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                      </svg>
-                      Related Anime
-                    </h2>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                      {[...Array(6)].map((_, i) => (
-                        <div key={i} className="aspect-[2/3] bg-[var(--color-bg-secondary)] rounded-lg animate-pulse" />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {!relatedLoading && relatedAnime.length > 0 && (
-                  <div className="mt-12">
-                    <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-                      <svg className="w-6 h-6 text-[var(--color-accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                      </svg>
-                      Related Anime
-                    </h2>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                      {relatedAnime.map((anime) => (
-                        <MediaCard
-                          key={anime.id}
-                          media={anime}
-                          status={getStatus(anime.id)}
-                          onClick={() => {
-                            // Change the media being displayed
-                            onMediaChange?.(anime)
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                  </>
-                )}
                 </div>
-              </div>
+              </div>{/* close content column */}
+            </div>{/* close two-column */}
             </>
           ) : null}
     </>
@@ -2018,11 +1912,11 @@ export function MediaDetailModal({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-300">
       <div
-        className="fixed inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
+        className="fixed inset-0 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300"
         onClick={onClose}
       />
       <div className="relative min-h-screen flex items-start justify-center p-4 sm:p-6 lg:p-8">
-        <div className="relative bg-[var(--color-bg-primary)] rounded-xl max-w-6xl w-full my-8 shadow-2xl animate-in slide-in-from-bottom-4 duration-500 border border-white/5">
+        <div className="relative bg-[var(--color-panel)] rounded-[var(--radius-lg)] max-w-[1000px] w-full my-8 shadow-[0_40px_120px_rgba(0,0,0,0.8),0_0_60px_var(--color-accent-glow,rgba(229,9,20,0.15))] animate-in slide-in-from-bottom-4 duration-500 border border-[var(--color-glass-border)]">
           {modalContent}
         </div>
       </div>

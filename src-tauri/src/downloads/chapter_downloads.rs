@@ -262,6 +262,7 @@ pub async fn start_chapter_download(
                 Some(&pool_clone),
                 &media_title_clone,
                 chapter_number,
+                &media_id_clone,
             ).await;
         } else if status == "failed" {
             let error_msg = error_message_str.as_deref().unwrap_or("Unknown error");
@@ -271,6 +272,7 @@ pub async fn start_chapter_download(
                 &media_title_clone,
                 chapter_number,
                 error_msg,
+                &media_id_clone,
             ).await;
         }
 

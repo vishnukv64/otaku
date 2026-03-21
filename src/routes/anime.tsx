@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Loader2, AlertCircle, X, Sparkles, Calendar, Star, Tag as TagIcon } from 'lucide-react'
+import { Loader2, AlertCircle, Star, Tag as TagIcon } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import {
   loadExtension,
@@ -15,6 +15,11 @@ import type { Tag } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { GenreFilterBar } from '@/components/media/GenreFilterBar'
+import { BrowseSidebar } from '@/components/browse/BrowseSidebar'
+import { BrowseHeader } from '@/components/browse/BrowseHeader'
+import { ActiveFilterChips } from '@/components/browse/ActiveFilterChips'
+import type { BrowseFilters, NavItem } from '@/components/browse/BrowseSidebar'
+import type { FilterChip } from '@/components/browse/ActiveFilterChips'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
@@ -54,8 +59,17 @@ export const Route = createFileRoute('/anime')({
 
 type TabType = 'browse' | 'season' | 'genres'
 
+const defaultFilters: BrowseFilters = {
+  year: undefined,
+  types: [],
+  statuses: [],
+  minScore: 0,
+  genres: new Set(),
+  orderBy: 'popularity',
+  sort: 'desc',
+}
+
 function AnimeScreen() {
-  const gridDensity = useSettingsStore((state) => state.gridDensity)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -63,7 +77,7 @@ function AnimeScreen() {
   const seasonLoadMoreRef = useRef<HTMLDivElement>(null)
   const genreLoadMoreRef = useRef<HTMLDivElement>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState('')
+  const [searchInput, _setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
 
   // Restore modal state when returning from watch page
@@ -79,11 +93,16 @@ function AnimeScreen() {
   const [browseHasNextPage, setBrowseHasNextPage] = useState(true)
   const browseSeenIdsRef = useRef<Set<string>>(new Set())
 
-  // Personalized recommendations state
-  const [userWatchingGenres, setUserWatchingGenres] = useState<string[]>([])
-  const [hasWatchHistory, setHasWatchHistory] = useState(false)
+  // Personalized recommendations state (used by browse fetcher logic)
+  const [_userWatchingGenres, setUserWatchingGenres] = useState<string[]>([])
+  const [_hasWatchHistory, setHasWatchHistory] = useState(false)
 
-  // Tab state
+  // Sidebar state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarFilters, setSidebarFilters] = useState<BrowseFilters>(defaultFilters)
+  const [sidebarNav, setSidebarNav] = useState<NavItem>('browse')
+
+  // Tab state (driven by sidebar nav)
   const [activeTab, setActiveTab] = useState<TabType>('browse')
 
   // Current season info (for tab label)
@@ -115,12 +134,79 @@ function AnimeScreen() {
   const [genreLoadingMore, setGenreLoadingMore] = useState(false)
   const genreSeenIdsRef = useRef<Set<string>>(new Set())
 
-  // Grid density class mapping
-  const gridClasses = {
-    compact: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 3xl:grid-cols-10 4xl:grid-cols-12 5xl:grid-cols-14 gap-x-2 gap-y-6 p-4 -m-4',
-    comfortable: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-12 gap-x-4 gap-y-8 p-4 -m-4',
-    spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-x-6 gap-y-10 p-4 -m-4',
-  }[gridDensity]
+  // Sidebar nav → tab mapping
+  const handleSidebarNav = useCallback((nav: NavItem) => {
+    setSidebarNav(nav)
+    if (nav === 'browse' || nav === 'top-rated') setActiveTab('browse')
+    else if (nav === 'season') setActiveTab('season')
+    else if (nav === 'genres') setActiveTab('genres')
+  }, [])
+
+  // Year options for sidebar
+  const sidebarYearOptions = Array.from({ length: currentYear - 1999 }, (_, i) => currentYear - i)
+
+  // Build active filter chips from sidebar filters
+  const activeFilterChips: FilterChip[] = []
+  for (const t of sidebarFilters.types) {
+    activeFilterChips.push({ key: `type:${t}`, label: t, group: 'type' })
+  }
+  for (const s of sidebarFilters.statuses) {
+    activeFilterChips.push({ key: `status:${s}`, label: s, group: 'status' })
+  }
+  if (sidebarFilters.minScore > 0) {
+    activeFilterChips.push({ key: 'score', label: `Score >= ${sidebarFilters.minScore}`, group: 'score' })
+  }
+  for (const gId of sidebarFilters.genres) {
+    const genre = animeGenres.find((g) => g.id === gId)
+    if (genre) {
+      activeFilterChips.push({ key: `genre:${gId}`, label: genre.name, group: 'genre' })
+    }
+  }
+
+  const handleRemoveChip = useCallback((key: string, group: string) => {
+    setSidebarFilters((prev) => {
+      if (group === 'type') {
+        const typeName = key.replace('type:', '')
+        return { ...prev, types: prev.types.filter((t) => t !== typeName) }
+      }
+      if (group === 'status') {
+        const statusName = key.replace('status:', '')
+        return { ...prev, statuses: prev.statuses.filter((s) => s !== statusName) }
+      }
+      if (group === 'score') {
+        return { ...prev, minScore: 0 }
+      }
+      if (group === 'genre') {
+        const genreId = Number(key.replace('genre:', ''))
+        const next = new Set(prev.genres)
+        next.delete(genreId)
+        return { ...prev, genres: next }
+      }
+      return prev
+    })
+  }, [])
+
+  const handleClearAllChips = useCallback(() => {
+    setSidebarFilters(defaultFilters)
+  }, [])
+
+  // Detect when sidebar filters are active (beyond defaults)
+  const hasActiveFilters = sidebarFilters.types.length > 0
+    || sidebarFilters.statuses.length > 0
+    || sidebarFilters.genres.size > 0
+    || sidebarFilters.minScore > 0
+
+  // Filtered browse state (used when hasActiveFilters on browse/season tabs)
+  const [filteredBrowseItems, setFilteredBrowseItems] = useState<SearchResult[]>([])
+  const [filteredBrowseLoading, setFilteredBrowseLoading] = useState(false)
+  const [filteredBrowsePage, setFilteredBrowsePage] = useState(1)
+  const [filteredBrowseHasNext, setFilteredBrowseHasNext] = useState(true)
+  const [filteredBrowseLoadingMore, setFilteredBrowseLoadingMore] = useState(false)
+  const filteredBrowseSeenRef = useRef<Set<string>>(new Set())
+  const filteredBrowseLoadMoreRef = useRef<HTMLDivElement>(null)
+
+  // Grid: auto-fill with 160px min (matches mock)
+  const gridClasses = 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 p-4 -m-4'
 
   const {
     searchQuery,
@@ -236,8 +322,25 @@ function AnimeScreen() {
   }, [seasonAnime.data, seasonAnime.hasNextPage])
 
   // Combined season items: hook page 1 + extra pages, sorted by rating
-  const fullSeasonAnime = [...seasonAnime.data, ...seasonExtraItems]
+  const fullSeasonAnimeRaw = [...seasonAnime.data, ...seasonExtraItems]
     .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+  // Apply client-side filtering when sidebar filters are active on season tab
+  const fullSeasonAnime = hasActiveFilters
+    ? fullSeasonAnimeRaw.filter(item => {
+        if (sidebarFilters.types.length > 0 && item.media_type && !sidebarFilters.types.some(t => t.toLowerCase() === item.media_type!.toLowerCase())) return false
+        if (sidebarFilters.statuses.length > 0 && item.status && !sidebarFilters.statuses.some(s => s.toLowerCase() === item.status!.toLowerCase())) return false
+        if (sidebarFilters.genres.size > 0 && item.genres) {
+          const itemGenres = item.genres.map(g => g.toLowerCase())
+          const filterGenreNames = Array.from(sidebarFilters.genres).map(id => {
+            const genre = animeGenres.find(ag => ag.id === id)
+            return genre?.name.toLowerCase() || ''
+          }).filter(Boolean)
+          if (!filterGenreNames.some(fg => itemGenres.includes(fg))) return false
+        }
+        if (sidebarFilters.minScore > 0 && (item.rating || 0) < sidebarFilters.minScore) return false
+        return true
+      })
+    : fullSeasonAnimeRaw
   const fullSeasonLoading = seasonAnime.loading
 
   // Load more browse anime (pages 2+)
@@ -292,15 +395,93 @@ function AnimeScreen() {
     }
   }, [fullSeasonPage, fullSeasonHasNextPage, fullSeasonLoadingMore, nsfwFilter, selectedYear, selectedSeason, isCurrentSeason])
 
-  // === GENRE TAB: Fetch genres list ===
+  // === FILTERED BROWSE: Fetch when sidebar filters are active on browse tab ===
   useEffect(() => {
-    if (activeTab !== 'genres' || animeGenres.length > 0) return
+    if (activeTab !== 'browse' || !hasActiveFilters) {
+      setFilteredBrowseItems([])
+      return
+    }
+    setFilteredBrowseLoading(true)
+    setFilteredBrowsePage(1)
+    filteredBrowseSeenRef.current.clear()
+
+    const genreStr = Array.from(sidebarFilters.genres).join(',')
+    jikanSearchAnimeFiltered({
+      page: 1,
+      sfw: nsfwFilter,
+      genres: genreStr || undefined,
+      orderBy: sidebarFilters.orderBy || 'popularity',
+      sort: sidebarFilters.sort || 'desc',
+      status: sidebarFilters.statuses[0] || undefined,
+      animeType: sidebarFilters.types[0] || undefined,
+      minScore: sidebarFilters.minScore > 0 ? String(sidebarFilters.minScore) : undefined,
+    })
+      .then(result => {
+        const filtered = filterNsfwContent(result.results, (item) => item.genres, nsfwFilter, (item) => item.title)
+        filtered.forEach(item => filteredBrowseSeenRef.current.add(item.id))
+        setFilteredBrowseItems(filtered)
+        setFilteredBrowseHasNext(result.has_next_page)
+      })
+      .catch(err => console.error('Filtered browse failed:', err))
+      .finally(() => setFilteredBrowseLoading(false))
+  }, [activeTab, hasActiveFilters, sidebarFilters, nsfwFilter])
+
+  // Filtered browse: load more
+  const loadMoreFilteredBrowse = useCallback(async () => {
+    if (filteredBrowseLoadingMore || !filteredBrowseHasNext) return
+    setFilteredBrowseLoadingMore(true)
+    try {
+      const nextPage = filteredBrowsePage + 1
+      const genreStr = Array.from(sidebarFilters.genres).join(',')
+      const result = await jikanSearchAnimeFiltered({
+        page: nextPage,
+        sfw: nsfwFilter,
+        genres: genreStr || undefined,
+        orderBy: sidebarFilters.orderBy || 'popularity',
+        sort: sidebarFilters.sort || 'desc',
+        status: sidebarFilters.statuses[0] || undefined,
+        animeType: sidebarFilters.types[0] || undefined,
+        minScore: sidebarFilters.minScore > 0 ? String(sidebarFilters.minScore) : undefined,
+      })
+      const newItems = result.results.filter(item => {
+        if (filteredBrowseSeenRef.current.has(item.id)) return false
+        filteredBrowseSeenRef.current.add(item.id)
+        return true
+      })
+      setFilteredBrowseItems(prev => [...prev, ...newItems])
+      setFilteredBrowsePage(nextPage)
+      setFilteredBrowseHasNext(result.has_next_page)
+    } catch (err) {
+      console.error('Failed to load more filtered browse:', err)
+    } finally {
+      setFilteredBrowseLoadingMore(false)
+    }
+  }, [filteredBrowsePage, filteredBrowseHasNext, filteredBrowseLoadingMore, sidebarFilters, nsfwFilter])
+
+  // Filtered browse intersection observer
+  useEffect(() => {
+    if (activeTab !== 'browse' || !hasActiveFilters) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && filteredBrowseHasNext && !filteredBrowseLoadingMore && !filteredBrowseLoading) {
+          loadMoreFilteredBrowse()
+        }
+      },
+      { threshold: 0.1 }
+    )
+    if (filteredBrowseLoadMoreRef.current) observer.observe(filteredBrowseLoadMoreRef.current)
+    return () => observer.disconnect()
+  }, [activeTab, hasActiveFilters, filteredBrowseHasNext, filteredBrowseLoadingMore, filteredBrowseLoading, loadMoreFilteredBrowse])
+
+  // === Fetch genres list (eagerly, for sidebar) ===
+  useEffect(() => {
+    if (animeGenres.length > 0) return
     setGenresLoading(true)
     jikanGenresAnime()
       .then(result => setAnimeGenres(result.genres))
       .catch(err => console.error('Failed to load anime genres:', err))
       .finally(() => setGenresLoading(false))
-  }, [activeTab, animeGenres.length])
+  }, [animeGenres.length])
 
   // Genre tab: fetch results when genres/filters change
   useEffect(() => {
@@ -451,13 +632,6 @@ function AnimeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput, nsfwFilter])
 
-  // Clear search input
-  const handleClearSearch = useCallback(() => {
-    setSearchInput('')
-    clearSearch()
-    searchInputRef.current?.focus()
-  }, [clearSearch])
-
   // Keyboard shortcuts
   useKeyboardShortcut(
     {
@@ -469,318 +643,229 @@ function AnimeScreen() {
     []
   )
 
+  // Determine header title based on active nav/tab
+  const headerTitle = (() => {
+    if (searchInput) return 'Search'
+    if (sidebarNav === 'browse') return 'Browse'
+    if (sidebarNav === 'season') return 'This Season'
+    if (sidebarNav === 'top-rated') return 'Top Rated'
+    if (sidebarNav === 'genres') return 'By Genre'
+    return 'Browse'
+  })()
+
+  // Count items for header
+  const currentResultCount = (() => {
+    if (searchInput) return searchResults.length
+    if (activeTab === 'browse') return hasActiveFilters ? filteredBrowseItems.length : recommendations.length
+    if (activeTab === 'season') return fullSeasonAnime.length
+    if (activeTab === 'genres') return genreResults.length
+    return 0
+  })()
+
   return (
-    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
-      {/* Search Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-6">Anime Browser</h1>
+    <div className="min-h-[calc(100vh-4rem)] flex">
+      {/* Sidebar */}
+      <BrowseSidebar
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((p) => !p)}
+        activeNav={sidebarNav}
+        onNavChange={handleSidebarNav}
+        filters={sidebarFilters}
+        onFiltersChange={setSidebarFilters}
+        onReset={handleClearAllChips}
+        mediaType="anime"
+        genres={animeGenres}
+        genresLoading={genresLoading}
+        yearOptions={sidebarYearOptions}
+      />
 
-        {/* Instant Search */}
-        <div className="max-w-2xl">
-          <div className="relative">
-            {searchLoading ? (
-              <Loader2
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-accent-primary)] animate-spin"
-                size={20}
-              />
-            ) : (
-              <Search
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
-                size={20}
-              />
-            )}
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search for anime..."
-              className="w-full pl-12 pr-12 py-3 bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg text-white placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:border-transparent"
-            />
-            {searchInput && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-                aria-label="Clear search"
-              >
-                <X size={20} />
-              </button>
-            )}
-          </div>
-          {searchInput && !searchLoading && (
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Showing results as you type
-            </p>
-          )}
-        </div>
-      </div>
+      {/* Main Content */}
+      <main className="flex-1 min-w-0 px-7 pb-3">
+        {/* Browse Header */}
+        <BrowseHeader
+          title={headerTitle}
+          resultCount={currentResultCount}
+          sortBy={sidebarFilters.orderBy || 'popularity'}
+          onSortChange={(sort) => setSidebarFilters((prev) => ({ ...prev, orderBy: sort }))}
+        />
 
-      {/* Search Results (shown when searching, hides tabs) */}
-      {searchInput ? (
-        <div>
-          {/* Results */}
-          {searchResults.length > 0 && (
-            <div className="overflow-visible">
-              <h2 className="text-xl font-semibold mb-4">
-                Search Results for "{searchQuery}" ({searchResults.length} results)
-              </h2>
-              <div className={`grid ${gridClasses} overflow-visible`}>
-                {searchResults.map((item) => (
-                  <MediaCard
-                    key={item.id}
-                    media={item}
-                    onClick={() => setSelectedMedia(item)}
-                    status={getStatus(item.id)}
-                  />
-                ))}
+        {/* Active Filter Chips */}
+        <ActiveFilterChips
+          filters={activeFilterChips}
+          onRemove={handleRemoveChip}
+          onClearAll={handleClearAllChips}
+        />
+
+        {/* Search Results (shown when searching, hides tabs) */}
+        {searchInput ? (
+          <div className="mt-4">
+            {/* Results */}
+            {searchResults.length > 0 && (
+              <div className="overflow-visible">
+                <div className={`grid ${gridClasses} overflow-visible`}>
+                  {searchResults.map((item) => (
+                    <MediaCard
+                      key={item.id}
+                      media={item}
+                      onClick={() => setSelectedMedia(item)}
+                      status={getStatus(item.id)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Error State */}
-          {searchError && (
-            <div className="text-center py-8">
-              <AlertCircle className="w-12 h-12 text-[var(--color-accent-primary)] mx-auto mb-3" />
-              <p className="text-[var(--color-text-secondary)]">{searchError}</p>
-            </div>
-          )}
+            {/* Error State */}
+            {searchError && (
+              <div className="text-center py-8">
+                <AlertCircle className="w-12 h-12 text-[var(--color-accent-primary)] mx-auto mb-3" />
+                <p className="text-[var(--color-text-secondary)]">{searchError}</p>
+              </div>
+            )}
 
-          {/* No Results */}
-          {!searchLoading && searchResults.length === 0 && !searchError && searchQuery && (
-            <div className="text-center py-12">
-              <p className="text-lg text-[var(--color-text-secondary)]">
-                No results found for "{searchQuery}"
-              </p>
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
-          {/* Tab Navigation */}
-          <div className="flex items-center gap-1 mb-6 border-b border-[var(--color-bg-hover)]">
-            <button
-              onClick={() => setActiveTab('browse')}
-              className={`px-4 py-3 text-sm font-medium transition-colors relative ${
-                activeTab === 'browse'
-                  ? 'text-[var(--color-accent-primary)]'
-                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4" />
-                Browse
-              </span>
-              {activeTab === 'browse' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent-primary)]" />
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('season')}
-              className={`px-4 py-3 text-sm font-medium transition-colors relative ${
-                activeTab === 'season'
-                  ? 'text-[var(--color-accent-primary)]'
-                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                Seasons
-              </span>
-              {activeTab === 'season' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent-primary)]" />
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('genres')}
-              className={`px-4 py-3 text-sm font-medium transition-colors relative ${
-                activeTab === 'genres'
-                  ? 'text-[var(--color-accent-primary)]'
-                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <TagIcon className="w-4 h-4" />
-                Genres
-              </span>
-              {activeTab === 'genres' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent-primary)]" />
-              )}
-            </button>
+            {/* No Results */}
+            {!searchLoading && searchResults.length === 0 && !searchError && searchQuery && (
+              <div className="text-center py-12">
+                <p className="text-lg text-[var(--color-text-secondary)]">
+                  No results found for "{searchQuery}"
+                </p>
+              </div>
+            )}
           </div>
+        ) : (
+          <div className="mt-4">
+            {/* Tab Content */}
+            {activeTab === 'browse' && (
+              // ========== BROWSE TAB ==========
+              hasActiveFilters ? (
+                // Filtered browse mode
+                <div>
+                  {filteredBrowseLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+                    </div>
+                  ) : filteredBrowseItems.length > 0 ? (
+                    <div className="overflow-visible">
+                      <div className={`grid ${gridClasses} overflow-visible`}>
+                        {filteredBrowseItems.map((item) => (
+                          <MediaCard
+                            key={item.id}
+                            media={item}
+                            onClick={() => setSelectedMedia(item)}
+                            status={getStatus(item.id)}
+                          />
+                        ))}
+                      </div>
 
-          {/* Tab Content */}
-          {activeTab === 'browse' && (
-            // ========== BROWSE TAB ==========
-            <div>
-              {/* Recommendations / Popular */}
-              <div>
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  {hasWatchHistory && userWatchingGenres.length > 0 ? (
-                    <>
-                      <Sparkles className="w-5 h-5 text-[var(--color-accent-primary)]" />
-                      Recommended for You
-                    </>
+                      <div ref={filteredBrowseLoadMoreRef} className="py-8 flex items-center justify-center">
+                        {filteredBrowseLoadingMore && (
+                          <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+                        )}
+                        {!filteredBrowseHasNext && filteredBrowseItems.length > 0 && (
+                          <p className="text-sm text-[var(--color-text-muted)]">
+                            You've reached the end
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   ) : (
-                    'Popular Anime'
+                    <div className="text-center py-12">
+                      <p className="text-[var(--color-text-secondary)]">
+                        No anime found matching the selected filters
+                      </p>
+                    </div>
                   )}
-                </h2>
-
-                {recommendationsLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-                  </div>
-                ) : recommendations.length > 0 ? (
-                  <div className="overflow-visible">
-                    <div className={`grid ${gridClasses} overflow-visible`}>
-                      {recommendations.map((item) => (
-                        <MediaCard
-                          key={item.id}
-                          media={item}
-                          onClick={() => setSelectedMedia(item)}
-                          status={getStatus(item.id)}
-                        />
-                      ))}
+                </div>
+              ) : (
+                // Default browse mode
+                <div>
+                  {recommendationsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
                     </div>
+                  ) : recommendations.length > 0 ? (
+                    <div className="overflow-visible">
+                      <div className={`grid ${gridClasses} overflow-visible`}>
+                        {recommendations.map((item) => (
+                          <MediaCard
+                            key={item.id}
+                            media={item}
+                            onClick={() => setSelectedMedia(item)}
+                            status={getStatus(item.id)}
+                          />
+                        ))}
+                      </div>
 
-                    {/* Infinite scroll sentinel */}
-                    <div ref={loadMoreRef} className="py-8 flex items-center justify-center">
-                      {loadingMore && (
-                        <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
-                      )}
-                      {!hasNextPage && recommendations.length > 0 && (
-                        <p className="text-sm text-[var(--color-text-muted)]">
-                          You've reached the end
-                        </p>
-                      )}
+                      {/* Infinite scroll sentinel */}
+                      <div ref={loadMoreRef} className="py-8 flex items-center justify-center">
+                        {loadingMore && (
+                          <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+                        )}
+                        {!hasNextPage && recommendations.length > 0 && (
+                          <p className="text-sm text-[var(--color-text-muted)]">
+                            You've reached the end
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <p className="text-[var(--color-text-secondary)]">
-                      No anime found
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'season' && (
-            // ========== SEASON TAB ==========
-            <div>
-              <div className="flex flex-wrap items-center gap-3 mb-6">
-                {/* Season Chips */}
-                <div className="flex gap-1.5">
-                  {seasonOptions.map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setSelectedSeason(s)}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                        selectedSeason === s
-                          ? 'bg-[var(--color-accent-primary)] text-white'
-                          : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                      }`}
-                    >
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
+                  ) : (
+                    <div className="text-center py-12">
+                      <p className="text-[var(--color-text-secondary)]">
+                        No anime found
+                      </p>
+                    </div>
+                  )}
                 </div>
+              )
+            )}
 
-                {/* Year Dropdown */}
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(Number(e.target.value))}
-                  className="bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)]
-                             rounded-lg px-3 py-1.5 text-sm text-[var(--color-text-primary)]
-                             focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]"
-                >
-                  {yearOptions.map(y => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-
-                {/* Sort indicator */}
-                <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] ml-auto">
-                  <Star className="w-4 h-4 text-yellow-400" />
-                  Sorted by Rating
-                </div>
-              </div>
-
-              {fullSeasonLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
-                </div>
-              ) : fullSeasonAnime.length > 0 ? (
-                <div className="overflow-visible">
-                  <div className={`grid ${gridClasses} overflow-visible`}>
-                    {fullSeasonAnime.map((item) => (
-                      <MediaCard
-                        key={item.id}
-                        media={item}
-                        onClick={() => setSelectedMedia(item)}
-                        status={getStatus(item.id)}
-                      />
+            {activeTab === 'season' && (
+              // ========== SEASON TAB ==========
+              <div>
+                <div className="flex flex-wrap items-center gap-3 mb-6">
+                  {/* Season Chips */}
+                  <div className="flex gap-1.5">
+                    {seasonOptions.map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setSelectedSeason(s)}
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 ${
+                          selectedSeason === s
+                            ? 'bg-[var(--color-accent-primary)] text-white shadow-[0_0_12px_rgba(229,9,20,0.3)]'
+                            : 'text-[var(--color-text-secondary)] border border-[var(--color-glass-border)] hover:text-white hover:border-[var(--color-glass-border-hover)]'
+                        }`}
+                      >
+                        {s.charAt(0).toUpperCase() + s.slice(1)}
+                      </button>
                     ))}
                   </div>
 
-                  {/* Infinite scroll sentinel */}
-                  <div ref={seasonLoadMoreRef} className="py-8 flex items-center justify-center">
-                    {fullSeasonLoadingMore && (
-                      <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
-                    )}
-                    {!fullSeasonHasNextPage && fullSeasonAnime.length > 0 && (
-                      <p className="text-sm text-[var(--color-text-muted)]">
-                        All {fullSeasonAnime.length} anime from {selectedSeason.charAt(0).toUpperCase() + selectedSeason.slice(1)} {selectedYear} loaded
-                      </p>
-                    )}
+                  {/* Year Dropdown */}
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-md)] px-3 py-1.5 text-sm text-white focus:outline-none focus:border-[var(--color-accent-primary)] transition-colors"
+                  >
+                    {yearOptions.map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+
+                  {/* Sort indicator */}
+                  <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] ml-auto">
+                    <Star className="w-3.5 h-3.5 text-[var(--color-gold)]" />
+                    Sorted by Rating
                   </div>
                 </div>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-[var(--color-text-secondary)]">
-                    No anime found for {selectedSeason.charAt(0).toUpperCase() + selectedSeason.slice(1)} {selectedYear}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
 
-          {activeTab === 'genres' && (
-            // ========== GENRES TAB ==========
-            <div>
-              <GenreFilterBar
-                genres={animeGenres}
-                selectedGenreIds={selectedGenreIds}
-                onToggleGenre={(id) => {
-                  setSelectedGenreIds(prev => {
-                    const next = new Set(prev)
-                    if (next.has(id)) {
-                      next.delete(id)
-                    } else {
-                      next.add(id)
-                    }
-                    return next
-                  })
-                }}
-                filters={genreFilters}
-                onFilterChange={setGenreFilters}
-                mediaType="anime"
-                loading={genresLoading}
-              />
-
-              {/* Genre Results */}
-              <div className="mt-6">
-                {genreResultsLoading ? (
+                {fullSeasonLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
                   </div>
-                ) : genreResults.length > 0 ? (
+                ) : fullSeasonAnime.length > 0 ? (
                   <div className="overflow-visible">
-                    <p className="text-sm text-[var(--color-text-muted)] mb-4">
-                      {genreResults.length} results
-                    </p>
                     <div className={`grid ${gridClasses} overflow-visible`}>
-                      {genreResults.map((item) => (
+                      {fullSeasonAnime.map((item) => (
                         <MediaCard
                           key={item.id}
                           media={item}
@@ -791,36 +876,104 @@ function AnimeScreen() {
                     </div>
 
                     {/* Infinite scroll sentinel */}
-                    <div ref={genreLoadMoreRef} className="py-8 flex items-center justify-center">
-                      {genreLoadingMore && (
+                    <div ref={seasonLoadMoreRef} className="py-8 flex items-center justify-center">
+                      {fullSeasonLoadingMore && (
                         <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
                       )}
-                      {!genreHasNextPage && genreResults.length > 0 && (
+                      {!fullSeasonHasNextPage && fullSeasonAnime.length > 0 && (
                         <p className="text-sm text-[var(--color-text-muted)]">
-                          You've reached the end
+                          All {fullSeasonAnime.length} anime from {selectedSeason.charAt(0).toUpperCase() + selectedSeason.slice(1)} {selectedYear} loaded
                         </p>
                       )}
                     </div>
                   </div>
-                ) : selectedGenreIds.size > 0 || genreFilters.orderBy || genreFilters.status || genreFilters.type ? (
-                  <div className="text-center py-12">
-                    <p className="text-[var(--color-text-secondary)]">
-                      No anime found matching the selected filters
-                    </p>
-                  </div>
                 ) : (
                   <div className="text-center py-12">
-                    <TagIcon className="w-12 h-12 text-[var(--color-text-muted)] mx-auto mb-3" />
                     <p className="text-[var(--color-text-secondary)]">
-                      Select one or more genres to browse anime
+                      No anime found for {selectedSeason.charAt(0).toUpperCase() + selectedSeason.slice(1)} {selectedYear}
                     </p>
                   </div>
                 )}
               </div>
-            </div>
-          )}
-        </>
-      )}
+            )}
+
+            {activeTab === 'genres' && (
+              // ========== GENRES TAB ==========
+              <div>
+                <GenreFilterBar
+                  genres={animeGenres}
+                  selectedGenreIds={selectedGenreIds}
+                  onToggleGenre={(id) => {
+                    setSelectedGenreIds(prev => {
+                      const next = new Set(prev)
+                      if (next.has(id)) {
+                        next.delete(id)
+                      } else {
+                        next.add(id)
+                      }
+                      return next
+                    })
+                  }}
+                  filters={genreFilters}
+                  onFilterChange={setGenreFilters}
+                  mediaType="anime"
+                  loading={genresLoading}
+                />
+
+                {/* Genre Results */}
+                <div className="mt-6">
+                  {genreResultsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
+                    </div>
+                  ) : genreResults.length > 0 ? (
+                    <div className="overflow-visible">
+                      <p className="text-sm text-[var(--color-text-muted)] mb-4">
+                        {genreResults.length} results
+                      </p>
+                      <div className={`grid ${gridClasses} overflow-visible`}>
+                        {genreResults.map((item) => (
+                          <MediaCard
+                            key={item.id}
+                            media={item}
+                            onClick={() => setSelectedMedia(item)}
+                            status={getStatus(item.id)}
+                          />
+                        ))}
+                      </div>
+
+                      {/* Infinite scroll sentinel */}
+                      <div ref={genreLoadMoreRef} className="py-8 flex items-center justify-center">
+                        {genreLoadingMore && (
+                          <Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent-primary)]" />
+                        )}
+                        {!genreHasNextPage && genreResults.length > 0 && (
+                          <p className="text-sm text-[var(--color-text-muted)]">
+                            You've reached the end
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : selectedGenreIds.size > 0 || genreFilters.orderBy || genreFilters.status || genreFilters.type ? (
+                    <div className="text-center py-12">
+                      <p className="text-[var(--color-text-secondary)]">
+                        No anime found matching the selected filters
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <TagIcon className="w-12 h-12 text-[var(--color-text-muted)] mx-auto mb-3" />
+                      <p className="text-[var(--color-text-secondary)]">
+                        Select one or more genres to browse anime
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
 
       {/* Media Detail Modal */}
       {selectedMedia && (

@@ -11,14 +11,6 @@ function getUserAvatar(review: JikanReview): string | undefined {
   return imgs.webp?.image_url || imgs.jpg?.image_url || undefined
 }
 
-function getScoreColor(score: number): string {
-  if (score >= 9) return 'bg-green-500'
-  if (score >= 7) return 'bg-lime-500'
-  if (score >= 5) return 'bg-yellow-500'
-  if (score >= 3) return 'bg-orange-500'
-  return 'bg-red-500'
-}
-
 function formatDate(dateStr?: string): string {
   if (!dateStr) return ''
   try {
@@ -39,35 +31,36 @@ export function ReviewCard({ review }: ReviewCardProps) {
   const isLong = reviewText.length > 300
 
   return (
-    <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4">
+    <div className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-md)] p-4">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-8 h-8 rounded-full overflow-hidden bg-[var(--color-bg-hover)] shrink-0">
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="w-9 h-9 rounded-full shrink-0 bg-[var(--color-accent-gradient)] flex items-center justify-center text-white text-sm font-bold">
           {avatarUrl ? (
             <img
               src={avatarUrl}
               alt={review.user?.username || 'User'}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover rounded-full"
               loading="lazy"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
-              ?
-            </div>
+            (review.user?.username || '?')[0].toUpperCase()
           )}
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
             {review.user?.username || 'Anonymous'}
           </p>
-          <p className="text-xs text-[var(--color-text-muted)]">
+          <p className="text-[0.7rem] text-[var(--color-text-muted)]">
             {formatDate(review.date)}
           </p>
         </div>
         {review.score != null && (
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 ${getScoreColor(review.score)}`}>
-            {review.score}
-          </div>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-yellow-500/15 text-yellow-400 text-xs font-bold shrink-0">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="#f59e0b" stroke="none">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            {review.score}/10
+          </span>
         )}
       </div>
 
@@ -120,14 +113,17 @@ export function ReviewCard({ review }: ReviewCardProps) {
 interface ReviewListProps {
   reviews: JikanReview[]
   loading?: boolean
+  onLoadMore?: () => void
+  hasMore?: boolean
+  loadingMore?: boolean
 }
 
-export function ReviewList({ reviews, loading }: ReviewListProps) {
+export function ReviewList({ reviews, loading, onLoadMore, hasMore, loadingMore }: ReviewListProps) {
   if (loading) {
     return (
       <div className="space-y-4">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="bg-[var(--color-bg-secondary)] rounded-lg p-4 animate-pulse">
+          <div key={i} className="bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-md)] p-4 animate-pulse">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-8 h-8 rounded-full bg-[var(--color-bg-hover)]" />
               <div className="flex-1">
@@ -159,6 +155,17 @@ export function ReviewList({ reviews, loading }: ReviewListProps) {
       {reviews.map((review) => (
         <ReviewCard key={review.mal_id} review={review} />
       ))}
+      {hasMore && onLoadMore && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="px-5 py-2 rounded-full text-sm font-medium bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:border-[var(--color-accent-primary)] transition-all disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading...' : 'Load More Reviews'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

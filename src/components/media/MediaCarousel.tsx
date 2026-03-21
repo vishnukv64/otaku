@@ -8,6 +8,7 @@
  */
 
 import { useCallback } from 'react'
+import { Link } from '@tanstack/react-router'
 import useEmblaCarousel from 'embla-carousel-react'
 import { WheelGesturesPlugin } from 'embla-carousel-wheel-gestures'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
@@ -23,6 +24,10 @@ interface MediaCarouselProps {
   onItemClick?: (item: SearchResult) => void
   /** When true, displays rank numbers (1, 2, 3...) on each card */
   showRank?: boolean
+  /** Optional "See all" link href */
+  seeAllHref?: string
+  /** Optional "See all" link text (default: "See all") */
+  seeAllText?: string
 }
 
 // Flex-basis classes for carousel items based on grid density
@@ -50,7 +55,7 @@ const skeletonGridClasses = {
   spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-6',
 }
 
-export function MediaCarousel({ title, items, loading = false, onItemClick, showRank }: MediaCarouselProps) {
+export function MediaCarousel({ title, items, loading = false, onItemClick, showRank, seeAllHref, seeAllText = 'See all' }: MediaCarouselProps) {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const { getStatus } = useMediaStatusContext()
 
@@ -73,8 +78,8 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
 
   if (loading) {
     return (
-      <div className="mb-12">
-        <h2 className="text-xl font-semibold mb-4">{title}</h2>
+      <div className="mb-9">
+        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3">{title}</h2>
         <div className={`grid ${skeletonGridClasses[gridDensity]}`}>
           {Array.from({ length: 6 }).map((_, i) => (
             <MediaCardSkeleton key={i} />
@@ -89,31 +94,42 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
   }
 
   return (
-    <div className="mb-12 group/carousel overflow-visible">
-      {/* Title */}
-      <h2 className="text-xl font-semibold mb-4">{title}</h2>
+    <div className="mb-9 group/carousel overflow-visible">
+      {/* Section Header */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">{title}</h2>
+        {seeAllHref && (
+          <Link
+            to={seeAllHref}
+            className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+          >
+            {seeAllText}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+          </Link>
+        )}
+      </div>
 
       {/* Carousel Container */}
       <div className="relative" style={{ overflow: 'visible' }}>
-        {/* Previous Button - Always visible on hover */}
+        {/* Previous Button */}
         <button
           onClick={scrollPrev}
-          className="absolute left-0 top-0 bottom-0 z-10 w-16 bg-gradient-to-r from-black via-black/80 to-transparent opacity-0 group-hover/carousel:opacity-100 transition-all flex items-center justify-start pl-2 hover:w-20"
+          className="absolute left-0 top-0 bottom-0 z-10 w-14 bg-gradient-to-r from-[var(--color-void)] to-transparent opacity-0 group-hover/carousel:opacity-100 transition-all flex items-center justify-start pl-1"
           aria-label="Previous"
         >
-          <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 hover:scale-110 transition-all">
-            <ChevronLeft size={28} />
+          <div className="w-10 h-10 rounded-full glass flex items-center justify-center hover:scale-110 transition-all">
+            <ChevronLeft size={22} />
           </div>
         </button>
 
-        {/* Next Button - Always visible on hover */}
+        {/* Next Button */}
         <button
           onClick={scrollNext}
-          className="absolute right-0 top-0 bottom-0 z-10 w-16 bg-gradient-to-l from-black via-black/80 to-transparent opacity-0 group-hover/carousel:opacity-100 transition-all flex items-center justify-end pr-2 hover:w-20"
+          className="absolute right-0 top-0 bottom-0 z-10 w-14 bg-gradient-to-l from-[var(--color-void)] to-transparent opacity-0 group-hover/carousel:opacity-100 transition-all flex items-center justify-end pr-1"
           aria-label="Next"
         >
-          <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 hover:scale-110 transition-all">
-            <ChevronRight size={28} />
+          <div className="w-10 h-10 rounded-full glass flex items-center justify-center hover:scale-110 transition-all">
+            <ChevronRight size={22} />
           </div>
         </button>
 
