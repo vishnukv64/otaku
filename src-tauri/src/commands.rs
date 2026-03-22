@@ -3361,3 +3361,154 @@ pub async fn get_migration_progress() -> Result<MigrationProgress, String> {
     let progress = migration_runner::MIGRATION_PROGRESS.lock().unwrap().clone();
     Ok(progress)
 }
+
+// --- History Commands ---
+
+#[tauri::command]
+pub async fn get_all_history(
+    state: State<'_, AppState>,
+    page: i32,
+    limit: i32,
+    media_type: Option<String>,
+    search: Option<String>,
+) -> Result<Vec<crate::database::history::HistoryEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::history::get_all_history(
+        pool, page, limit,
+        media_type.as_deref(),
+        search.as_deref(),
+    ).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_history_grouped_by_media(
+    state: State<'_, AppState>,
+    page: i32,
+    limit: i32,
+    media_type: Option<String>,
+    search: Option<String>,
+) -> Result<Vec<crate::database::history::MediaHistorySummary>, String> {
+    let pool = state.database.pool();
+    crate::database::history::get_history_grouped_by_media(
+        pool, page, limit,
+        media_type.as_deref(),
+        search.as_deref(),
+    ).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_watch_history_entry(
+    state: State<'_, AppState>,
+    media_id: String,
+    episode_id: String,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    crate::database::history::remove_watch_history_entry(pool, &media_id, &episode_id)
+        .await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_reading_history_entry(
+    state: State<'_, AppState>,
+    media_id: String,
+    chapter_id: String,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    crate::database::history::remove_reading_history_entry(pool, &media_id, &chapter_id)
+        .await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn clear_all_reading_history(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    crate::database::history::clear_all_reading_history(pool)
+        .await.map_err(|e| e.to_string())
+}
+
+// --- Stats Commands ---
+
+#[tauri::command]
+pub async fn get_watch_stats_summary(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::WatchStatsSummary, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_watch_stats_summary(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_reading_stats_summary(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::ReadingStatsSummary, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_reading_stats_summary(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_daily_activity(
+    state: State<'_, AppState>,
+    days: i32,
+) -> Result<Vec<crate::database::stats::DailyActivity>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_daily_activity(pool, days).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_genre_stats(
+    state: State<'_, AppState>,
+    media_type: Option<String>,
+) -> Result<Vec<crate::database::stats::GenreStat>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_genre_stats(pool, media_type.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_completion_stats(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::CompletionStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_completion_stats(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_top_watched_anime(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::stats::TopWatchedEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_top_watched_anime(pool, limit).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_top_read_manga(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::stats::TopReadEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_top_read_manga(pool, limit).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_streak_stats(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::StreakStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_streak_stats(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_activity_patterns(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::ActivityPatterns, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_activity_patterns(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_binge_stats(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::BingeStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_binge_stats(pool).await.map_err(|e| e.to_string())
+}

@@ -522,6 +522,23 @@ pub fn run() {
       commands::check_migration_needed,
       commands::start_migration,
       commands::get_migration_progress,
+      // History
+      commands::get_all_history,
+      commands::get_history_grouped_by_media,
+      commands::remove_watch_history_entry,
+      commands::remove_reading_history_entry,
+      commands::clear_all_reading_history,
+      // Stats
+      commands::get_watch_stats_summary,
+      commands::get_reading_stats_summary,
+      commands::get_daily_activity,
+      commands::get_genre_stats,
+      commands::get_completion_stats,
+      commands::get_top_watched_anime,
+      commands::get_top_read_manga,
+      commands::get_streak_stats,
+      commands::get_activity_patterns,
+      commands::get_binge_stats,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
