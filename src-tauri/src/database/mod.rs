@@ -13,6 +13,7 @@ use anyhow::{Result, Context};
 pub mod watch_history;
 pub mod reading_history;
 pub mod history;
+pub mod stats;
 pub mod library;
 pub mod media;
 pub mod tags;
