@@ -14,6 +14,7 @@ import {
   getStreakStats,
   getActivityPatterns,
   getBingeStats,
+  getDailyActivity,
 } from '@/utils/tauri-commands'
 import type {
   WatchStatsSummary,
@@ -24,6 +25,7 @@ import type {
   StreakStats,
   ActivityPatterns,
   BingeStats,
+  DailyActivity,
 } from '@/utils/tauri-commands'
 
 import { SummaryCards } from './SummaryCards'
@@ -42,6 +44,7 @@ export function StatsPage() {
   const [streaks, setStreaks] = useState<StreakStats | null>(null)
   const [patterns, setPatterns] = useState<ActivityPatterns | null>(null)
   const [binge, setBinge] = useState<BingeStats | null>(null)
+  const [dailyActivity, setDailyActivity] = useState<DailyActivity[] | null>(null)
 
   useEffect(() => {
     // Fire all API calls in parallel
@@ -55,6 +58,7 @@ export function StatsPage() {
         getStreakStats(),             // 5
         getActivityPatterns(),        // 6
         getBingeStats(),              // 7
+        getDailyActivity(30),        // 8 — initial 30D data for ActivityChart
       ])
 
       if (results[0].status === 'fulfilled') setWatchStats(results[0].value)
@@ -65,6 +69,9 @@ export function StatsPage() {
       if (results[5].status === 'fulfilled') setStreaks(results[5].value)
       if (results[6].status === 'fulfilled') setPatterns(results[6].value)
       if (results[7].status === 'fulfilled') setBinge(results[7].value)
+      // Pass initial activity data (or empty array on failure) so ActivityChart
+      // does not need to fire its own query during the initial pool-contention window
+      setDailyActivity(results[8].status === 'fulfilled' ? results[8].value : [])
 
       // Log any failures
       results.forEach((r, i) => {
@@ -93,8 +100,8 @@ export function StatsPage() {
         {/* Summary Cards */}
         <SummaryCards watchStats={watchStats} readingStats={readingStats} />
 
-        {/* Activity Chart (manages its own data fetching) */}
-        <ActivityChart />
+        {/* Activity Chart — receives initial 30D data to avoid pool contention */}
+        <ActivityChart initialData={dailyActivity} />
 
         {/* Genre Distribution (manages its own data fetching) */}
         <GenreDistribution />

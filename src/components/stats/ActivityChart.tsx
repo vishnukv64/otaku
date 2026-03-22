@@ -45,15 +45,27 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   )
 }
 
-export function ActivityChart() {
+interface ActivityChartProps {
+  /** Pre-fetched 30-day data from StatsPage to avoid SQLite pool contention on mount.
+   *  null = still loading, undefined = not provided (fallback to self-fetch). */
+  initialData?: DailyActivity[] | null
+}
+
+export function ActivityChart({ initialData }: ActivityChartProps) {
   const [selectedPeriod, setSelectedPeriod] = useState(1) // 30D default
-  const [data, setData] = useState<DailyActivity[] | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<DailyActivity[]>([])
+  const [loading, setLoading] = useState(false)
 
   const fetchData = useCallback(async (days: number) => {
     setLoading(true)
     try {
-      const result = await getDailyActivity(days)
+      // Race against a timeout so a hung invoke never causes a perpetual spinner
+      const result = await Promise.race([
+        getDailyActivity(days),
+        new Promise<DailyActivity[]>((_, reject) =>
+          setTimeout(() => reject(new Error('Activity fetch timed out')), 10_000)
+        ),
+      ])
       setData(result)
     } catch (err) {
       console.error('Failed to fetch daily activity:', err)
@@ -63,9 +75,19 @@ export function ActivityChart() {
     }
   }, [])
 
+  // Seed data from parent-provided initial batch (30D), avoiding an extra DB call
   useEffect(() => {
+    if (initialData != null && selectedPeriod === 1) {
+      setData(initialData)
+    }
+  }, [initialData]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch when user changes period, or when no initial data was provided
+  useEffect(() => {
+    // If parent already gave us 30D data, skip the redundant fetch
+    if (selectedPeriod === 1 && initialData != null) return
     fetchData(periods[selectedPeriod].days)
-  }, [selectedPeriod, fetchData])
+  }, [selectedPeriod, fetchData, initialData])
 
   const isEmpty = !data || data.length === 0 || data.every((d) => d.watch_minutes === 0 && d.read_minutes === 0)
 
