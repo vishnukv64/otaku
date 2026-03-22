@@ -154,24 +154,22 @@ pub async fn get_reading_stats_summary(pool: &SqlitePool) -> Result<ReadingStats
 }
 
 pub async fn get_daily_activity(pool: &SqlitePool, days: i32) -> Result<Vec<DailyActivity>> {
-    // Use SQLite's built-in 'localtime' modifier to convert UTC to system local time
-
     // When days <= 0, return all activity (no date filter)
     let watch_where = if days > 0 {
-        format!("WHERE DATE(last_watched, 'localtime') >= DATE('now', 'localtime', '-{} days')", days)
+        format!("WHERE DATE(last_watched) >= DATE('now', '-{} days')", days)
     } else {
         String::new()
     };
 
     let read_where = if days > 0 {
-        format!("WHERE DATE(last_read, 'localtime') >= DATE('now', 'localtime', '-{} days')", days)
+        format!("WHERE DATE(last_read) >= DATE('now', '-{} days')", days)
     } else {
         String::new()
     };
 
-    // Watch minutes per day (using local date)
+    // Watch minutes per day
     let watch_query = format!(
-        "SELECT DATE(last_watched, 'localtime') as day, SUM(progress_seconds) / 60.0 as minutes
+        "SELECT DATE(last_watched) as day, SUM(progress_seconds) / 60.0 as minutes
         FROM watch_history
         {}
         GROUP BY day ORDER BY day",
@@ -183,7 +181,7 @@ pub async fn get_daily_activity(pool: &SqlitePool, days: i32) -> Result<Vec<Dail
 
     // Read minutes per day (estimated from pages)
     let read_query = format!(
-        "SELECT DATE(last_read, 'localtime') as day,
+        "SELECT DATE(last_read) as day,
             SUM(CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
         FROM reading_history
         {}
@@ -397,14 +395,12 @@ pub async fn get_top_read_manga(pool: &SqlitePool, limit: i32) -> Result<Vec<Top
 }
 
 pub async fn get_streak_stats(pool: &SqlitePool) -> Result<StreakStats> {
-    // Get all unique active dates in local timezone
-    // Use SQLite's built-in 'localtime' modifier to convert UTC to system local time
-
+    // Get all unique active dates
     let rows = sqlx::query(
             "SELECT DISTINCT day FROM (
-                SELECT DATE(last_watched, 'localtime') as day FROM watch_history
+                SELECT DATE(last_watched) as day FROM watch_history
                 UNION
-                SELECT DATE(last_read, 'localtime') as day FROM reading_history
+                SELECT DATE(last_read) as day FROM reading_history
             ) ORDER BY day DESC"
     )
     .fetch_all(pool)
@@ -489,17 +485,15 @@ pub async fn get_streak_stats(pool: &SqlitePool) -> Result<StreakStats> {
 }
 
 pub async fn get_activity_patterns(pool: &SqlitePool) -> Result<ActivityPatterns> {
-    // Use SQLite's built-in 'localtime' modifier to convert UTC to system local time
-
     // Most active day of week
     let dow_rows = sqlx::query(
         &format!(
             "SELECT day_of_week, AVG(total_minutes) as avg_min FROM (
                 SELECT strftime('%w', day) as day_of_week, SUM(minutes) as total_minutes FROM (
-                    SELECT DATE(last_watched, 'localtime') as day, SUM(progress_seconds) / 60.0 as minutes
+                    SELECT DATE(last_watched) as day, SUM(progress_seconds) / 60.0 as minutes
                     FROM watch_history GROUP BY day
                     UNION ALL
-                    SELECT DATE(last_read, 'localtime') as day,
+                    SELECT DATE(last_read) as day,
                         SUM(CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
                     FROM reading_history GROUP BY day
                 ) GROUP BY day
@@ -529,10 +523,10 @@ pub async fn get_activity_patterns(pool: &SqlitePool) -> Result<ActivityPatterns
         &format!(
             "SELECT AVG(total_minutes) as avg_min FROM (
                 SELECT SUM(minutes) as total_minutes FROM (
-                    SELECT DATE(last_watched, 'localtime') as day, SUM(progress_seconds) / 60.0 as minutes
+                    SELECT DATE(last_watched) as day, SUM(progress_seconds) / 60.0 as minutes
                     FROM watch_history GROUP BY day
                     UNION ALL
-                    SELECT DATE(last_read, 'localtime') as day,
+                    SELECT DATE(last_read) as day,
                         SUM(CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
                     FROM reading_history GROUP BY day
                 ) GROUP BY day
@@ -553,8 +547,6 @@ pub async fn get_activity_patterns(pool: &SqlitePool) -> Result<ActivityPatterns
 }
 
 pub async fn get_binge_stats(pool: &SqlitePool) -> Result<BingeStats> {
-    // Use SQLite's built-in 'localtime' modifier to convert UTC to system local time
-
     // Most episodes in a single day
     let ep_row = sqlx::query(
             "SELECT m.title, DATE(w.last_watched, 'localtime') as day, COUNT(*) as cnt
