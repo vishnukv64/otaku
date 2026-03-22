@@ -14,6 +14,8 @@ const navItems = [
   { name: 'Manga', path: '/manga' },
   { name: 'Schedule', path: '/schedule' },
   { name: 'Library', path: '/library' },
+  { name: 'History', path: '/history' },
+  { name: 'Stats', path: '/stats' },
 ]
 
 interface TopNavProps {

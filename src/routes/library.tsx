@@ -7,9 +7,9 @@
  * - Filters and sorting
  */
 
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, useCallback } from 'react'
-import { Loader2, AlertCircle, Download, Tv, BookOpen, CheckSquare, Square } from 'lucide-react'
+import { Loader2, AlertCircle, Download, Tv, BookOpen, CheckSquare, Square, Clock, BarChart3 } from 'lucide-react'
 import { getLibraryWithMedia, loadExtension, getDownloadsWithMedia, getDownloadedMangaWithMedia, getLibraryTagsWithCounts, getLibraryByTag, type LibraryEntryWithMedia, type LibraryStatus, type DownloadWithMedia, type DownloadedMangaWithMedia, type LibraryTagWithCount } from '@/utils/tauri-commands'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from '@/components/media/MediaCard'
@@ -20,6 +20,7 @@ import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
+import { isMobile } from '@/utils/platform'
 
 export const Route = createFileRoute('/library')({
   component: LibraryScreen,
@@ -356,6 +357,18 @@ function LibraryScreen() {
           {library.length + downloadedAnime.length + downloadedManga.length} titles
         </p>
       </div>
+
+      {/* Mobile-only shortcut buttons */}
+      {isMobile() && (
+        <div className="flex gap-2 px-4 mb-3">
+          <Link to="/history" className="flex-1 flex items-center justify-center gap-2 bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] rounded-lg py-2.5 text-sm font-medium text-[var(--color-text-secondary)]">
+            <Clock size={16} /> History
+          </Link>
+          <Link to="/stats" className="flex-1 flex items-center justify-center gap-2 bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] rounded-lg py-2.5 text-sm font-medium text-[var(--color-text-secondary)]">
+            <BarChart3 size={16} /> Stats
+          </Link>
+        </div>
+      )}
 
       {/* Media Type Filter and Tag Filter */}
       <div className="mb-6 flex flex-wrap items-center gap-3">
