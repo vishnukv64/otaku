@@ -156,32 +156,43 @@ pub async fn get_reading_stats_summary(pool: &SqlitePool) -> Result<ReadingStats
 pub async fn get_daily_activity(pool: &SqlitePool, days: i32) -> Result<Vec<DailyActivity>> {
     // Use SQLite's built-in 'localtime' modifier to convert UTC to system local time
 
+    // When days <= 0, return all activity (no date filter)
+    let watch_where = if days > 0 {
+        format!("WHERE DATE(last_watched, 'localtime') >= DATE('now', 'localtime', '-{} days')", days)
+    } else {
+        String::new()
+    };
+
+    let read_where = if days > 0 {
+        format!("WHERE DATE(last_read, 'localtime') >= DATE('now', 'localtime', '-{} days')", days)
+    } else {
+        String::new()
+    };
+
     // Watch minutes per day (using local date)
-    let watch_rows = sqlx::query(
-        &format!(
-            "SELECT DATE(last_watched, 'localtime') as day, SUM(progress_seconds) / 60.0 as minutes
-            FROM watch_history
-            WHERE DATE(last_watched, 'localtime') >= DATE('now', 'localtime', '-{} days')
-            GROUP BY day ORDER BY day",
-            days
-        )
-    )
-    .fetch_all(pool)
-    .await?;
+    let watch_query = format!(
+        "SELECT DATE(last_watched, 'localtime') as day, SUM(progress_seconds) / 60.0 as minutes
+        FROM watch_history
+        {}
+        GROUP BY day ORDER BY day",
+        watch_where
+    );
+    let watch_rows = sqlx::query(&watch_query)
+        .fetch_all(pool)
+        .await?;
 
     // Read minutes per day (estimated from pages)
-    let read_rows = sqlx::query(
-        &format!(
-            "SELECT DATE(last_read, 'localtime') as day,
-                SUM(CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
-            FROM reading_history
-            WHERE DATE(last_read, 'localtime') >= DATE('now', 'localtime', '-{} days')
-            GROUP BY day ORDER BY day",
-            READING_MINUTES_PER_PAGE, days
-        )
-    )
-    .fetch_all(pool)
-    .await?;
+    let read_query = format!(
+        "SELECT DATE(last_read, 'localtime') as day,
+            SUM(CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
+        FROM reading_history
+        {}
+        GROUP BY day ORDER BY day",
+        READING_MINUTES_PER_PAGE, read_where
+    );
+    let read_rows = sqlx::query(&read_query)
+        .fetch_all(pool)
+        .await?;
 
     // Merge watch and read data into a single timeline
     use std::collections::BTreeMap;
