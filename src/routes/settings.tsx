@@ -15,9 +15,9 @@ import { DangerButton } from '../components/settings/DangerButton'
 import { UpdateSection } from '../components/settings/UpdateSection'
 import { ExportImportSection } from '../components/settings/ExportImportSection'
 import { AutoBackupSection } from '../components/settings/AutoBackupSection'
+import { DeveloperStats } from '@/components/settings/DeveloperStats'
 import {
   HardDrive,
-  Activity,
   ChevronRight,
   FileText,
   Info,
@@ -470,19 +470,7 @@ function SettingsScreen() {
             {/* Developer Section — hidden on mobile */}
             {!isMobile() && (
               <SettingSection title="Developer" description="Debugging and diagnostic tools">
-                <SettingRow
-                  label="System Stats"
-                  description="View real-time CPU, memory, and storage metrics"
-                >
-                  <Link
-                    to="/stats"
-                    className="flex items-center gap-2 bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] rounded-lg px-4 py-2 font-medium transition-colors"
-                  >
-                    <Activity size={16} />
-                    View Stats
-                    <ChevronRight size={16} className="text-[var(--color-text-tertiary)]" />
-                  </Link>
-                </SettingRow>
+                <DeveloperStats />
                 <SettingRow
                   label="Application Logs"
                   description="View error logs and debug information"
