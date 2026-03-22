@@ -25,25 +25,22 @@ function formatDuration(totalSeconds: number): string {
 export function SummaryCards({ watchStats, readingStats }: SummaryCardsProps) {
   const cards = [
     {
-      icon: <Clock size={22} />,
+      icon: <Clock size={20} />,
       label: 'Time Watched',
       value: watchStats ? formatDuration(watchStats.total_time_seconds) : '--',
-      color: '#3b82f6',
     },
     {
-      icon: <Tv size={22} />,
+      icon: <Tv size={20} />,
       label: 'Episodes Completed',
       value: watchStats ? watchStats.episodes_completed.toLocaleString() : '--',
-      color: '#8b5cf6',
     },
     {
-      icon: <BookOpen size={22} />,
+      icon: <BookOpen size={20} />,
       label: 'Chapters Read',
       value: readingStats ? readingStats.total_chapters_completed.toLocaleString() : '--',
-      color: '#f59e0b',
     },
     {
-      icon: <Trophy size={22} />,
+      icon: <Trophy size={20} />,
       label: 'Series Completed',
       value:
         watchStats && readingStats
@@ -53,7 +50,6 @@ export function SummaryCards({ watchStats, readingStats }: SummaryCardsProps) {
             : readingStats
               ? readingStats.series_completed.toLocaleString()
               : '--',
-      color: '#10b981',
     },
   ]
 
@@ -62,20 +58,15 @@ export function SummaryCards({ watchStats, readingStats }: SummaryCardsProps) {
       {cards.map((card) => (
         <div
           key={card.label}
-          className="p-5 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] transition-all hover:border-[var(--color-border-hover)]"
+          className="p-5 rounded-xl bg-[var(--color-surface-subtle)] transition-colors hover:bg-[var(--color-surface-hover)]"
         >
-          <div className="flex items-center gap-3 mb-3">
-            <div
-              className="p-2 rounded-lg"
-              style={{ backgroundColor: `${card.color}20` }}
-            >
-              <div style={{ color: card.color }}>{card.icon}</div>
-            </div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-[var(--color-text-tertiary)]">{card.icon}</div>
             <span className="text-sm font-medium text-[var(--color-text-secondary)]">
               {card.label}
             </span>
           </div>
-          <p className="text-2xl font-bold text-[var(--color-text-primary)]">{card.value}</p>
+          <p className="text-3xl font-bold text-[var(--color-text-primary)]">{card.value}</p>
         </div>
       ))}
     </div>

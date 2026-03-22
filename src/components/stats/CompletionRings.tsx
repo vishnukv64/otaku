@@ -16,11 +16,11 @@ interface RingSegment {
 
 function getSegments(cat: CompletionStatsCategory): RingSegment[] {
   return [
-    { label: 'Completed', value: cat.completed, color: '#10b981' },
-    { label: 'Watching', value: cat.watching, color: '#3b82f6' },
-    { label: 'On Hold', value: cat.on_hold, color: '#eab308' },
-    { label: 'Dropped', value: cat.dropped, color: '#ef4444' },
-    { label: 'Plan to Watch', value: cat.plan_to_watch, color: '#6b7280' },
+    { label: 'Completed', value: cat.completed, color: 'rgba(229, 9, 20, 0.9)' },
+    { label: 'Watching', value: cat.watching, color: 'rgba(229, 9, 20, 0.55)' },
+    { label: 'On Hold', value: cat.on_hold, color: 'rgba(255, 255, 255, 0.25)' },
+    { label: 'Dropped', value: cat.dropped, color: 'rgba(255, 255, 255, 0.12)' },
+    { label: 'Plan to Watch', value: cat.plan_to_watch, color: 'rgba(255, 255, 255, 0.06)' },
   ]
 }
 
@@ -51,7 +51,7 @@ function DonutRing({
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="var(--color-surface-subtle)"
+            stroke="var(--color-surface-hover)"
             strokeWidth={strokeWidth}
           />
           {/* Segments */}
@@ -125,7 +125,7 @@ export function CompletionRings({ data }: CompletionRingsProps) {
   const isEmpty = animeTotal === 0 && mangaTotal === 0
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] p-6">
+    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">
         Library Status
       </h2>

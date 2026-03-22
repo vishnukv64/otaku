@@ -22,7 +22,7 @@ function AnimeThumbnail({ url, title }: { url?: string; title: string }) {
   const { src, loading } = useProxiedImage(url || '')
   if (!url || loading || !src) {
     return (
-      <div className="w-10 h-14 rounded bg-[var(--color-surface-subtle)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
+      <div className="w-10 h-14 rounded bg-[var(--color-surface-hover)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
         <Tv size={16} />
       </div>
     )
@@ -40,7 +40,7 @@ function MangaThumbnail({ url, title }: { url?: string; title: string }) {
   const { src, loading } = useProxiedImage(url || '')
   if (!url || loading || !src) {
     return (
-      <div className="w-10 h-14 rounded bg-[var(--color-surface-subtle)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
+      <div className="w-10 h-14 rounded bg-[var(--color-surface-hover)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
         <BookOpen size={16} />
       </div>
     )
@@ -61,11 +61,9 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Top Anime */}
-      <div className="rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] p-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="p-2 rounded-lg" style={{ backgroundColor: '#3b82f620' }}>
-            <Tv size={20} className="text-blue-500" />
-          </div>
+      <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <Tv size={18} className="text-[var(--color-text-tertiary)]" />
           <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
             Top Anime
           </h2>
@@ -97,11 +95,9 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
       </div>
 
       {/* Top Manga */}
-      <div className="rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] p-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="p-2 rounded-lg" style={{ backgroundColor: '#8b5cf620' }}>
-            <BookOpen size={20} className="text-purple-500" />
-          </div>
+      <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <BookOpen size={18} className="text-[var(--color-text-tertiary)]" />
           <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
             Top Manga
           </h2>

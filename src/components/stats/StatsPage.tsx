@@ -5,7 +5,6 @@
  */
 
 import { useEffect, useState } from 'react'
-import { BarChart3 } from 'lucide-react'
 import {
   getWatchStatsSummary,
   getReadingStatsSummary,
@@ -79,21 +78,16 @@ export function StatsPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[var(--color-background)] px-4 py-8">
+    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 rounded-lg bg-blue-500/20">
-            <BarChart3 size={24} className="text-blue-500" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
-              Activity Statistics
-            </h1>
-            <p className="text-sm text-[var(--color-text-secondary)]">
-              Your anime and manga activity at a glance
-            </p>
-          </div>
+        <div className="mb-2">
+          <h1 className="text-[2.5rem] font-extrabold font-display mb-1.5 bg-gradient-to-br from-[var(--color-text-primary)] to-[var(--color-text-secondary)] bg-clip-text text-transparent">
+            Activity Statistics
+          </h1>
+          <p className="text-[var(--color-text-muted)] text-[0.9375rem]">
+            Your anime and manga activity at a glance
+          </p>
         </div>
 
         {/* Summary Cards */}

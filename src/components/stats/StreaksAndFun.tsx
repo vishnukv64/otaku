@@ -31,16 +31,13 @@ interface TileProps {
   label: string
   value: string
   subtitle?: string
-  color: string
 }
 
-function Tile({ icon, label, value, subtitle, color }: TileProps) {
+function Tile({ icon, label, value, subtitle }: TileProps) {
   return (
-    <div className="p-5 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)]">
+    <div className="p-5 rounded-xl bg-[var(--color-surface-subtle)] transition-colors hover:bg-[var(--color-surface-hover)]">
       <div className="flex items-center gap-2 mb-3">
-        <div className="p-1.5 rounded-lg" style={{ backgroundColor: `${color}20` }}>
-          <div style={{ color }}>{icon}</div>
-        </div>
+        <div className="text-[var(--color-text-tertiary)]">{icon}</div>
         <span className="text-sm text-[var(--color-text-secondary)]">{label}</span>
       </div>
       <p className="text-xl font-bold text-[var(--color-text-primary)]">{value}</p>
@@ -56,7 +53,7 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
   const longestStreak = streaks?.longest_streak_days ?? 0
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] p-6">
+    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">
         Streaks & Fun Stats
       </h2>
@@ -72,7 +69,6 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
               ? 'Watch or read something today!'
               : undefined
           }
-          color={currentStreak > 0 ? '#f59e0b' : '#6b7280'}
         />
 
         {/* Longest Streak */}
@@ -85,7 +81,6 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
               ? formatDateRange(streaks.longest_streak_start, streaks.longest_streak_end)
               : undefined
           }
-          color="#10b981"
         />
 
         {/* Most Active Day */}
@@ -98,7 +93,6 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
               ? `avg ${formatMinutes(patterns.avg_daily_minutes)}/day`
               : undefined
           }
-          color="#3b82f6"
         />
 
         {/* Binge Record - Anime */}
@@ -108,7 +102,6 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
             label="Anime Binge Record"
             value={`${binge.max_episodes_in_day} episodes`}
             subtitle={`${binge.max_episodes_anime_title} (${binge.max_episodes_date})`}
-            color="#8b5cf6"
           />
         )}
 
@@ -119,7 +112,6 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
             label="Manga Binge Record"
             value={`${binge.max_chapters_in_day} chapters`}
             subtitle={`${binge.max_chapters_manga_title} (${binge.max_chapters_date})`}
-            color="#ec4899"
           />
         )}
 
@@ -130,7 +122,6 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
             label="Avg Daily Span"
             value={formatMinutes(patterns.avg_daily_span_minutes)}
             subtitle="Time between first & last activity"
-            color="#06b6d4"
           />
         )}
       </div>

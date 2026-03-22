@@ -6,7 +6,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { getDailyActivity } from '@/utils/tauri-commands'
 import type { DailyActivity } from '@/utils/tauri-commands'
-import { BarChart3 } from 'lucide-react'
 
 const periods = [
   { label: '7D', days: 7 },
@@ -29,13 +28,13 @@ interface CustomTooltipProps {
 function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload || !label) return null
   return (
-    <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-3 shadow-lg text-sm">
+    <div className="rounded-lg bg-[var(--color-surface-hover)] p-3 shadow-lg text-sm">
       <p className="text-[var(--color-text-secondary)] mb-1">{formatDateLabel(label)}</p>
       {payload.map((entry) => (
         <p key={entry.dataKey} className="text-[var(--color-text-primary)]">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full mr-2"
-            style={{ backgroundColor: entry.dataKey === 'watch_minutes' ? '#3b82f6' : '#8b5cf6' }}
+            style={{ backgroundColor: entry.dataKey === 'watch_minutes' ? 'var(--color-accent-primary)' : 'rgba(229,9,20,0.5)' }}
           />
           {entry.dataKey === 'watch_minutes' ? 'Anime' : 'Manga'}:{' '}
           {Math.round(entry.value)} min
@@ -71,22 +70,17 @@ export function ActivityChart() {
   const isEmpty = !data || data.length === 0 || data.every((d) => d.watch_minutes === 0 && d.read_minutes === 0)
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] p-6">
+    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg" style={{ backgroundColor: '#3b82f620' }}>
-            <BarChart3 size={20} className="text-blue-500" />
-          </div>
-          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Activity</h2>
-        </div>
-        <div className="flex gap-1 rounded-lg bg-[var(--color-surface-subtle)] p-1">
+        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Activity</h2>
+        <div className="flex gap-1 rounded-lg bg-[var(--color-surface-hover)] p-1">
           {periods.map((p, i) => (
             <button
               key={p.label}
               onClick={() => setSelectedPeriod(i)}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 selectedPeriod === i
-                  ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-sm'
+                  ? 'bg-[var(--color-accent-primary)] text-white shadow-sm'
                   : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
               }`}
             >
@@ -98,7 +92,7 @@ export function ActivityChart() {
 
       {loading ? (
         <div className="h-64 flex items-center justify-center">
-          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-[var(--color-accent-primary)] border-t-transparent rounded-full animate-spin" />
         </div>
       ) : isEmpty ? (
         <div className="h-64 flex items-center justify-center text-[var(--color-text-tertiary)]">
@@ -110,12 +104,12 @@ export function ActivityChart() {
             <AreaChart data={data!} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
               <defs>
                 <linearGradient id="colorAnime" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="rgba(229,9,20,0.8)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="rgba(229,9,20,0.8)" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="colorManga" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="rgba(229,9,20,0.4)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="rgba(229,9,20,0.4)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis
@@ -136,14 +130,14 @@ export function ActivityChart() {
               <Area
                 type="monotone"
                 dataKey="watch_minutes"
-                stroke="#3b82f6"
+                stroke="rgba(229,9,20,0.9)"
                 fill="url(#colorAnime)"
                 strokeWidth={2}
               />
               <Area
                 type="monotone"
                 dataKey="read_minutes"
-                stroke="#8b5cf6"
+                stroke="rgba(229,9,20,0.45)"
                 fill="url(#colorManga)"
                 strokeWidth={2}
               />
@@ -156,11 +150,11 @@ export function ActivityChart() {
       {!isEmpty && !loading && (
         <div className="flex items-center gap-6 mt-4 text-sm text-[var(--color-text-secondary)]">
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-blue-500" />
+            <span className="w-3 h-3 rounded-full bg-[var(--color-accent-primary)]" />
             Anime
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-purple-500" />
+            <span className="w-3 h-3 rounded-full bg-[rgba(229,9,20,0.45)]" />
             Manga (estimated)
           </div>
         </div>
