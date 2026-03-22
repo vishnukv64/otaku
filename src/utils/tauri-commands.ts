@@ -1112,6 +1112,106 @@ export interface ContinueReadingEntry {
   last_read: string
 }
 
+// --- History Types ---
+
+export interface HistoryEntry {
+  type: 'watch' | 'read'
+  media: MediaEntry
+  episode_id: string | null
+  chapter_id: string | null
+  episode_number: number | null
+  chapter_number: number | null
+  progress_seconds: number | null
+  current_page: number | null
+  duration: number | null
+  total_pages: number | null
+  completed: boolean
+  timestamp: string
+}
+
+export interface MediaHistorySummary {
+  media: MediaEntry
+  type: 'anime' | 'manga'
+  items_completed: number
+  total_items: number | null
+  total_time_seconds: number
+  last_activity: string
+}
+
+// --- Stats Types ---
+
+export interface WatchStatsSummary {
+  total_time_seconds: number
+  episodes_completed: number
+  series_completed: number
+  total_episodes_started: number
+}
+
+export interface ReadingStatsSummary {
+  total_chapters_completed: number
+  total_pages_read: number
+  series_completed: number
+  total_chapters_started: number
+}
+
+export interface DailyActivity {
+  date: string
+  watch_minutes: number
+  read_minutes: number
+}
+
+export interface GenreStat {
+  genre: string
+  time_seconds: number
+  count: number
+}
+
+export interface CompletionStatsCategory {
+  watching: number
+  completed: number
+  on_hold: number
+  dropped: number
+  plan_to_watch: number
+}
+
+export interface CompletionStats {
+  anime: CompletionStatsCategory
+  manga: CompletionStatsCategory
+}
+
+export interface TopWatchedEntry {
+  media: MediaEntry
+  total_time_seconds: number
+  episodes_watched: number
+}
+
+export interface TopReadEntry {
+  media: MediaEntry
+  chapters_read: number
+}
+
+export interface StreakStats {
+  current_streak_days: number
+  longest_streak_days: number
+  longest_streak_start: string
+  longest_streak_end: string
+}
+
+export interface ActivityPatterns {
+  most_active_day: string
+  avg_daily_minutes: number
+  avg_daily_span_minutes: number
+}
+
+export interface BingeStats {
+  max_episodes_in_day: number
+  max_episodes_anime_title: string
+  max_episodes_date: string
+  max_chapters_in_day: number
+  max_chapters_manga_title: string
+  max_chapters_date: string
+}
+
 /**
  * Save media details to database
  */
@@ -2543,4 +2643,98 @@ export async function startMigration(): Promise<void> {
  */
 export async function getMigrationProgress(): Promise<MigrationProgress> {
   return await invoke('get_migration_progress')
+}
+
+// ==================== History Commands ====================
+
+export async function getAllHistory(
+  page: number,
+  limit: number,
+  mediaType?: string,
+  search?: string
+): Promise<HistoryEntry[]> {
+  return invoke<HistoryEntry[]>('get_all_history', {
+    page,
+    limit,
+    mediaType: mediaType ?? null,
+    search: search ?? null,
+  })
+}
+
+export async function getHistoryGroupedByMedia(
+  page: number,
+  limit: number,
+  mediaType?: string,
+  search?: string
+): Promise<MediaHistorySummary[]> {
+  return invoke<MediaHistorySummary[]>('get_history_grouped_by_media', {
+    page,
+    limit,
+    mediaType: mediaType ?? null,
+    search: search ?? null,
+  })
+}
+
+export async function removeWatchHistoryEntry(
+  mediaId: string,
+  episodeId: string
+): Promise<void> {
+  return invoke<void>('remove_watch_history_entry', { mediaId, episodeId })
+}
+
+export async function removeReadingHistoryEntry(
+  mediaId: string,
+  chapterId: string
+): Promise<void> {
+  return invoke<void>('remove_reading_history_entry', { mediaId, chapterId })
+}
+
+export async function clearAllWatchHistory(): Promise<void> {
+  return invoke<void>('clear_all_watch_history')
+}
+
+export async function clearAllReadingHistory(): Promise<void> {
+  return invoke<void>('clear_all_reading_history')
+}
+
+// ==================== Stats Commands ====================
+
+export async function getWatchStatsSummary(): Promise<WatchStatsSummary> {
+  return invoke<WatchStatsSummary>('get_watch_stats_summary')
+}
+
+export async function getReadingStatsSummary(): Promise<ReadingStatsSummary> {
+  return invoke<ReadingStatsSummary>('get_reading_stats_summary')
+}
+
+export async function getDailyActivity(days: number): Promise<DailyActivity[]> {
+  return invoke<DailyActivity[]>('get_daily_activity', { days })
+}
+
+export async function getGenreStats(mediaType?: string): Promise<GenreStat[]> {
+  return invoke<GenreStat[]>('get_genre_stats', { mediaType: mediaType ?? null })
+}
+
+export async function getCompletionStats(): Promise<CompletionStats> {
+  return invoke<CompletionStats>('get_completion_stats')
+}
+
+export async function getTopWatchedAnime(limit: number): Promise<TopWatchedEntry[]> {
+  return invoke<TopWatchedEntry[]>('get_top_watched_anime', { limit })
+}
+
+export async function getTopReadManga(limit: number): Promise<TopReadEntry[]> {
+  return invoke<TopReadEntry[]>('get_top_read_manga', { limit })
+}
+
+export async function getStreakStats(): Promise<StreakStats> {
+  return invoke<StreakStats>('get_streak_stats')
+}
+
+export async function getActivityPatterns(): Promise<ActivityPatterns> {
+  return invoke<ActivityPatterns>('get_activity_patterns')
+}
+
+export async function getBingeStats(): Promise<BingeStats> {
+  return invoke<BingeStats>('get_binge_stats')
 }
