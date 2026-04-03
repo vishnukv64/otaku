@@ -19,14 +19,23 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Mutex;
 
 /// Global flag to control the background checker
 static CHECKER_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Global handle to stop the checker
+/// Global handle to stop the BACKGROUND checker loop
 static CHECKER_STOP_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// Flag to stop a manual check in progress (separate from background stop)
+static MANUAL_CHECK_STOP_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// Mutex to prevent concurrent release checks (manual + background)
+static CHECK_LOCK: std::sync::LazyLock<Arc<Mutex<()>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(())));
 
 /// Delay between API calls to avoid rate limiting (in milliseconds)
 const API_DELAY_MS: u64 = 2000;
@@ -37,6 +46,12 @@ const MAX_RETRIES: u32 = 3;
 
 /// Base delay for exponential backoff (in seconds)
 const RETRY_BASE_DELAY_SECS: u64 = 5;
+
+/// Timeout for a single media item check (seconds)
+const SINGLE_CHECK_TIMEOUT_SECS: u64 = 60;
+
+/// Timeout for the entire full release check (seconds)
+const FULL_CHECK_TIMEOUT_SECS: u64 = 30 * 60; // 30 minutes max
 
 // ==================== Data Types ====================
 
@@ -573,8 +588,17 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
         INNER JOIN library l ON m.id = l.media_id
         LEFT JOIN release_tracking_v2 rt ON m.id = rt.media_id
         WHERE (
-                COALESCE(rt.normalized_status, 'unknown') IN ('ongoing', 'unknown')
-                OR rt.normalized_status IS NULL
+                COALESCE(rt.normalized_status, 'unknown') = 'ongoing'
+                OR (
+                    COALESCE(rt.normalized_status, 'unknown') = 'unknown'
+                    AND (
+                        LOWER(COALESCE(m.status, '')) LIKE '%airing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%releasing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%ongoing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%publishing%'
+                        OR COALESCE(m.status, '') = ''
+                    )
+                )
             )
             AND (
                 l.status IN ('watching', 'reading', 'plan_to_watch', 'plan_to_read')
@@ -675,7 +699,6 @@ fn should_notify(media: &EligibleMedia, current_number: Option<f32>) -> bool {
 
 // ==================== Release Checking Logic ====================
 
-/// Fetch episode info with retry
 async fn fetch_episode_info_with_retry(
     app_state: &AppState,
     pool: &SqlitePool,
@@ -691,14 +714,30 @@ async fn fetch_episode_info_with_retry(
             tokio::time::sleep(delay).await;
         }
 
-        match fetch_episode_info(app_state, pool, media).await {
-            Ok(info) => return Ok(info),
-            Err(e) => {
+        // Each attempt gets a timeout to prevent hanging on unresponsive APIs
+        match tokio::time::timeout(
+            Duration::from_secs(SINGLE_CHECK_TIMEOUT_SECS),
+            fetch_episode_info(app_state, pool, media),
+        )
+        .await
+        {
+            Ok(Ok(info)) => return Ok(info),
+            Ok(Err(e)) => {
                 log::warn!(
                     "Attempt {} failed for {}: {}",
                     attempt + 1, media.media_id, e
                 );
                 last_error = Some(e);
+            }
+            Err(_elapsed) => {
+                log::warn!(
+                    "Attempt {} timed out for {} after {}s",
+                    attempt + 1, media.media_id, SINGLE_CHECK_TIMEOUT_SECS
+                );
+                last_error = Some(anyhow::anyhow!(
+                    "API call timed out after {}s",
+                    SINGLE_CHECK_TIMEOUT_SECS
+                ));
             }
         }
     }
@@ -934,26 +973,48 @@ async fn check_single_media(
     Ok(None)
 }
 
-/// Run a full release check on all eligible media
+/// Run a full release check on all eligible media.
+/// `is_manual` controls which stop flag is checked (manual vs background).
 pub async fn run_full_release_check(
     app_handle: &AppHandle,
+    is_manual: bool,
 ) -> Result<Vec<ReleaseCheckResult>> {
+    // Acquire lock to prevent concurrent checks (manual + background)
+    let lock = CHECK_LOCK.clone();
+    let _guard = match tokio::time::timeout(Duration::from_secs(5), lock.lock()).await {
+        Ok(guard) => guard,
+        Err(_) => {
+            log::warn!("Another release check is already running, skipping");
+            return Ok(vec![]);
+        }
+    };
+
+    if is_manual {
+        MANUAL_CHECK_STOP_FLAG.store(false, Ordering::SeqCst);
+    }
+
     let app_state: tauri::State<'_, AppState> = app_handle.state();
     let pool = app_state.database.pool();
 
     let settings = get_release_settings(pool).await?;
 
-    // Get eligible media
     let eligible = get_eligible_media(pool).await?;
     let total_count = eligible.len() as u32;
-    log::info!("Checking {} media items for new releases", total_count);
+    log::info!("Checking {} media items for new releases (manual={})", total_count, is_manual);
 
     let mut results = Vec::new();
+    let check_start = std::time::Instant::now();
 
     for (index, media) in eligible.iter().enumerate() {
-        // Check if we should stop
-        if CHECKER_STOP_FLAG.load(Ordering::SeqCst) {
-            log::info!("Release check stopped by user");
+        // Check the appropriate stop flag
+        let should_stop = if is_manual {
+            MANUAL_CHECK_STOP_FLAG.load(Ordering::SeqCst)
+        } else {
+            CHECKER_STOP_FLAG.load(Ordering::SeqCst)
+        };
+
+        if should_stop {
+            log::info!("Release check stopped by user (manual={})", is_manual);
             let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
                 current_index: index as u32 + 1,
                 total_count,
@@ -966,7 +1027,12 @@ pub async fn run_full_release_check(
             break;
         }
 
-        // Emit progress
+        // Enforce overall timeout
+        if check_start.elapsed().as_secs() > FULL_CHECK_TIMEOUT_SECS {
+            log::warn!("Full release check exceeded {}s timeout, stopping", FULL_CHECK_TIMEOUT_SECS);
+            break;
+        }
+
         let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
             current_index: index as u32 + 1,
             total_count,
@@ -979,7 +1045,6 @@ pub async fn run_full_release_check(
 
         match check_single_media(&app_state, pool, media, &settings).await {
             Ok(Some(result)) => {
-                // Emit success
                 let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
                     current_index: index as u32 + 1,
                     total_count,
@@ -990,7 +1055,6 @@ pub async fn run_full_release_check(
                     error_message: None,
                 });
 
-                // Emit notification
                 if let Err(e) = emit_release_notification(app_handle, pool, &result).await {
                     log::error!("Failed to emit notification for {}: {}", result.media_id, e);
                 }
@@ -998,7 +1062,7 @@ pub async fn run_full_release_check(
                 results.push(result);
             }
             Ok(None) => {
-                // No new release, progress continues
+                // No new release
             }
             Err(e) => {
                 log::error!("Failed to check {}: {}", media.media_id, e);
@@ -1014,11 +1078,10 @@ pub async fn run_full_release_check(
             }
         }
 
-        // Rate limiting
         tokio::time::sleep(Duration::from_millis(API_DELAY_MS)).await;
     }
 
-    // Emit completion
+    // Always emit completion so the frontend overlay can dismiss
     let _ = app_handle.emit("release_check_progress", ReleaseCheckProgress {
         current_index: total_count,
         total_count,
@@ -1029,17 +1092,26 @@ pub async fn run_full_release_check(
         error_message: None,
     });
 
-    // Update last check timestamp
     let mut settings = settings;
     settings.last_full_check = Some(chrono::Utc::now().timestamp_millis());
     update_release_settings(pool, &settings).await?;
 
-    // Summary notification
     if results.len() > 3 {
         emit_summary_notification(app_handle, pool, &results).await?;
     }
 
+    log::info!(
+        "Release check complete: {} new releases found in {:.1}s",
+        results.len(),
+        check_start.elapsed().as_secs_f64()
+    );
+
     Ok(results)
+}
+
+/// Stop a manual release check in progress
+pub fn stop_manual_release_check() {
+    MANUAL_CHECK_STOP_FLAG.store(true, Ordering::SeqCst);
 }
 
 // ==================== Notification Emission ====================
@@ -1329,7 +1401,6 @@ pub async fn get_release_tracking_debug(
 
 // ==================== Background Checker ====================
 
-/// Start the background release checker
 pub async fn start_release_checker(app_handle: AppHandle) {
     if CHECKER_RUNNING.swap(true, Ordering::SeqCst) {
         log::warn!("Release checker is already running");
@@ -1340,6 +1411,17 @@ pub async fn start_release_checker(app_handle: AppHandle) {
     log::info!("Starting background release checker V2");
 
     tokio::spawn(async move {
+        // Guarantee: CHECKER_RUNNING is ALWAYS reset when this task exits,
+        // whether from normal completion, error, or panic.
+        struct RunningGuard;
+        impl Drop for RunningGuard {
+            fn drop(&mut self) {
+                CHECKER_RUNNING.store(false, Ordering::SeqCst);
+                log::info!("Release checker task exited, CHECKER_RUNNING reset to false");
+            }
+        }
+        let _guard = RunningGuard;
+
         loop {
             if CHECKER_STOP_FLAG.load(Ordering::SeqCst) {
                 log::info!("Release checker stopping");
@@ -1362,7 +1444,6 @@ pub async fn start_release_checker(app_handle: AppHandle) {
                 continue;
             }
 
-            // Check if it's time
             let now = chrono::Utc::now().timestamp_millis();
             let interval_ms = (settings.interval_minutes as i64) * 60 * 1000;
             let should_check = match settings.last_full_check {
@@ -1372,22 +1453,19 @@ pub async fn start_release_checker(app_handle: AppHandle) {
 
             if should_check {
                 log::info!("Running scheduled release check");
-                match run_full_release_check(&app_handle).await {
+                match run_full_release_check(&app_handle, false).await {
                     Ok(results) => {
-                        log::info!("Release check complete: {} new releases found", results.len());
+                        log::info!("Scheduled release check complete: {} new releases found", results.len());
                     }
                     Err(e) => {
-                        log::error!("Release check failed: {}", e);
+                        log::error!("Scheduled release check failed: {}", e);
                     }
                 }
             }
 
-            // Sleep for 5 minutes before checking again
             tokio::time::sleep(Duration::from_secs(5 * 60)).await;
         }
-
-        CHECKER_RUNNING.store(false, Ordering::SeqCst);
-        log::info!("Release checker stopped");
+        // _guard dropped here → CHECKER_RUNNING = false
     });
 }
 

@@ -8,19 +8,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  Bell,
-  X,
-  CheckCheck,
-  Trash2,
-  RefreshCw,
-  Clock,
-  ChevronDown,
-} from 'lucide-react'
-import {
-  useNotificationStore,
-  type Notification,
-} from '@/store/notificationStore'
+import { Bell, X, CheckCheck, Trash2, RefreshCw, Clock, ChevronDown } from 'lucide-react'
+import { useNotificationStore, type Notification } from '@/store/notificationStore'
 import {
   markNotificationRead as markReadBackend,
   markAllNotificationsRead as markAllReadBackend,
@@ -76,15 +65,11 @@ type TabType = 'all' | 'releases'
  * Standalone notification content — no modal wrapper, no backdrop, no fixed positioning.
  * Used directly by the /notifications route and mounted inside MobileNotificationCenter's modal shell.
  */
-export function NotificationPageContent({
-  onNavigateAway,
-}: NotificationPageContentProps) {
+export function NotificationPageContent({ onNavigateAway }: NotificationPageContentProps) {
   const [activeTab, setActiveTab] = useState<TabType>('all')
   const [isChecking, setIsChecking] = useState(false)
-  const [releaseSettings, setReleaseSettings] =
-    useState<ReleaseCheckSettings | null>(null)
-  const [releaseStatus, setReleaseStatus] =
-    useState<ReleaseCheckStatus | null>(null)
+  const [releaseSettings, setReleaseSettings] = useState<ReleaseCheckSettings | null>(null)
+  const [releaseStatus, setReleaseStatus] = useState<ReleaseCheckStatus | null>(null)
   const [showIntervalPicker, setShowIntervalPicker] = useState(false)
   const navigate = useNavigate()
 
@@ -101,14 +86,10 @@ export function NotificationPageContent({
 
   // Count release notifications for badge
   const releaseCount = useMemo(() => {
-    return notifications.filter(
-      (n) => n.source === 'release' && !n.read && !n.dismissed
-    ).length
+    return notifications.filter((n) => n.source === 'release' && !n.read && !n.dismissed).length
   }, [notifications])
 
-  const unreadCount = notifications.filter(
-    (n) => !n.read && !n.dismissed
-  ).length
+  const unreadCount = notifications.filter((n) => !n.read && !n.dismissed).length
 
   // Load release settings on mount
   useEffect(() => {
@@ -177,9 +158,7 @@ export function NotificationPageContent({
         let route = notification.action.route
 
         // Migrate old manga routes
-        const oldMangaRouteMatch = route.match(
-          /^\/manga\/([^?]+)\?extensionId=(.+)$/
-        )
+        const oldMangaRouteMatch = route.match(/^\/manga\/([^?]+)\?extensionId=(.+)$/)
         if (oldMangaRouteMatch) {
           const [, mangaId, extensionId] = oldMangaRouteMatch
           route = `/read?extensionId=${extensionId}&mangaId=${mangaId}`
@@ -199,10 +178,7 @@ export function NotificationPageContent({
 
     const newEnabled = !releaseSettings.enabled
     try {
-      await updateReleaseCheckSettings(
-        newEnabled,
-        releaseSettings.interval_minutes
-      )
+      await updateReleaseCheckSettings(newEnabled, releaseSettings.interval_minutes)
       setReleaseSettings({ ...releaseSettings, enabled: newEnabled })
     } catch (error) {
       console.error('Failed to toggle release check:', error)
@@ -224,11 +200,17 @@ export function NotificationPageContent({
   const handleCheckNow = async () => {
     setIsChecking(true)
     try {
-      const results = await checkForNewReleases()
+      const timeoutMs = 10 * 60 * 1000 // 10 minute frontend timeout
+      const result = await Promise.race([
+        checkForNewReleases(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Release check timed out')), timeoutMs)
+        ),
+      ])
       const status = await getReleaseCheckStatus()
       setReleaseStatus(status)
 
-      if (results.length > 0) {
+      if (result.length > 0) {
         setActiveTab('releases')
       }
     } catch (error) {
@@ -239,9 +221,8 @@ export function NotificationPageContent({
   }
 
   const currentIntervalLabel =
-    INTERVAL_OPTIONS.find(
-      (o) => o.value === releaseSettings?.interval_minutes
-    )?.label ?? `${releaseSettings?.interval_minutes ?? 60}m`
+    INTERVAL_OPTIONS.find((o) => o.value === releaseSettings?.interval_minutes)?.label ??
+    `${releaseSettings?.interval_minutes ?? 60}m`
 
   return (
     <div className="flex flex-col min-h-0">
@@ -315,9 +296,7 @@ export function NotificationPageContent({
         <div className="px-4 py-3 border-b border-white/10 bg-[var(--color-bg-secondary)] flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-sm text-[var(--color-text-secondary)]">
-                Auto-check
-              </span>
+              <span className="text-sm text-[var(--color-text-secondary)]">Auto-check</span>
               {/* Toggle Switch */}
               <button
                 onClick={handleToggleReleaseCheck}
@@ -326,18 +305,12 @@ export function NotificationPageContent({
                     ? 'bg-[var(--color-accent-primary)]'
                     : 'bg-[var(--color-bg-hover)]'
                 }`}
-                title={
-                  releaseSettings.enabled
-                    ? 'Disable release alerts'
-                    : 'Enable release alerts'
-                }
+                title={releaseSettings.enabled ? 'Disable release alerts' : 'Enable release alerts'}
               >
                 <span
                   className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
                   style={{
-                    transform: releaseSettings.enabled
-                      ? 'translateX(24px)'
-                      : 'translateX(4px)',
+                    transform: releaseSettings.enabled ? 'translateX(24px)' : 'translateX(4px)',
                   }}
                 />
               </button>
@@ -385,10 +358,7 @@ export function NotificationPageContent({
                     : 'text-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 hover:bg-[var(--color-accent-primary)]/20'
                 }`}
               >
-                <RefreshCw
-                  size={12}
-                  className={isChecking ? 'animate-spin' : ''}
-                />
+                <RefreshCw size={12} className={isChecking ? 'animate-spin' : ''} />
                 {isChecking ? 'Checking...' : 'Check Now'}
               </button>
             </div>
@@ -400,9 +370,7 @@ export function NotificationPageContent({
               <Clock size={10} />
               <span>
                 Last checked: {formatRelativeTime(releaseStatus.last_check)}
-                {releaseStatus.items_checked > 0 && (
-                  <> · {releaseStatus.items_checked} items</>
-                )}
+                {releaseStatus.items_checked > 0 && <> · {releaseStatus.items_checked} items</>}
               </span>
             </div>
           )}
@@ -413,14 +381,9 @@ export function NotificationPageContent({
       <div className="flex-1 overflow-y-auto">
         {filteredNotifications.length === 0 ? (
           <div className="py-16 px-4 text-center">
-            <Bell
-              size={40}
-              className="mx-auto mb-4 text-[var(--color-text-muted)]"
-            />
+            <Bell size={40} className="mx-auto mb-4 text-[var(--color-text-muted)]" />
             <p className="text-[var(--color-text-secondary)] font-medium">
-              {activeTab === 'releases'
-                ? 'No release notifications'
-                : 'No notifications yet'}
+              {activeTab === 'releases' ? 'No release notifications' : 'No notifications yet'}
             </p>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
               {activeTab === 'releases'
@@ -447,9 +410,7 @@ export function NotificationPageContent({
           <span className="text-xs text-[var(--color-text-muted)]">
             {filteredNotifications.length} notification
             {filteredNotifications.length !== 1 ? 's' : ''}
-            {activeTab === 'all' &&
-              unreadCount > 0 &&
-              ` (${unreadCount} unread)`}
+            {activeTab === 'all' && unreadCount > 0 && ` (${unreadCount} unread)`}
           </span>
         </div>
       )}
@@ -461,10 +422,7 @@ export function NotificationPageContent({
  * Modal shell — wraps NotificationPageContent with backdrop, fixed positioning,
  * close button, and Escape key handler.
  */
-export function MobileNotificationCenter({
-  isOpen,
-  onClose,
-}: MobileNotificationCenterProps) {
+export function MobileNotificationCenter({ isOpen, onClose }: MobileNotificationCenterProps) {
   // Handle Escape key
   useEffect(() => {
     if (!isOpen) return
@@ -486,10 +444,7 @@ export function MobileNotificationCenter({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-300">
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/90 backdrop-blur-md -z-10"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 bg-black/90 backdrop-blur-md -z-10" onClick={onClose} />
 
       {/* Modal Content */}
       <div

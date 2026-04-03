@@ -77,61 +77,60 @@ export function ReleaseCheckOverlay() {
 
   useEffect(() => {
     let hideTimeout: ReturnType<typeof setTimeout> | null = null
-    // Track last notified index on mobile to avoid spamming notifications
+    let staleTimeout: ReturnType<typeof setTimeout> | null = null
     let lastNotifiedIndex = 0
 
+    const resetStaleTimer = () => {
+      if (staleTimeout) clearTimeout(staleTimeout)
+      staleTimeout = setTimeout(() => {
+        setIsVisible(false)
+        setTimeout(() => setProgress(null), 300)
+        isDismissedRef.current = false
+      }, 120_000) // 2 minutes with no progress → assume stuck, auto-hide
+    }
+
     const setupListener = async () => {
-      const unlisten = await listen<ReleaseCheckProgress>(
-        'release_check_progress',
-        (event) => {
-          const data = event.payload
+      const unlisten = await listen<ReleaseCheckProgress>('release_check_progress', (event) => {
+        const data = event.payload
 
-          // On mobile, send native OS notifications instead of showing overlay
-          if (mobile) {
-            if (data.is_complete) {
-              sendMobileReleaseNotification(
-                'Release Check Complete',
-                `Checked ${data.total_count} items for new releases`
-              )
-              lastNotifiedIndex = 0
-            } else if (
-              data.status === 'checking' &&
-              data.current_index - lastNotifiedIndex >= 5
-            ) {
-              // Send progress notification every 5 items to avoid spam
-              sendMobileReleaseNotification(
-                'Checking Releases...',
-                `${data.current_index}/${data.total_count}: ${data.media_title}`
-              )
-              lastNotifiedIndex = data.current_index
-            }
-            return
-          }
-
-          // Desktop: show in-app overlay
+        if (mobile) {
           if (data.is_complete) {
-            // Reset dismissed state when check completes (for next check)
-            isDismissedRef.current = false
-            // Hide after a short delay when complete
-            hideTimeout = setTimeout(() => {
-              setIsVisible(false)
-              // Clear progress after fade out
-              setTimeout(() => setProgress(null), 300)
-            }, 1000)
-          } else if (data.status === 'checking') {
-            // Only show items being actively checked (skip failed/success)
-            if (hideTimeout) {
-              clearTimeout(hideTimeout)
-              hideTimeout = null
-            }
-            setProgress(data)
-            // Only show if not dismissed by user
-            if (!isDismissedRef.current) {
-              setIsVisible(true)
-            }
+            sendMobileReleaseNotification(
+              'Release Check Complete',
+              `Checked ${data.total_count} items for new releases`
+            )
+            lastNotifiedIndex = 0
+          } else if (data.status === 'checking' && data.current_index - lastNotifiedIndex >= 5) {
+            sendMobileReleaseNotification(
+              'Checking Releases...',
+              `${data.current_index}/${data.total_count}: ${data.media_title}`
+            )
+            lastNotifiedIndex = data.current_index
           }
+          return
         }
-      )
+
+        if (data.is_complete) {
+          isDismissedRef.current = false
+          if (staleTimeout) clearTimeout(staleTimeout)
+          hideTimeout = setTimeout(() => {
+            setIsVisible(false)
+            setTimeout(() => setProgress(null), 300)
+          }, 1000)
+        } else if (data.status === 'checking') {
+          if (hideTimeout) {
+            clearTimeout(hideTimeout)
+            hideTimeout = null
+          }
+          setProgress(data)
+          if (!isDismissedRef.current) {
+            setIsVisible(true)
+          }
+          resetStaleTimer()
+        } else if (data.status === 'failed') {
+          resetStaleTimer()
+        }
+      })
 
       return unlisten
     }
@@ -141,6 +140,7 @@ export function ReleaseCheckOverlay() {
     return () => {
       unlistenPromise.then((unlisten) => unlisten())
       if (hideTimeout) clearTimeout(hideTimeout)
+      if (staleTimeout) clearTimeout(staleTimeout)
     }
   }, [mobile])
 

@@ -2875,20 +2875,19 @@ pub async fn update_release_check_settings(
     Ok(())
 }
 
-/// Manually check for new releases
 #[tauri::command]
 pub async fn check_for_new_releases(
     app: AppHandle,
 ) -> Result<Vec<ReleaseCheckResult>, String> {
-    release_checker::run_full_release_check(&app)
+    release_checker::run_full_release_check(&app, true)
         .await
         .map_err(|e| format!("Release check failed: {}", e))
 }
 
-/// Stop the current release check
 #[tauri::command]
 pub async fn stop_release_check() -> Result<(), String> {
     release_checker::stop_release_checker();
+    release_checker::stop_manual_release_check();
     Ok(())
 }
 
