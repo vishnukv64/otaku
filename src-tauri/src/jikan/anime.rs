@@ -463,10 +463,15 @@ fn fetch_all_episodes(mal_id: i64) -> Result<(Vec<Episode>, Option<String>), Str
     let mut page = 1;
 
     loop {
-        let page_str = page.to_string();
         let path = format!("/anime/{}/episodes", mal_id);
-        let response: JikanPaginatedResponse<JikanEpisode> =
-            JIKAN.get_parsed_with_query(&path, &[("page", &page_str)])?;
+        let response: JikanPaginatedResponse<JikanEpisode> = if page == 1 {
+            // Don't pass page=1 explicitly — Jikan returns fewer results with
+            // an explicit page param than when the param is omitted entirely.
+            JIKAN.get_parsed(&path)?
+        } else {
+            let page_str = page.to_string();
+            JIKAN.get_parsed_with_query(&path, &[("page", &page_str)])?
+        };
 
         for ep in &response.data {
             if let Some(ref aired) = ep.aired {
@@ -490,10 +495,13 @@ fn fetch_all_episodes(mal_id: i64) -> Result<(Vec<Episode>, Option<String>), Str
 }
 
 pub fn anime_episodes(mal_id: i64, page: i32) -> Result<(Vec<Episode>, bool), String> {
-    let page_str = page.to_string();
     let path = format!("/anime/{}/episodes", mal_id);
-    let response: JikanPaginatedResponse<JikanEpisode> =
-        JIKAN.get_parsed_with_query(&path, &[("page", &page_str)])?;
+    let response: JikanPaginatedResponse<JikanEpisode> = if page == 1 {
+        JIKAN.get_parsed(&path)?
+    } else {
+        let page_str = page.to_string();
+        JIKAN.get_parsed_with_query(&path, &[("page", &page_str)])?
+    };
 
     let episodes = response.data.iter().map(|ep| jikan_episode_to_episode(mal_id, ep)).collect();
     Ok((episodes, response.pagination.has_next_page))

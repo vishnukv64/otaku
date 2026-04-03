@@ -154,70 +154,52 @@ pub async fn get_reading_stats_summary(pool: &SqlitePool) -> Result<ReadingStats
 }
 
 pub async fn get_daily_activity(pool: &SqlitePool, days: i32) -> Result<Vec<DailyActivity>> {
-    // When days <= 0, return all activity (no date filter)
-    let watch_where = if days > 0 {
-        format!("WHERE DATE(last_watched) >= DATE('now', '-{} days')", days)
+    log::info!("get_daily_activity called with days={}", days);
+
+    // Single query: UNION ALL watch + read, aggregate per day
+    let date_filter = if days > 0 {
+        format!("WHERE day >= DATE('now', '-{} days')", days)
     } else {
         String::new()
     };
 
-    let read_where = if days > 0 {
-        format!("WHERE DATE(last_read) >= DATE('now', '-{} days')", days)
-    } else {
-        String::new()
-    };
-
-    // Watch minutes per day
-    let watch_query = format!(
-        "SELECT DATE(last_watched) as day, SUM(progress_seconds) / 60.0 as minutes
-        FROM watch_history
-        {}
-        GROUP BY day ORDER BY day",
-        watch_where
+    let query = format!(
+        "SELECT day, SUM(watch_min) as watch_minutes, SUM(read_min) as read_minutes
+         FROM (
+             SELECT DATE(last_watched) as day, progress_seconds / 60.0 as watch_min, 0.0 as read_min
+             FROM watch_history WHERE last_watched IS NOT NULL
+             UNION ALL
+             SELECT DATE(last_read) as day, 0.0 as watch_min,
+                 (CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {rpm} as read_min
+             FROM reading_history WHERE last_read IS NOT NULL
+         )
+         WHERE day IS NOT NULL
+         {filter}
+         GROUP BY day ORDER BY day",
+        rpm = READING_MINUTES_PER_PAGE,
+        filter = if date_filter.is_empty() { String::new() } else { format!("AND day >= DATE('now', '-{} days')", days) }
     );
-    let watch_rows = sqlx::query(&watch_query)
+
+    log::info!("get_daily_activity query: {}", query);
+
+    let rows = sqlx::query(&query)
         .fetch_all(pool)
         .await?;
 
-    // Read minutes per day (estimated from pages)
-    let read_query = format!(
-        "SELECT DATE(last_read) as day,
-            SUM(CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
-        FROM reading_history
-        {}
-        GROUP BY day ORDER BY day",
-        READING_MINUTES_PER_PAGE, read_where
-    );
-    let read_rows = sqlx::query(&read_query)
-        .fetch_all(pool)
-        .await?;
+    log::info!("get_daily_activity got {} rows", rows.len());
 
-    // Merge watch and read data into a single timeline
-    use std::collections::BTreeMap;
     use sqlx::Row;
-    let mut day_map: BTreeMap<String, DailyActivity> = BTreeMap::new();
+    let results: Vec<DailyActivity> = rows.iter().filter_map(|row| {
+        let day: Option<String> = row.try_get("day").ok().flatten();
+        day.map(|d| DailyActivity {
+            date: d,
+            watch_minutes: row.try_get("watch_minutes").unwrap_or(0.0),
+            read_minutes: row.try_get("read_minutes").unwrap_or(0.0),
+        })
+    }).collect();
 
-    for row in &watch_rows {
-        let day: String = row.get("day");
-        let minutes: f64 = row.get("minutes");
-        day_map.entry(day.clone()).or_insert(DailyActivity {
-            date: day,
-            watch_minutes: 0.0,
-            read_minutes: 0.0,
-        }).watch_minutes = minutes;
-    }
-
-    for row in &read_rows {
-        let day: String = row.get("day");
-        let minutes: f64 = row.get("minutes");
-        day_map.entry(day.clone()).or_insert(DailyActivity {
-            date: day,
-            watch_minutes: 0.0,
-            read_minutes: 0.0,
-        }).read_minutes = minutes;
-    }
-
-    Ok(day_map.into_values().collect())
+    log::info!("get_daily_activity returning {} entries", results.len());
+    Ok(results)
 }
 
 pub async fn get_genre_stats(
@@ -409,7 +391,9 @@ pub async fn get_streak_stats(pool: &SqlitePool) -> Result<StreakStats> {
     use sqlx::Row;
     use chrono::NaiveDateTime;
 
-    let dates: Vec<String> = rows.iter().map(|r| r.get::<String, _>("day")).collect();
+    let dates: Vec<String> = rows.iter()
+        .filter_map(|r| r.get::<Option<String>, _>("day"))
+        .collect();
 
     if dates.is_empty() {
         return Ok(StreakStats {
@@ -549,7 +533,7 @@ pub async fn get_activity_patterns(pool: &SqlitePool) -> Result<ActivityPatterns
 pub async fn get_binge_stats(pool: &SqlitePool) -> Result<BingeStats> {
     // Most episodes in a single day
     let ep_row = sqlx::query(
-            "SELECT m.title, DATE(w.last_watched, 'localtime') as day, COUNT(*) as cnt
+            "SELECT m.title, DATE(w.last_watched) as day, COUNT(*) as cnt
             FROM watch_history w
             JOIN media m ON w.media_id = m.id
             GROUP BY m.id, day
@@ -560,7 +544,7 @@ pub async fn get_binge_stats(pool: &SqlitePool) -> Result<BingeStats> {
 
     // Most chapters in a single day
     let ch_row = sqlx::query(
-            "SELECT m.title, DATE(r.last_read, 'localtime') as day, COUNT(*) as cnt
+            "SELECT m.title, DATE(r.last_read) as day, COUNT(*) as cnt
             FROM reading_history r
             JOIN media m ON r.media_id = m.id
             GROUP BY m.id, day

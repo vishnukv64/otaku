@@ -3450,8 +3450,18 @@ pub async fn get_daily_activity(
     state: State<'_, AppState>,
     days: i32,
 ) -> Result<Vec<crate::database::stats::DailyActivity>, String> {
+    log::info!("Command get_daily_activity invoked with days={}", days);
     let pool = state.database.pool();
-    crate::database::stats::get_daily_activity(pool, days).await.map_err(|e| e.to_string())
+    match crate::database::stats::get_daily_activity(pool, days).await {
+        Ok(data) => {
+            log::info!("Command get_daily_activity success: {} entries", data.len());
+            Ok(data)
+        }
+        Err(e) => {
+            log::error!("Command get_daily_activity error: {}", e);
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
