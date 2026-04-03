@@ -19,7 +19,12 @@ import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
 import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
-import { saveWatchProgress, deleteEpisodeDownload, getVideoServerInfo, type VideoServerUrls } from '@/utils/tauri-commands'
+import {
+  saveWatchProgress,
+  deleteEpisodeDownload,
+  getVideoServerInfo,
+  type VideoServerUrls,
+} from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
 import { usePlayerStore } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -120,11 +125,17 @@ export function VideoPlayer({
   const progressBarRef = useRef<HTMLDivElement>(null)
 
   // Skip indicator state for stacking +10/-10 feature
-  const [skipAmount, setSkipAmount] = useState<{ direction: 'forward' | 'backward'; amount: number } | null>(null)
+  const [skipAmount, setSkipAmount] = useState<{
+    direction: 'forward' | 'backward'
+    amount: number
+  } | null>(null)
   const skipTimeoutRef = useRef<number | null>(null)
 
   // Volume indicator state for visual feedback
-  const [volumeIndicator, setVolumeIndicator] = useState<{ level: number; direction: 'up' | 'down' } | null>(null)
+  const [volumeIndicator, setVolumeIndicator] = useState<{
+    level: number
+    direction: 'up' | 'down'
+  } | null>(null)
   const volumeIndicatorTimeoutRef = useRef<number | null>(null)
 
   // Performance: Throttle time updates to prevent frame drops
@@ -135,7 +146,9 @@ export function VideoPlayer({
   const hideControlsTimerRef = useRef<number | null>(null)
 
   // Video fit mode: contain (letterbox), cover (crop to fill), fill (stretch)
-  const [videoFitMode, setVideoFitMode] = useState<'contain' | 'cover' | 'fill'>(playerSettings.videoFitMode ?? 'contain')
+  const [videoFitMode, setVideoFitMode] = useState<'contain' | 'cover' | 'fill'>(
+    playerSettings.videoFitMode ?? 'contain'
+  )
 
   const cycleVideoFit = () => {
     const modes: Array<'contain' | 'cover' | 'fill'> = ['contain', 'cover', 'fill']
@@ -144,7 +157,8 @@ export function VideoPlayer({
     updatePlayerSettings({ videoFitMode: next })
   }
 
-  const fitModeLabel = videoFitMode === 'contain' ? 'FIT' : videoFitMode === 'cover' ? 'FILL' : 'STRETCH'
+  const fitModeLabel =
+    videoFitMode === 'contain' ? 'FIT' : videoFitMode === 'cover' ? 'FILL' : 'STRETCH'
 
   // PiP store for entering mini player mode
   const enterPip = usePipStore((state) => state.enterPip)
@@ -168,14 +182,17 @@ export function VideoPlayer({
 
   // Group sources by server (memoized to prevent unnecessary recalculations)
   const serverGroups = useMemo(() => {
-    return sources.reduce((acc, source, index) => {
-      const serverName = source.server || `Server ${index + 1}`
-      if (!acc[serverName]) {
-        acc[serverName] = []
-      }
-      acc[serverName].push({ ...source, originalIndex: index })
-      return acc
-    }, {} as Record<string, Array<VideoSource & { originalIndex: number }>>)
+    return sources.reduce(
+      (acc, source, index) => {
+        const serverName = source.server || `Server ${index + 1}`
+        if (!acc[serverName]) {
+          acc[serverName] = []
+        }
+        acc[serverName].push({ ...source, originalIndex: index })
+        return acc
+      },
+      {} as Record<string, Array<VideoSource & { originalIndex: number }>>
+    )
   }, [sources])
 
   const servers = useMemo(() => Object.keys(serverGroups), [serverGroups])
@@ -228,8 +245,9 @@ export function VideoPlayer({
         }
 
         // Check if this is actually an HLS stream by looking at the URL
-        const isActuallyHls = currentSource.url.toLowerCase().includes('.m3u8') ||
-                              currentSource.url.toLowerCase().includes('m3u8')
+        const isActuallyHls =
+          currentSource.url.toLowerCase().includes('.m3u8') ||
+          currentSource.url.toLowerCase().includes('m3u8')
 
         if (isActuallyHls && Hls.isSupported()) {
           // HLS.js already cleaned up at the start of loadVideo, create new instance
@@ -287,7 +305,11 @@ export function VideoPlayer({
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
                   // If it's a manifest error, this is not an HLS stream - fall back to direct playback
-                  if ((data.details === 'manifestLoadError' || data.details === 'manifestParsingError') && videoServer) {
+                  if (
+                    (data.details === 'manifestLoadError' ||
+                      data.details === 'manifestParsingError') &&
+                    videoServer
+                  ) {
                     hls.destroy()
                     hlsRef.current = null
 
@@ -312,7 +334,9 @@ export function VideoPlayer({
                   // On Android, MSE codec support can be buggy (bufferAppendError).
                   // Fall back to native HLS playback with rewritten manifest.
                   if (isAndroid() && videoServer) {
-                    console.log('[VideoPlayer] HLS.js media error on Android, falling back to native HLS')
+                    console.log(
+                      '[VideoPlayer] HLS.js media error on Android, falling back to native HLS'
+                    )
                     hls.destroy()
                     hlsRef.current = null
 
@@ -339,7 +363,10 @@ export function VideoPlayer({
                 default:
                   // On Android, any fatal HLS.js error should fall back to native HLS
                   if (isAndroid() && videoServer) {
-                    console.log('[VideoPlayer] HLS.js fatal error on Android, falling back to native HLS:', data.details)
+                    console.log(
+                      '[VideoPlayer] HLS.js fatal error on Android, falling back to native HLS:',
+                      data.details
+                    )
                     hls.destroy()
                     hlsRef.current = null
 
@@ -366,7 +393,10 @@ export function VideoPlayer({
               }
             }
           })
-        } else if (isActuallyHls && (video.canPlayType('application/vnd.apple.mpegurl') || isAndroid())) {
+        } else if (
+          isActuallyHls &&
+          (video.canPlayType('application/vnd.apple.mpegurl') || isAndroid())
+        ) {
           // Native HLS support (Safari, Android) - only for actual HLS streams
           // Android's MediaPlayer has built-in HLS support but needs rewritten manifest
           // so segment URLs go through our proxy (which adds Referer headers).
@@ -395,7 +425,11 @@ export function VideoPlayer({
         } else {
           // Direct MP4 playback (including downloaded videos and remote non-HLS)
           let videoUrl = currentSource.url
-          if (videoServer && currentSource.url.startsWith('http') && !currentSource.url.includes('127.0.0.1')) {
+          if (
+            videoServer &&
+            currentSource.url.startsWith('http') &&
+            !currentSource.url.includes('127.0.0.1')
+          ) {
             // Remote URL - proxy through video server
             videoUrl = createProxyUrl(videoServer, currentSource.url)
           }
@@ -485,6 +519,38 @@ export function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run on mount
 
+  // Register MediaSession for OS-level audio routing (Bluetooth, AirPlay, media keys)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    const video = videoRef.current
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentEpisode != null ? `Episode ${currentEpisode}` : 'Playing',
+      artist: animeTitle || undefined,
+    })
+
+    navigator.mediaSession.setActionHandler('play', () => video?.play().catch(() => {}))
+    navigator.mediaSession.setActionHandler('pause', () => video?.pause())
+    navigator.mediaSession.setActionHandler('seekbackward', () => {
+      if (video) video.currentTime = Math.max(0, video.currentTime - 10)
+    })
+    navigator.mediaSession.setActionHandler('seekforward', () => {
+      if (video) video.currentTime = Math.min(video.duration || 0, video.currentTime + 10)
+    })
+    navigator.mediaSession.setActionHandler('previoustrack', () => onPreviousEpisode?.())
+    navigator.mediaSession.setActionHandler('nexttrack', () => onNextEpisode?.())
+
+    return () => {
+      navigator.mediaSession.metadata = null
+      navigator.mediaSession.setActionHandler('play', null)
+      navigator.mediaSession.setActionHandler('pause', null)
+      navigator.mediaSession.setActionHandler('seekbackward', null)
+      navigator.mediaSession.setActionHandler('seekforward', null)
+      navigator.mediaSession.setActionHandler('previoustrack', null)
+      navigator.mediaSession.setActionHandler('nexttrack', null)
+    }
+  }, [animeTitle, currentEpisode, onNextEpisode, onPreviousEpisode])
+
   // Video event handlers
   useEffect(() => {
     const video = videoRef.current
@@ -506,7 +572,11 @@ export function VideoPlayer({
       onProgress?.(video.currentTime)
 
       // Update buffered percentage only every 2 seconds
-      if (now - lastBufferUpdateRef.current >= 2000 && video.buffered.length > 0 && video.duration > 0) {
+      if (
+        now - lastBufferUpdateRef.current >= 2000 &&
+        video.buffered.length > 0 &&
+        video.duration > 0
+      ) {
         lastBufferUpdateRef.current = now
         const bufferedEnd = video.buffered.end(video.buffered.length - 1)
         const percentage = (bufferedEnd / video.duration) * 100
@@ -569,8 +639,13 @@ export function VideoPlayer({
 
   // Handle next episode countdown (only when autoPlayNext is ON and next episode exists)
   // Use array index to determine if there's a next episode, not episode number vs count
-  const currentEpisodeIndex = episodes?.findIndex(ep => ep.number === currentEpisode) ?? -1
-  const hasNextEpisode = !!(onNextEpisode && episodes && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodes.length - 1)
+  const currentEpisodeIndex = episodes?.findIndex((ep) => ep.number === currentEpisode) ?? -1
+  const hasNextEpisode = !!(
+    onNextEpisode &&
+    episodes &&
+    currentEpisodeIndex >= 0 &&
+    currentEpisodeIndex < episodes.length - 1
+  )
 
   useEffect(() => {
     if (!showNextEpisodeOverlay) return
@@ -591,7 +666,13 @@ export function VideoPlayer({
     }, 1000)
 
     return () => clearTimeout(timer)
-  }, [showNextEpisodeOverlay, countdown, onNextEpisode, playerSettings.autoPlayNext, hasNextEpisode])
+  }, [
+    showNextEpisodeOverlay,
+    countdown,
+    onNextEpisode,
+    playerSettings.autoPlayNext,
+    hasNextEpisode,
+  ])
 
   // Replay current episode from the beginning
   const handlePlayAgain = () => {
@@ -605,10 +686,22 @@ export function VideoPlayer({
   // Enter Picture-in-Picture mini player mode
   const handleEnterPip = () => {
     const video = videoRef.current
-    console.log('[VideoPlayer] handleEnterPip called:', { video: !!video, mediaId, episodeId, currentEpisode, videoServer: !!videoServer })
+    console.log('[VideoPlayer] handleEnterPip called:', {
+      video: !!video,
+      mediaId,
+      episodeId,
+      currentEpisode,
+      videoServer: !!videoServer,
+    })
 
     if (!video || !mediaId || !episodeId || typeof currentEpisode !== 'number' || !videoServer) {
-      console.warn('[VideoPlayer] PiP blocked - missing:', { video: !!video, mediaId, episodeId, currentEpisode, videoServer: !!videoServer })
+      console.warn('[VideoPlayer] PiP blocked - missing:', {
+        video: !!video,
+        mediaId,
+        episodeId,
+        currentEpisode,
+        videoServer: !!videoServer,
+      })
       return
     }
 
@@ -619,7 +712,11 @@ export function VideoPlayer({
     }
 
     const isHls = currentSource.url.toLowerCase().includes('.m3u8')
-    console.log('[VideoPlayer] Entering PiP:', { sourceUrl: currentSource.url, isHls, currentTime: video.currentTime })
+    console.log('[VideoPlayer] Entering PiP:', {
+      sourceUrl: currentSource.url,
+      isHls,
+      currentTime: video.currentTime,
+    })
 
     enterPip({
       sourceUrl: currentSource.url,
@@ -674,7 +771,10 @@ export function VideoPlayer({
         if (completed && autoDeleteWatched) {
           try {
             await deleteEpisodeDownload(mediaId, currentEpisode)
-            notifySuccess(animeTitle || 'Episode Deleted', `Episode ${currentEpisode} auto-deleted after watching`)
+            notifySuccess(
+              animeTitle || 'Episode Deleted',
+              `Episode ${currentEpisode} auto-deleted after watching`
+            )
           } catch {
             // Silently fail if episode wasn't downloaded - this is expected
           }
@@ -744,11 +844,17 @@ export function VideoPlayer({
     // Skip on Android: we manage fullscreen state manually via OtakuBridge
     let unlistenTauri: (() => void) | undefined
     if (isMobile() && !isAndroid()) {
-      import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-        getCurrentWindow().onResized(() => {
-          getCurrentWindow().isFullscreen().then(setIsFullscreen)
-        }).then(unlisten => { unlistenTauri = unlisten })
-      }).catch(() => {})
+      import('@tauri-apps/api/window')
+        .then(({ getCurrentWindow }) => {
+          getCurrentWindow()
+            .onResized(() => {
+              getCurrentWindow().isFullscreen().then(setIsFullscreen)
+            })
+            .then((unlisten) => {
+              unlistenTauri = unlisten
+            })
+        })
+        .catch(() => {})
     }
 
     return () => {
@@ -859,21 +965,29 @@ export function VideoPlayer({
         if (elem.requestFullscreen) {
           return elem.requestFullscreen()
         } else if (elem.webkitRequestFullscreen) {
-          elem.webkitRequestFullscreen(); return Promise.resolve()
+          elem.webkitRequestFullscreen()
+          return Promise.resolve()
         } else if (elem.webkitEnterFullscreen) {
-          elem.webkitEnterFullscreen(); return Promise.resolve()
+          elem.webkitEnterFullscreen()
+          return Promise.resolve()
         } else if (elem.mozRequestFullScreen) {
-          elem.mozRequestFullScreen(); return Promise.resolve()
+          elem.mozRequestFullScreen()
+          return Promise.resolve()
         } else if (elem.msRequestFullscreen) {
-          elem.msRequestFullscreen(); return Promise.resolve()
+          elem.msRequestFullscreen()
+          return Promise.resolve()
         }
         return Promise.resolve()
       }
       enterFs()
         .then(() => {
           if (isMobile()) {
-            const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
-            orient?.lock?.('landscape')
+            const orient = screen.orientation as ScreenOrientation & {
+              lock?: (o: string) => Promise<void>
+              unlock?: () => void
+            }
+            orient
+              ?.lock?.('landscape')
               ?.then?.(() => console.log('[VideoPlayer] Orientation locked to landscape'))
               ?.catch?.((err: Error) => console.warn('[VideoPlayer] Orientation lock failed:', err))
           }
@@ -890,7 +1004,10 @@ export function VideoPlayer({
         doc.msExitFullscreen()
       }
       if (isMobile()) {
-        const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
+        const orient = screen.orientation as ScreenOrientation & {
+          lock?: (o: string) => Promise<void>
+          unlock?: () => void
+        }
         orient?.unlock?.()
       }
     }
@@ -899,7 +1016,11 @@ export function VideoPlayer({
   // Android native bridge fullscreen via @JavascriptInterface in MainActivity.kt
   // Hides system bars (status + navigation) and locks to landscape
   const androidToggleFullscreen = () => {
-    const bridge = (window as Window & { OtakuBridge?: { enterFullscreen: () => void; exitFullscreen: () => void } }).OtakuBridge
+    const bridge = (
+      window as Window & {
+        OtakuBridge?: { enterFullscreen: () => void; exitFullscreen: () => void }
+      }
+    ).OtakuBridge
     if (!bridge) {
       console.warn('[VideoPlayer] OtakuBridge not available, falling back to web fullscreen')
       webToggleFullscreen()
@@ -931,10 +1052,16 @@ export function VideoPlayer({
         await win.setFullscreen(newFullscreen)
         setIsFullscreen(newFullscreen)
         if (newFullscreen) {
-          const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
+          const orient = screen.orientation as ScreenOrientation & {
+            lock?: (o: string) => Promise<void>
+            unlock?: () => void
+          }
           orient?.lock?.('landscape')?.catch?.(() => {})
         } else {
-          const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }
+          const orient = screen.orientation as ScreenOrientation & {
+            lock?: (o: string) => Promise<void>
+            unlock?: () => void
+          }
           orient?.unlock?.()
         }
       } catch (err) {
@@ -990,14 +1117,14 @@ export function VideoPlayer({
     }
 
     // Actually seek (but only by 10 seconds from current position each click)
-    const seekAmount = direction === 'forward'
-      ? Math.min(duration - video.currentTime, skipSeconds)
-      : Math.min(video.currentTime, skipSeconds)
+    const seekAmount =
+      direction === 'forward'
+        ? Math.min(duration - video.currentTime, skipSeconds)
+        : Math.min(video.currentTime, skipSeconds)
 
     if (seekAmount > 0) {
-      seekToTime(direction === 'forward'
-        ? video.currentTime + seekAmount
-        : video.currentTime - seekAmount
+      seekToTime(
+        direction === 'forward' ? video.currentTime + seekAmount : video.currentTime - seekAmount
       )
     }
 
@@ -1278,7 +1405,7 @@ export function VideoPlayer({
       const rect = progressBar.getBoundingClientRect()
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
       seekToTime(pct * duration)
-      setHoverPreview(prev => ({ ...prev, visible: false }))
+      setHoverPreview((prev) => ({ ...prev, visible: false }))
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -1307,7 +1434,7 @@ export function VideoPlayer({
   // Auto-set active season based on current episode
   useEffect(() => {
     if (!episodes || seasonCount <= 1 || typeof currentEpisode !== 'number') return
-    const epIndex = episodes.findIndex(ep => ep.number === currentEpisode)
+    const epIndex = episodes.findIndex((ep) => ep.number === currentEpisode)
     if (epIndex >= 0) {
       const season = Math.floor(epIndex / 26)
       setActiveSeason(season)
@@ -1323,13 +1450,15 @@ export function VideoPlayer({
       style={{
         // Mobile (Android/iOS): CSS fullscreen since we bypass the browser Fullscreen API
         // Native bridge hides system bars, but we still need to fill the viewport
-        ...((isAndroid() || isIOS()) && isFullscreen ? {
-          position: 'fixed' as const,
-          inset: 0,
-          zIndex: 9999,
-          width: '100vw',
-          height: '100vh',
-        } : {}),
+        ...((isAndroid() || isIOS()) && isFullscreen
+          ? {
+              position: 'fixed' as const,
+              inset: 0,
+              zIndex: 9999,
+              width: '100vw',
+              height: '100vh',
+            }
+          : {}),
       }}
     >
       {/* ── Video Area ────────────────────────────────────────────── */}
@@ -1337,7 +1466,9 @@ export function VideoPlayer({
         className="flex-1 relative bg-black overflow-hidden"
         style={{ cursor: !showControls && !isPiP ? 'none' : 'default' }}
         onClick={togglePlay}
-        onMouseMove={() => {/* handled by document-level listener */}}
+        onMouseMove={() => {
+          /* handled by document-level listener */
+        }}
       >
         {/* Video Element */}
         <video
@@ -1357,14 +1488,16 @@ export function VideoPlayer({
         <div
           className="absolute top-0 left-0 right-0 h-[120px] z-[8] pointer-events-none transition-opacity duration-[400ms]"
           style={{
-            background: 'linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, transparent 100%)',
+            background:
+              'linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, transparent 100%)',
             opacity: showControls || !isPlaying ? 1 : 0,
           }}
         />
         <div
           className="absolute bottom-0 left-0 right-0 h-[200px] z-[8] pointer-events-none transition-opacity duration-[400ms]"
           style={{
-            background: 'linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.5) 50%, transparent 100%)',
+            background:
+              'linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.5) 50%, transparent 100%)',
             opacity: showControls || !isPlaying ? 1 : 0,
           }}
         />
@@ -1379,7 +1512,10 @@ export function VideoPlayer({
             background: 'rgba(229, 9, 20, 0.85)',
             boxShadow: '0 0 60px rgba(229, 9, 20, 0.4), 0 0 120px rgba(229, 9, 20, 0.15)',
           }}
-          onClick={(e) => { e.stopPropagation(); togglePlay() }}
+          onClick={(e) => {
+            e.stopPropagation()
+            togglePlay()
+          }}
           onMouseEnter={(e) => {
             const el = e.currentTarget
             el.style.background = '#e50914'
@@ -1391,7 +1527,14 @@ export function VideoPlayer({
             el.style.boxShadow = '0 0 60px rgba(229, 9, 20, 0.4), 0 0 120px rgba(229, 9, 20, 0.15)'
           }}
         >
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="white" stroke="none" className="ml-[3px]">
+          <svg
+            width="30"
+            height="30"
+            viewBox="0 0 24 24"
+            fill="white"
+            stroke="none"
+            className="ml-[3px]"
+          >
             <polygon points="6,3 20,12 6,21" />
           </svg>
         </div>
@@ -1428,7 +1571,16 @@ export function VideoPlayer({
             }}
           >
             Skip Intro
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polyline points="13 17 18 12 13 7" />
               <polyline points="6 17 11 12 6 7" />
             </svg>
@@ -1462,18 +1614,33 @@ export function VideoPlayer({
                 e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)'
               }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19 12H5" /><polyline points="12 19 5 12 12 5" />
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M19 12H5" />
+                <polyline points="12 19 5 12 12 5" />
               </svg>
             </button>
           )}
           <div className="flex flex-col gap-[2px] min-w-0">
             {animeTitle && (
-              <div className="font-display font-bold text-[0.9375rem] text-white/95 truncate">{animeTitle}</div>
+              <div className="font-display font-bold text-[0.9375rem] text-white/95 truncate">
+                {animeTitle}
+              </div>
             )}
             {currentEpisode && (
               <div className="text-xs text-white/50" style={{ fontFamily: "'Inter', sans-serif" }}>
-                E{currentEpisode}{episodeTitle && !episodeTitle.toLowerCase().startsWith('episode') ? ` \u00B7 ${episodeTitle}` : ''}
+                E{currentEpisode}
+                {episodeTitle && !episodeTitle.toLowerCase().startsWith('episode')
+                  ? ` \u00B7 ${episodeTitle}`
+                  : ''}
               </div>
             )}
           </div>
@@ -1482,7 +1649,9 @@ export function VideoPlayer({
         {/* ── Bottom Controls ───────────────────────────────────── */}
         <div
           className={`absolute bottom-0 left-0 right-0 z-10 transition-opacity duration-[400ms] ${
-            mobile ? 'px-[max(12px,env(safe-area-inset-left))] pb-[max(8px,env(safe-area-inset-bottom))]' : 'px-6 pb-[18px]'
+            mobile
+              ? 'px-[max(12px,env(safe-area-inset-left))] pb-[max(8px,env(safe-area-inset-bottom))]'
+              : 'px-6 pb-[18px]'
           } ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           onClick={(e) => e.stopPropagation()}
         >
@@ -1507,7 +1676,10 @@ export function VideoPlayer({
             }}
           >
             {/* Background track */}
-            <div className="absolute left-0 right-0 top-[8px] h-[3px] group-hover/progress:h-[5px] rounded-sm transition-[height] duration-[120ms]" style={{ background: 'rgba(255, 255, 255, 0.2)' }} />
+            <div
+              className="absolute left-0 right-0 top-[8px] h-[3px] group-hover/progress:h-[5px] rounded-sm transition-[height] duration-[120ms]"
+              style={{ background: 'rgba(255, 255, 255, 0.2)' }}
+            />
             {/* Buffered */}
             <div
               className="absolute left-0 top-[8px] h-[3px] group-hover/progress:h-[5px] rounded-sm transition-[height] duration-[120ms] pointer-events-none"
@@ -1582,9 +1754,30 @@ export function VideoPlayer({
                 onClick={() => handleSkip('backward')}
                 title="Rewind 10s"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 19a8 8 0 1 0 0-14.4" /><polyline points="11 4 4 4 4 11" />
-                  <text x="11.5" y="15.5" fill="currentColor" stroke="none" fontSize="7" fontFamily="sans-serif" fontWeight="700" textAnchor="middle">10</text>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M11 19a8 8 0 1 0 0-14.4" />
+                  <polyline points="11 4 4 4 4 11" />
+                  <text
+                    x="11.5"
+                    y="15.5"
+                    fill="currentColor"
+                    stroke="none"
+                    fontSize="7"
+                    fontFamily="sans-serif"
+                    fontWeight="700"
+                    textAnchor="middle"
+                  >
+                    10
+                  </text>
                 </svg>
               </button>
 
@@ -1594,9 +1787,30 @@ export function VideoPlayer({
                 onClick={() => handleSkip('forward')}
                 title="Forward 10s"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M13 5a8 8 0 1 1 0 14.4" /><polyline points="13 4 20 4 20 11" />
-                  <text x="12.5" y="15.5" fill="currentColor" stroke="none" fontSize="7" fontFamily="sans-serif" fontWeight="700" textAnchor="middle">10</text>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M13 5a8 8 0 1 1 0 14.4" />
+                  <polyline points="13 4 20 4 20 11" />
+                  <text
+                    x="12.5"
+                    y="15.5"
+                    fill="currentColor"
+                    stroke="none"
+                    fontSize="7"
+                    fontFamily="sans-serif"
+                    fontWeight="700"
+                    textAnchor="middle"
+                  >
+                    10
+                  </text>
                 </svg>
               </button>
 
@@ -1609,12 +1823,34 @@ export function VideoPlayer({
                     title="Mute (M)"
                   >
                     {isMuted || volume === 0 ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <line x1="23" y1="9" x2="17" y2="15" />
+                        <line x1="17" y1="9" x2="23" y2="15" />
                       </svg>
                     ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                       </svg>
                     )}
                   </button>
@@ -1639,11 +1875,22 @@ export function VideoPlayer({
               )}
 
               {/* Separator */}
-              <div className="w-px h-[18px] mx-1 flex-shrink-0" style={{ background: 'rgba(255, 255, 255, 0.12)' }} />
+              <div
+                className="w-px h-[18px] mx-1 flex-shrink-0"
+                style={{ background: 'rgba(255, 255, 255, 0.12)' }}
+              />
 
               {/* Time display */}
-              <span className="whitespace-nowrap ml-1" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.6)' }}>
-                {formatTime(currentTime)} <span style={{ opacity: 0.4 }}>/</span> {formatTime(duration)}
+              <span
+                className="whitespace-nowrap ml-1"
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '0.75rem',
+                  color: 'rgba(255, 255, 255, 0.6)',
+                }}
+              >
+                {formatTime(currentTime)} <span style={{ opacity: 0.4 }}>/</span>{' '}
+                {formatTime(duration)}
               </span>
             </div>
 
@@ -1661,12 +1908,30 @@ export function VideoPlayer({
                     fontSize: '0.7rem',
                     fontWeight: 600,
                   }}
-                  onClick={() => { setQualityMenuOpen(!qualityMenuOpen); setServerMenuOpen(false) }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'; e.currentTarget.style.color = 'white' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)' }}
+                  onClick={() => {
+                    setQualityMenuOpen(!qualityMenuOpen)
+                    setServerMenuOpen(false)
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
+                    e.currentTarget.style.color = 'white'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                    e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
+                  }}
                 >
                   {selectedQuality}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 </button>
@@ -1689,16 +1954,28 @@ export function VideoPlayer({
                           padding: '9px 14px',
                           fontFamily: "'Inter', sans-serif",
                           fontSize: '0.8125rem',
-                          color: selectedQuality === quality ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
+                          color:
+                            selectedQuality === quality ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
                           cursor: 'pointer',
                         }}
                         onClick={() => changeQuality(quality)}
-                        onMouseEnter={(e) => { if (selectedQuality !== quality) e.currentTarget.style.color = 'white' }}
-                        onMouseLeave={(e) => { if (selectedQuality !== quality) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)' }}
+                        onMouseEnter={(e) => {
+                          if (selectedQuality !== quality) e.currentTarget.style.color = 'white'
+                        }}
+                        onMouseLeave={(e) => {
+                          if (selectedQuality !== quality)
+                            e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)'
+                        }}
                       >
                         {quality}
                         {selectedQuality === quality && (
-                          <span className="w-[6px] h-[6px] rounded-full" style={{ background: '#e50914', boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)' }} />
+                          <span
+                            className="w-[6px] h-[6px] rounded-full"
+                            style={{
+                              background: '#e50914',
+                              boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)',
+                            }}
+                          />
                         )}
                       </button>
                     ))}
@@ -1719,12 +1996,30 @@ export function VideoPlayer({
                       fontSize: '0.7rem',
                       fontWeight: 600,
                     }}
-                    onClick={() => { setServerMenuOpen(!serverMenuOpen); setQualityMenuOpen(false) }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'; e.currentTarget.style.color = 'white' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)' }}
+                    onClick={() => {
+                      setServerMenuOpen(!serverMenuOpen)
+                      setQualityMenuOpen(false)
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
+                      e.currentTarget.style.color = 'white'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
+                    }}
                   >
                     {servers[selectedServer]}
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
                       <polyline points="6 9 12 15 18 9" />
                     </svg>
                   </button>
@@ -1747,16 +2042,28 @@ export function VideoPlayer({
                             padding: '9px 14px',
                             fontFamily: "'Inter', sans-serif",
                             fontSize: '0.8125rem',
-                            color: selectedServer === index ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
+                            color:
+                              selectedServer === index ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
                             cursor: 'pointer',
                           }}
                           onClick={() => changeServer(index)}
-                          onMouseEnter={(e) => { if (selectedServer !== index) e.currentTarget.style.color = 'white' }}
-                          onMouseLeave={(e) => { if (selectedServer !== index) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)' }}
+                          onMouseEnter={(e) => {
+                            if (selectedServer !== index) e.currentTarget.style.color = 'white'
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedServer !== index)
+                              e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)'
+                          }}
                         >
                           {server}
                           {selectedServer === index && (
-                            <span className="w-[6px] h-[6px] rounded-full" style={{ background: '#e50914', boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)' }} />
+                            <span
+                              className="w-[6px] h-[6px] rounded-full"
+                              style={{
+                                background: '#e50914',
+                                boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)',
+                              }}
+                            />
                           )}
                         </button>
                       ))}
@@ -1766,7 +2073,10 @@ export function VideoPlayer({
               )}
 
               {/* Separator */}
-              <div className="w-px h-[18px] mx-1 flex-shrink-0" style={{ background: 'rgba(255, 255, 255, 0.12)' }} />
+              <div
+                className="w-px h-[18px] mx-1 flex-shrink-0"
+                style={{ background: 'rgba(255, 255, 255, 0.12)' }}
+              />
 
               {/* Video Fit Mode */}
               <button
@@ -1795,9 +2105,27 @@ export function VideoPlayer({
                   onClick={handleEnterPip}
                   title="Mini Player"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <rect x="2" y="3" width="20" height="14" rx="2" />
-                    <rect x="12" y="10" width="9" height="6" rx="1" fill="currentColor" fillOpacity="0.4" stroke="none" />
+                    <rect
+                      x="12"
+                      y="10"
+                      width="9"
+                      height="6"
+                      rx="1"
+                      fill="currentColor"
+                      fillOpacity="0.4"
+                      stroke="none"
+                    />
                   </svg>
                 </button>
               )}
@@ -1809,8 +2137,18 @@ export function VideoPlayer({
                   onClick={() => onNextEpisode?.()}
                   title="Next Episode (N)"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="5 4 15 12 5 20 5 4" fill="currentColor" opacity="0.85" /><line x1="19" y1="5" x2="19" y2="19" />
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon points="5 4 15 12 5 20 5 4" fill="currentColor" opacity="0.85" />
+                    <line x1="19" y1="5" x2="19" y2="19" />
                   </svg>
                 </button>
               )}
@@ -1822,11 +2160,29 @@ export function VideoPlayer({
                 title="Fullscreen (F)"
               >
                 {isFullscreen ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
                   </svg>
                 ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                   </svg>
                 )}
@@ -1834,7 +2190,10 @@ export function VideoPlayer({
 
               {/* Separator */}
               {!mobile && episodes && episodes.length > 0 && (
-                <div className="w-px h-[18px] mx-1 flex-shrink-0" style={{ background: 'rgba(255, 255, 255, 0.12)' }} />
+                <div
+                  className="w-px h-[18px] mx-1 flex-shrink-0"
+                  style={{ background: 'rgba(255, 255, 255, 0.12)' }}
+                />
               )}
 
               {/* Sidebar toggle (desktop only) */}
@@ -1844,8 +2203,18 @@ export function VideoPlayer({
                   onClick={() => setShowSidebar(!showSidebar)}
                   title="Episodes"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="3" width="20" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="2" y="3" width="20" height="18" rx="2" />
+                    <line x1="9" y1="3" x2="9" y2="21" />
                   </svg>
                 </button>
               )}
@@ -1873,13 +2242,35 @@ export function VideoPlayer({
               { key: 'N', label: 'Next' },
               { key: 'I', label: 'Mini' },
             ].map((item, i) => (
-              <div key={i} className="flex items-center gap-[5px] text-[0.65rem] text-white/35 whitespace-nowrap">
+              <div
+                key={i}
+                className="flex items-center gap-[5px] text-[0.65rem] text-white/35 whitespace-nowrap"
+              >
                 {'keys' in item ? (
                   item.keys!.map((k, j) => (
-                    <span key={j} className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[3px] text-[0.6rem] text-white/50" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', fontFamily: "'JetBrains Mono', monospace" }}>{k}</span>
+                    <span
+                      key={j}
+                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[3px] text-[0.6rem] text-white/50"
+                      style={{
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        fontFamily: "'JetBrains Mono', monospace",
+                      }}
+                    >
+                      {k}
+                    </span>
                   ))
                 ) : (
-                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[3px] text-[0.6rem] text-white/50" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', fontFamily: "'JetBrains Mono', monospace" }}>{item.key}</span>
+                  <span
+                    className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[3px] text-[0.6rem] text-white/50"
+                    style={{
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}
+                  >
+                    {item.key}
+                  </span>
                 )}
                 <span>{item.label}</span>
               </div>
@@ -1890,16 +2281,21 @@ export function VideoPlayer({
         {/* ── Skip Amount Indicator ─────────────────────────────── */}
         {skipAmount && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-            <div className={`flex flex-col items-center ${skipAmount.direction === 'forward' ? 'translate-x-24' : '-translate-x-24'}`}>
+            <div
+              className={`flex flex-col items-center ${skipAmount.direction === 'forward' ? 'translate-x-24' : '-translate-x-24'}`}
+            >
               <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
                 <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
-                  {skipAmount.direction === 'backward'
-                    ? <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
-                    : <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
-                  }
+                  {skipAmount.direction === 'backward' ? (
+                    <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                  ) : (
+                    <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                  )}
                 </svg>
               </div>
-              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">{skipAmount.amount}s</span>
+              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
+                {skipAmount.amount}s
+              </span>
             </div>
           </div>
         )}
@@ -1910,19 +2306,41 @@ export function VideoPlayer({
             <div className="flex flex-col items-center">
               <div className="bg-black/60 backdrop-blur-sm rounded-full p-6">
                 <div className="flex items-center gap-3">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="32"
+                    height="32"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     {volumeIndicator.level === 0 ? (
-                      <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>
+                      <>
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <line x1="23" y1="9" x2="17" y2="15" />
+                        <line x1="17" y1="9" x2="23" y2="15" />
+                      </>
                     ) : (
-                      <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></>
+                      <>
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </>
                     )}
                   </svg>
                   <div className="w-24 h-2 bg-white/30 rounded-full overflow-hidden">
-                    <div className="h-full bg-white rounded-full transition-all duration-100" style={{ width: `${volumeIndicator.level * 100}%` }} />
+                    <div
+                      className="h-full bg-white rounded-full transition-all duration-100"
+                      style={{ width: `${volumeIndicator.level * 100}%` }}
+                    />
                   </div>
                 </div>
               </div>
-              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">{Math.round(volumeIndicator.level * 100)}%</span>
+              <span className="mt-2 text-lg font-bold text-white drop-shadow-lg">
+                {Math.round(volumeIndicator.level * 100)}%
+              </span>
             </div>
           </div>
         )}
@@ -1940,8 +2358,18 @@ export function VideoPlayer({
         {/* ── Error Overlay ──────────────────────────────────────── */}
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 text-white p-8 z-[15]">
-            <svg className="w-16 h-16 mb-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            <svg
+              className="w-16 h-16 mb-4 text-red-500"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <h3 className="text-xl font-bold mb-2">Playback Error</h3>
             <p className="text-white/60">{error}</p>
@@ -1950,13 +2378,19 @@ export function VideoPlayer({
 
         {/* ── Episode End Overlay ─────────────────────────────── */}
         {showNextEpisodeOverlay && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex flex-col items-center gap-6">
               {/* Play Again button */}
               <button
                 onClick={handlePlayAgain}
                 className="flex items-center gap-3 text-white font-medium py-3 px-6 rounded-full transition-all duration-150 hover:bg-white/[0.12]"
-                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                }}
               >
                 <RotateCcw size={20} />
                 Play Again
@@ -1966,13 +2400,22 @@ export function VideoPlayer({
               {playerSettings.autoPlayNext && hasNextEpisode && (
                 <div className="flex flex-col items-center gap-3">
                   <p className="text-sm text-white/70">
-                    Episode {episodes?.[currentEpisodeIndex + 1]?.number ?? (currentEpisode != null ? currentEpisode + 1 : '?')} in {countdown}s
+                    Episode{' '}
+                    {episodes?.[currentEpisodeIndex + 1]?.number ??
+                      (currentEpisode != null ? currentEpisode + 1 : '?')}{' '}
+                    in {countdown}s
                   </p>
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => { setShowNextEpisodeOverlay(false); onNextEpisode?.() }}
+                      onClick={() => {
+                        setShowNextEpisodeOverlay(false)
+                        onNextEpisode?.()
+                      }}
                       className="flex items-center gap-2 text-white font-semibold py-3 px-6 rounded-full transition-all duration-150"
-                      style={{ background: 'linear-gradient(135deg, #e50914, #b20710)', boxShadow: '0 0 20px rgba(229,9,20,0.3)' }}
+                      style={{
+                        background: 'linear-gradient(135deg, #e50914, #b20710)',
+                        boxShadow: '0 0 20px rgba(229,9,20,0.3)',
+                      }}
                     >
                       <SkipForward size={20} />
                       Play Next Episode
@@ -1980,7 +2423,10 @@ export function VideoPlayer({
                     <button
                       onClick={() => setShowNextEpisodeOverlay(false)}
                       className="py-3 px-4 text-white rounded-full transition-all duration-150 hover:bg-white/[0.12] text-sm"
-                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                      style={{
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                      }}
                     >
                       Cancel
                     </button>
@@ -2015,31 +2461,69 @@ export function VideoPlayer({
           }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between flex-shrink-0 min-w-[320px]" style={{ padding: '18px 16px 14px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+          <div
+            className="flex items-center justify-between flex-shrink-0 min-w-[320px]"
+            style={{
+              padding: '18px 16px 14px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            }}
+          >
             <span className="font-display font-bold text-base text-white/95">Episodes</span>
             <button
               className="flex items-center justify-center w-[30px] h-[30px] rounded-full transition-all duration-[120ms] hover:bg-white/[0.12]"
-              style={{ background: 'rgba(255, 255, 255, 0.06)', border: 'none', color: 'rgba(255, 255, 255, 0.5)' }}
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: 'none',
+                color: 'rgba(255, 255, 255, 0.5)',
+              }}
               onClick={() => setShowSidebar(false)}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
           </div>
 
           {/* Season tabs (only if >26 episodes) */}
           {seasonCount > 1 && (
-            <div className="flex gap-1 flex-shrink-0 min-w-[320px] overflow-x-auto" style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', scrollbarWidth: 'none' }}>
+            <div
+              className="flex gap-1 flex-shrink-0 min-w-[320px] overflow-x-auto"
+              style={{
+                padding: '12px 16px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                scrollbarWidth: 'none',
+              }}
+            >
               {Array.from({ length: seasonCount }, (_, i) => (
                 <button
                   key={i}
                   className={`py-[5px] px-[14px] rounded-full whitespace-nowrap transition-all duration-[120ms] text-xs font-semibold ${
                     activeSeason === i ? '' : 'hover:text-white hover:bg-white/[0.08]'
                   }`}
-                  style={activeSeason === i
-                    ? { background: '#e50914', borderColor: '#e50914', color: 'white', border: '1px solid #e50914', boxShadow: '0 0 12px rgba(229, 9, 20, 0.3)' }
-                    : { background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.08)', color: 'rgba(255, 255, 255, 0.5)' }
+                  style={
+                    activeSeason === i
+                      ? {
+                          background: '#e50914',
+                          borderColor: '#e50914',
+                          color: 'white',
+                          border: '1px solid #e50914',
+                          boxShadow: '0 0 12px rgba(229, 9, 20, 0.3)',
+                        }
+                      : {
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          color: 'rgba(255, 255, 255, 0.5)',
+                        }
                   }
                   onClick={() => setActiveSeason(i)}
                 >
@@ -2050,7 +2534,10 @@ export function VideoPlayer({
           )}
 
           {/* Episode list */}
-          <div className="flex-1 overflow-y-auto p-2 min-w-[320px]" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
+          <div
+            className="flex-1 overflow-y-auto p-2 min-w-[320px]"
+            style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}
+          >
             {seasonEpisodes.map((ep) => {
               const isActive = currentEpisode === ep.number
               return (
@@ -2068,15 +2555,23 @@ export function VideoPlayer({
                   onClick={() => onEpisodeSelect?.(ep.id)}
                 >
                   {/* Thumbnail */}
-                  <div className="w-[110px] h-[62px] rounded-md overflow-hidden flex-shrink-0 relative" style={{ background: '#1a1a1a' }}>
+                  <div
+                    className="w-[110px] h-[62px] rounded-md overflow-hidden flex-shrink-0 relative"
+                    style={{ background: '#1a1a1a' }}
+                  >
                     {ep.thumbnail ? (
                       <img src={ep.thumbnail} alt="" className="w-full h-full object-cover block" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">EP {ep.number}</div>
+                      <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">
+                        EP {ep.number}
+                      </div>
                     )}
                     {/* Now-playing bars */}
                     {isActive && (
-                      <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0, 0, 0, 0.55)' }}>
+                      <div
+                        className="absolute inset-0 flex items-center justify-center"
+                        style={{ background: 'rgba(0, 0, 0, 0.55)' }}
+                      >
                         <div className="flex items-end gap-[2px] h-4">
                           {[8, 14, 10, 6].map((h, i) => (
                             <span
