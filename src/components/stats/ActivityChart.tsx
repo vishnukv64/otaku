@@ -2,7 +2,7 @@
  * ActivityChart — recharts AreaChart with period toggle (7D/30D/90D/All)
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { getDailyActivity } from '@/utils/tauri-commands'
 import type { DailyActivity } from '@/utils/tauri-commands'
@@ -34,10 +34,12 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
         <p key={entry.dataKey} className="text-[var(--color-text-primary)]">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full mr-2"
-            style={{ backgroundColor: entry.dataKey === 'watch_minutes' ? 'var(--color-accent-primary)' : 'rgba(229,9,20,0.5)' }}
+            style={{
+              backgroundColor:
+                entry.dataKey === 'watch_minutes' ? 'var(--color-accent-primary)' : '#6366F1',
+            }}
           />
-          {entry.dataKey === 'watch_minutes' ? 'Anime' : 'Manga'}:{' '}
-          {Math.round(entry.value)} min
+          {entry.dataKey === 'watch_minutes' ? 'Anime' : 'Manga'}: {Math.round(entry.value)} min
           {entry.dataKey === 'read_minutes' ? ' (estimated)' : ''}
         </p>
       ))}
@@ -45,51 +47,33 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   )
 }
 
-interface ActivityChartProps {
-  /** Pre-fetched 30-day data from StatsPage to avoid SQLite pool contention on mount.
-   *  null = still loading, undefined = not provided (fallback to self-fetch). */
-  initialData?: DailyActivity[] | null
-}
-
-export function ActivityChart({ initialData }: ActivityChartProps) {
-  const [selectedPeriod, setSelectedPeriod] = useState(1) // 30D default
+export function ActivityChart() {
+  const [selectedPeriod, setSelectedPeriod] = useState(3) // All time default
   const [data, setData] = useState<DailyActivity[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  const fetchData = useCallback(async (days: number) => {
+  // Fetch data when period changes (including initial mount)
+  useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    try {
-      // Race against a timeout so a hung invoke never causes a perpetual spinner
-      const result = await Promise.race([
-        getDailyActivity(days),
-        new Promise<DailyActivity[]>((_, reject) =>
-          setTimeout(() => reject(new Error('Activity fetch timed out')), 10_000)
-        ),
-      ])
-      setData(result)
-    } catch (err) {
-      console.error('Failed to fetch daily activity:', err)
-      setData([])
-    } finally {
-      setLoading(false)
+    getDailyActivity(periods[selectedPeriod].days)
+      .then((result) => {
+        if (!cancelled) setData(result)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch daily activity:', err)
+        if (!cancelled) setData([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [])
+  }, [selectedPeriod])
 
-  // Seed data from parent-provided initial batch (30D), avoiding an extra DB call
-  useEffect(() => {
-    if (initialData != null && selectedPeriod === 1) {
-      setData(initialData)
-    }
-  }, [initialData]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch when user changes period, or when no initial data was provided
-  useEffect(() => {
-    // If parent already gave us 30D data, skip the redundant fetch
-    if (selectedPeriod === 1 && initialData != null) return
-    fetchData(periods[selectedPeriod].days)
-  }, [selectedPeriod, fetchData, initialData])
-
-  const isEmpty = !data || data.length === 0 || data.every((d) => d.watch_minutes === 0 && d.read_minutes === 0)
+  const isEmpty =
+    !data || data.length === 0 || data.every((d) => d.watch_minutes === 0 && d.read_minutes === 0)
 
   return (
     <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
@@ -130,8 +114,8 @@ export function ActivityChart({ initialData }: ActivityChartProps) {
                   <stop offset="95%" stopColor="rgba(229,9,20,0.8)" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="colorManga" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="rgba(229,9,20,0.4)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="rgba(229,9,20,0.4)" stopOpacity={0} />
+                  <stop offset="5%" stopColor="rgba(99, 102, 241, 0.8)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="rgba(99, 102, 241, 0.8)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis
@@ -140,6 +124,7 @@ export function ActivityChart({ initialData }: ActivityChartProps) {
                 tick={{ fontSize: 12, fill: 'var(--color-text-tertiary)' }}
                 axisLine={false}
                 tickLine={false}
+                interval="preserveStartEnd"
               />
               <YAxis
                 tick={{ fontSize: 12, fill: 'var(--color-text-tertiary)' }}
@@ -155,13 +140,19 @@ export function ActivityChart({ initialData }: ActivityChartProps) {
                 stroke="rgba(229,9,20,0.9)"
                 fill="url(#colorAnime)"
                 strokeWidth={2}
+                animationDuration={800}
+                animationEasing="ease-out"
+                dot={false}
               />
               <Area
                 type="monotone"
                 dataKey="read_minutes"
-                stroke="rgba(229,9,20,0.45)"
+                stroke="rgba(99, 102, 241, 0.9)"
                 fill="url(#colorManga)"
                 strokeWidth={2}
+                animationDuration={800}
+                animationEasing="ease-out"
+                dot={false}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -176,7 +167,7 @@ export function ActivityChart({ initialData }: ActivityChartProps) {
             Anime
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-[rgba(229,9,20,0.45)]" />
+            <span className="w-3 h-3 rounded-full bg-[#6366F1]" />
             Manga (estimated)
           </div>
         </div>

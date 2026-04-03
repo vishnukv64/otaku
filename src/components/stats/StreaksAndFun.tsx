@@ -41,9 +41,7 @@ function Tile({ icon, label, value, subtitle }: TileProps) {
         <span className="text-sm text-[var(--color-text-secondary)]">{label}</span>
       </div>
       <p className="text-xl font-bold text-[var(--color-text-primary)]">{value}</p>
-      {subtitle && (
-        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">{subtitle}</p>
-      )}
+      {subtitle && <p className="text-xs text-[var(--color-text-tertiary)] mt-1">{subtitle}</p>}
     </div>
   )
 }
@@ -53,8 +51,8 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
   const longestStreak = streaks?.longest_streak_days ?? 0
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
-      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
         Streaks & Fun Stats
       </h2>
 
@@ -63,12 +61,10 @@ export function StreaksAndFun({ streaks, patterns, binge }: StreaksAndFunProps) 
         <Tile
           icon={currentStreak > 0 ? <Flame size={18} /> : <Calendar size={18} />}
           label="Current Streak"
-          value={currentStreak > 0 ? `${currentStreak} day${currentStreak !== 1 ? 's' : ''}` : '0 days'}
-          subtitle={
-            currentStreak === 0
-              ? 'Watch or read something today!'
-              : undefined
+          value={
+            currentStreak > 0 ? `${currentStreak} day${currentStreak !== 1 ? 's' : ''}` : '0 days'
           }
+          subtitle={currentStreak === 0 ? 'Watch or read something today!' : undefined}
         />
 
         {/* Longest Streak */}

@@ -22,36 +22,24 @@ function AnimeThumbnail({ url, title }: { url?: string; title: string }) {
   const { src, loading } = useProxiedImage(url || '')
   if (!url || loading || !src) {
     return (
-      <div className="w-10 h-14 rounded bg-[var(--color-surface-hover)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
+      <div className="w-12 h-16 rounded bg-[var(--color-surface-hover)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
         <Tv size={16} />
       </div>
     )
   }
-  return (
-    <img
-      src={src}
-      alt={title}
-      className="w-10 h-14 rounded object-cover shrink-0"
-    />
-  )
+  return <img src={src} alt={title} className="w-12 h-16 rounded object-cover shrink-0" />
 }
 
 function MangaThumbnail({ url, title }: { url?: string; title: string }) {
   const { src, loading } = useProxiedImage(url || '')
   if (!url || loading || !src) {
     return (
-      <div className="w-10 h-14 rounded bg-[var(--color-surface-hover)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
+      <div className="w-12 h-16 rounded bg-[var(--color-surface-hover)] shrink-0 flex items-center justify-center text-[var(--color-text-tertiary)]">
         <BookOpen size={16} />
       </div>
     )
   }
-  return (
-    <img
-      src={src}
-      alt={title}
-      className="w-10 h-14 rounded object-cover shrink-0"
-    />
-  )
+  return <img src={src} alt={title} className="w-12 h-16 rounded object-cover shrink-0" />
 }
 
 export function TopContent({ topAnime, topManga }: TopContentProps) {
@@ -64,9 +52,7 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
       <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
         <div className="flex items-center gap-2 mb-5">
           <Tv size={18} className="text-[var(--color-text-tertiary)]" />
-          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-            Top Anime
-          </h2>
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Top Anime</h2>
         </div>
         {animeEmpty ? (
           <p className="text-sm text-[var(--color-text-tertiary)] py-8 text-center">
@@ -85,7 +71,8 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
                     {entry.media.title}
                   </p>
                   <p className="text-xs text-[var(--color-text-tertiary)]">
-                    {formatTime(entry.total_time_seconds)} &middot; {entry.episodes_watched} episodes
+                    {formatTime(entry.total_time_seconds)} &middot; {entry.episodes_watched}{' '}
+                    episodes
                   </p>
                 </div>
               </div>
@@ -98,9 +85,7 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
       <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
         <div className="flex items-center gap-2 mb-5">
           <BookOpen size={18} className="text-[var(--color-text-tertiary)]" />
-          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-            Top Manga
-          </h2>
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Top Manga</h2>
         </div>
         {mangaEmpty ? (
           <p className="text-sm text-[var(--color-text-tertiary)] py-8 text-center">

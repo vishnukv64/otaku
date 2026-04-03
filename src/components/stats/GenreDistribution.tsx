@@ -77,7 +77,7 @@ export function GenreDistribution() {
           {data!.slice(0, 10).map((genre, i) => {
             const pct = (genre.time_seconds / maxTime) * 100
             // Use accent color with decreasing opacity for lower-ranked genres
-            const opacity = 1 - (i * 0.07)
+            const opacity = 1 - i * 0.07
             return (
               <div key={genre.genre} className="flex items-center gap-3">
                 <span className="w-24 text-sm text-[var(--color-text-secondary)] text-right shrink-0 truncate">
@@ -88,7 +88,10 @@ export function GenreDistribution() {
                     className="h-full rounded-full transition-all duration-500"
                     style={{
                       width: `${Math.max(pct, 2)}%`,
-                      backgroundColor: `rgba(229, 9, 20, ${opacity})`,
+                      backgroundColor:
+                        selectedTab === 'Manga'
+                          ? `rgba(99, 102, 241, ${opacity})`
+                          : `rgba(229, 9, 20, ${opacity})`,
                     }}
                   />
                 </div>

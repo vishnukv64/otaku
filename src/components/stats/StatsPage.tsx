@@ -14,7 +14,6 @@ import {
   getStreakStats,
   getActivityPatterns,
   getBingeStats,
-  getDailyActivity,
 } from '@/utils/tauri-commands'
 import type {
   WatchStatsSummary,
@@ -25,7 +24,6 @@ import type {
   StreakStats,
   ActivityPatterns,
   BingeStats,
-  DailyActivity,
 } from '@/utils/tauri-commands'
 
 import { SummaryCards } from './SummaryCards'
@@ -44,44 +42,20 @@ export function StatsPage() {
   const [streaks, setStreaks] = useState<StreakStats | null>(null)
   const [patterns, setPatterns] = useState<ActivityPatterns | null>(null)
   const [binge, setBinge] = useState<BingeStats | null>(null)
-  const [dailyActivity, setDailyActivity] = useState<DailyActivity[] | null>(null)
 
   useEffect(() => {
-    // Fire all API calls in parallel
-    const load = async () => {
-      const results = await Promise.allSettled([
-        getWatchStatsSummary(),       // 0
-        getReadingStatsSummary(),     // 1
-        getCompletionStats(),         // 2
-        getTopWatchedAnime(5),        // 3
-        getTopReadManga(5),           // 4
-        getStreakStats(),             // 5
-        getActivityPatterns(),        // 6
-        getBingeStats(),              // 7
-        getDailyActivity(30),        // 8 — initial 30D data for ActivityChart
-      ])
+    // Fire each query independently so sections render as data arrives.
+    // ActivityChart and GenreDistribution manage their own data fetching.
+    const err = (name: string) => (e: unknown) => console.error(`Stats [${name}] failed:`, e)
 
-      if (results[0].status === 'fulfilled') setWatchStats(results[0].value)
-      if (results[1].status === 'fulfilled') setReadingStats(results[1].value)
-      if (results[2].status === 'fulfilled') setCompletionStats(results[2].value)
-      if (results[3].status === 'fulfilled') setTopAnime(results[3].value)
-      if (results[4].status === 'fulfilled') setTopManga(results[4].value)
-      if (results[5].status === 'fulfilled') setStreaks(results[5].value)
-      if (results[6].status === 'fulfilled') setPatterns(results[6].value)
-      if (results[7].status === 'fulfilled') setBinge(results[7].value)
-      // Pass initial activity data (or empty array on failure) so ActivityChart
-      // does not need to fire its own query during the initial pool-contention window
-      setDailyActivity(results[8].status === 'fulfilled' ? results[8].value : [])
-
-      // Log any failures
-      results.forEach((r, i) => {
-        if (r.status === 'rejected') {
-          console.error(`Stats query ${i} failed:`, r.reason)
-        }
-      })
-    }
-
-    load()
+    getWatchStatsSummary().then(setWatchStats).catch(err('watchStats'))
+    getReadingStatsSummary().then(setReadingStats).catch(err('readingStats'))
+    getCompletionStats().then(setCompletionStats).catch(err('completion'))
+    getTopWatchedAnime(5).then(setTopAnime).catch(err('topAnime'))
+    getTopReadManga(5).then(setTopManga).catch(err('topManga'))
+    getStreakStats().then(setStreaks).catch(err('streaks'))
+    getActivityPatterns().then(setPatterns).catch(err('patterns'))
+    getBingeStats().then(setBinge).catch(err('binge'))
   }, [])
 
   return (
@@ -98,22 +72,70 @@ export function StatsPage() {
         </div>
 
         {/* Summary Cards */}
-        <SummaryCards watchStats={watchStats} readingStats={readingStats} />
+        <div
+          style={{
+            animation: 'stats-fade-up 0.5s ease-out forwards',
+            animationDelay: '0ms',
+            opacity: 0,
+          }}
+        >
+          <SummaryCards watchStats={watchStats} readingStats={readingStats} />
+        </div>
 
-        {/* Activity Chart — receives initial 30D data to avoid pool contention */}
-        <ActivityChart initialData={dailyActivity} />
+        {/* Activity Chart (manages its own data fetching) */}
+        <div
+          style={{
+            animation: 'stats-fade-up 0.5s ease-out forwards',
+            animationDelay: '80ms',
+            opacity: 0,
+          }}
+        >
+          <ActivityChart />
+        </div>
 
         {/* Genre Distribution (manages its own data fetching) */}
-        <GenreDistribution />
+        <div
+          style={{
+            animation: 'stats-fade-up 0.5s ease-out forwards',
+            animationDelay: '160ms',
+            opacity: 0,
+          }}
+        >
+          <GenreDistribution />
+        </div>
 
         {/* Completion Rings */}
-        <CompletionRings data={completionStats} />
+        <div
+          style={{
+            animation: 'stats-fade-up 0.5s ease-out forwards',
+            animationDelay: '240ms',
+            opacity: 0,
+          }}
+        >
+          <CompletionRings data={completionStats} />
+        </div>
 
         {/* Top Content */}
-        <TopContent topAnime={topAnime} topManga={topManga} />
+        <div
+          style={{
+            animation: 'stats-fade-up 0.5s ease-out forwards',
+            animationDelay: '320ms',
+            opacity: 0,
+          }}
+        >
+          <TopContent topAnime={topAnime} topManga={topManga} />
+        </div>
 
         {/* Streaks & Fun */}
-        <StreaksAndFun streaks={streaks} patterns={patterns} binge={binge} />
+        <div
+          style={{
+            animation: 'stats-fade-up 0.5s ease-out forwards',
+            animationDelay: '400ms',
+            opacity: 0,
+          }}
+        >
+          <StreaksAndFun streaks={streaks} patterns={patterns} binge={binge} />
+        </div>
       </div>
     </div>
   )

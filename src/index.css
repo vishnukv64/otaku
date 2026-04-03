@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
 @theme {
@@ -47,8 +47,9 @@
   --color-text-dim: #404040;
 
   /* ── Font families ── */
-  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-family-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
+    'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   --font-family-display: 'Space Grotesk', 'Inter', sans-serif;
   --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
@@ -113,7 +114,9 @@
 @layer utilities {
   /* Performance-optimized animations (opacity and transform only) */
   .animate-scale-hover {
-    transition: transform 0.3s ease, opacity 0.3s ease;
+    transition:
+      transform 0.3s ease,
+      opacity 0.3s ease;
   }
 
   .animate-scale-hover:hover {
@@ -138,6 +141,17 @@
     }
     100% {
       background-position: -200% 0;
+    }
+  }
+
+  @keyframes stats-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 
@@ -371,7 +385,8 @@
   }
 
   @keyframes onboarding-glow-pulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0.6;
     }
     50% {
@@ -390,7 +405,8 @@
 
   /* ── Abyss Design System Animations ── */
   @keyframes float {
-    0%, 100% {
+    0%,
+    100% {
       transform: translateY(0);
     }
     50% {
@@ -399,7 +415,8 @@
   }
 
   @keyframes glow-pulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0.4;
     }
     50% {
@@ -439,7 +456,8 @@
   }
 
   @keyframes orb-float {
-    0%, 100% {
+    0%,
+    100% {
       transform: translate(0, 0) scale(1);
     }
     33% {
@@ -451,7 +469,8 @@
   }
 
   @keyframes dot-pulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0.3;
       transform: scale(1);
     }

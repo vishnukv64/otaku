@@ -28,16 +28,22 @@ export function SummaryCards({ watchStats, readingStats }: SummaryCardsProps) {
       icon: <Clock size={20} />,
       label: 'Time Watched',
       value: watchStats ? formatDuration(watchStats.total_time_seconds) : '--',
+      iconColor: 'text-[var(--color-info)]',
+      bgClass: 'bg-[rgba(59,130,246,0.06)] hover:bg-[rgba(59,130,246,0.1)]',
     },
     {
       icon: <Tv size={20} />,
       label: 'Episodes Completed',
       value: watchStats ? watchStats.episodes_completed.toLocaleString() : '--',
+      iconColor: 'text-[var(--color-accent-primary)]',
+      bgClass: 'bg-[rgba(229,9,20,0.06)] hover:bg-[rgba(229,9,20,0.1)]',
     },
     {
       icon: <BookOpen size={20} />,
       label: 'Chapters Read',
       value: readingStats ? readingStats.total_chapters_completed.toLocaleString() : '--',
+      iconColor: 'text-[var(--color-green)]',
+      bgClass: 'bg-[rgba(70,211,105,0.06)] hover:bg-[rgba(70,211,105,0.1)]',
     },
     {
       icon: <Trophy size={20} />,
@@ -50,18 +56,17 @@ export function SummaryCards({ watchStats, readingStats }: SummaryCardsProps) {
             : readingStats
               ? readingStats.series_completed.toLocaleString()
               : '--',
+      iconColor: 'text-[var(--color-gold)]',
+      bgClass: 'bg-[rgba(245,197,24,0.06)] hover:bg-[rgba(245,197,24,0.1)]',
     },
   ]
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {cards.map((card) => (
-        <div
-          key={card.label}
-          className="p-5 rounded-xl bg-[var(--color-surface-subtle)] transition-colors hover:bg-[var(--color-surface-hover)]"
-        >
+        <div key={card.label} className={`p-5 rounded-xl transition-colors ${card.bgClass}`}>
           <div className="flex items-center gap-2 mb-3">
-            <div className="text-[var(--color-text-tertiary)]">{card.icon}</div>
+            <div className={card.iconColor}>{card.icon}</div>
             <span className="text-sm font-medium text-[var(--color-text-secondary)]">
               {card.label}
             </span>

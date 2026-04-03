@@ -14,10 +14,15 @@ interface RingSegment {
   color: string
 }
 
-function getSegments(cat: CompletionStatsCategory): RingSegment[] {
+function getSegments(cat: CompletionStatsCategory, hue: 'red' | 'indigo' = 'red'): RingSegment[] {
+  const colors =
+    hue === 'indigo'
+      ? { completed: 'rgba(99, 102, 241, 0.9)', watching: 'rgba(99, 102, 241, 0.55)' }
+      : { completed: 'rgba(229, 9, 20, 0.9)', watching: 'rgba(229, 9, 20, 0.55)' }
+
   return [
-    { label: 'Completed', value: cat.completed, color: 'rgba(229, 9, 20, 0.9)' },
-    { label: 'Watching', value: cat.watching, color: 'rgba(229, 9, 20, 0.55)' },
+    { label: 'Completed', value: cat.completed, color: colors.completed },
+    { label: 'Watching', value: cat.watching, color: colors.watching },
     { label: 'On Hold', value: cat.on_hold, color: 'rgba(255, 255, 255, 0.25)' },
     { label: 'Dropped', value: cat.dropped, color: 'rgba(255, 255, 255, 0.12)' },
     { label: 'Plan to Watch', value: cat.plan_to_watch, color: 'rgba(255, 255, 255, 0.06)' },
@@ -102,21 +107,27 @@ function DonutRing({
 }
 
 export function CompletionRings({ data }: CompletionRingsProps) {
-  const animeSegments = data ? getSegments(data.anime) : getSegments({ watching: 0, completed: 0, on_hold: 0, dropped: 0, plan_to_watch: 0 })
-  const mangaSegments = data
-    ? getSegments({
-        watching: data.manga.watching,
-        completed: data.manga.completed,
-        on_hold: data.manga.on_hold,
-        dropped: data.manga.dropped,
-        plan_to_watch: data.manga.plan_to_watch,
-      })
+  const animeSegments = data
+    ? getSegments(data.anime)
     : getSegments({ watching: 0, completed: 0, on_hold: 0, dropped: 0, plan_to_watch: 0 })
+  const mangaSegments = data
+    ? getSegments(
+        {
+          watching: data.manga.watching,
+          completed: data.manga.completed,
+          on_hold: data.manga.on_hold,
+          dropped: data.manga.dropped,
+          plan_to_watch: data.manga.plan_to_watch,
+        },
+        'indigo'
+      )
+    : getSegments({ watching: 0, completed: 0, on_hold: 0, dropped: 0, plan_to_watch: 0 }, 'indigo')
 
   // Relabel for manga
   const mangaLabeled = mangaSegments.map((s) => ({
     ...s,
-    label: s.label === 'Watching' ? 'Reading' : s.label === 'Plan to Watch' ? 'Plan to Read' : s.label,
+    label:
+      s.label === 'Watching' ? 'Reading' : s.label === 'Plan to Watch' ? 'Plan to Read' : s.label,
   }))
 
   const animeTotal = animeSegments.reduce((sum, s) => sum + s.value, 0)
