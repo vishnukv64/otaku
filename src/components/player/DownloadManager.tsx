@@ -422,7 +422,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       const downloadsList = await listDownloads()
       setDownloads(downloadsList)
       notifySuccess('Downloads Paused', `Paused ${activeDownloads.length} download(s)`)
-    } catch (error) {
+    } catch {
       notifyError('Pause Failed', 'Failed to pause some downloads')
     }
   }

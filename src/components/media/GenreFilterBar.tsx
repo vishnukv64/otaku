@@ -116,7 +116,7 @@ export function GenreFilterBar({
 
   const selectClasses = "bg-[var(--color-bg-secondary)] border border-[var(--color-bg-hover)] rounded-lg px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]"
 
-  const FilterDropdowns = () => (
+  const filterDropdowns = (
     <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
       <select
         value={filters.orderBy}
@@ -268,12 +268,12 @@ export function GenreFilterBar({
                   <X className="w-5 h-5 text-[var(--color-text-secondary)]" />
                 </button>
               </div>
-              <FilterDropdowns />
+              {filterDropdowns}
             </div>
           </BottomSheet>
         </>
       ) : (
-        <FilterDropdowns />
+        filterDropdowns
       )}
     </div>
   )

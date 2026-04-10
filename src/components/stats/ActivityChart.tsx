@@ -53,9 +53,10 @@ export function ActivityChart() {
   const [loading, setLoading] = useState(true)
 
   // Fetch data when period changes (including initial mount)
+  // Note: setLoading(true) is called in the button onClick handler below
+  // (and initialized as true for the first render) to avoid setState in effect body.
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     getDailyActivity(periods[selectedPeriod].days)
       .then((result) => {
         if (!cancelled) setData(result)
@@ -83,7 +84,7 @@ export function ActivityChart() {
           {periods.map((p, i) => (
             <button
               key={p.label}
-              onClick={() => setSelectedPeriod(i)}
+              onClick={() => { setSelectedPeriod(i); setLoading(true) }}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 selectedPeriod === i
                   ? 'bg-[var(--color-accent-primary)] text-white shadow-sm'

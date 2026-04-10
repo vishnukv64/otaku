@@ -13,6 +13,12 @@ import { usePipStore } from '@/store/pipStore'
 import { saveWatchProgress, type VideoServerUrls } from '@/utils/tauri-commands'
 import { isAndroid } from '@/utils/platform'
 
+/** HTMLVideoElement extended with WebKit PiP APIs (macOS WKWebView) */
+interface WebKitVideoElement extends HTMLVideoElement {
+  webkitPresentationMode?: 'inline' | 'picture-in-picture'
+  webkitSetPresentationMode?: (mode: 'inline' | 'picture-in-picture') => void
+}
+
 function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
   return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}`
 }
@@ -56,7 +62,7 @@ export function MiniPlayer() {
   const isInNativePip = useCallback(() => {
     if (document.pictureInPictureElement) return true
     const video = videoRef.current
-    return video ? (video as any).webkitPresentationMode === 'picture-in-picture' : false
+    return video ? (video as WebKitVideoElement).webkitPresentationMode === 'picture-in-picture' : false
   }, [])
 
   // Exit native PiP via whichever API is active
@@ -67,8 +73,8 @@ export function MiniPlayer() {
       return
     }
     const video = videoRef.current
-    if (video && (video as any).webkitPresentationMode === 'picture-in-picture') {
-      ;(video as any).webkitSetPresentationMode('inline')
+    if (video && (video as WebKitVideoElement).webkitPresentationMode === 'picture-in-picture') {
+      ;(video as WebKitVideoElement).webkitSetPresentationMode!('inline')
     }
   }, [])
 
@@ -82,7 +88,7 @@ export function MiniPlayer() {
       videoWidth: video.videoWidth,
       pipEnabled: document.pictureInPictureEnabled,
       hasStandardApi: typeof video.requestPictureInPicture === 'function',
-      hasWebkitApi: typeof (video as any).webkitSetPresentationMode === 'function',
+      hasWebkitApi: typeof (video as WebKitVideoElement).webkitSetPresentationMode === 'function',
     })
 
     // Standard PiP API (Chromium, Safari 13.1+)
@@ -92,9 +98,9 @@ export function MiniPlayer() {
         .then(() => console.log('[MiniPlayer] Standard PiP entered'))
         .catch((e) => {
           console.warn('[MiniPlayer] Standard PiP failed:', e.message, '— trying WebKit API')
-          if (typeof (video as any).webkitSetPresentationMode === 'function') {
+          if (typeof (video as WebKitVideoElement).webkitSetPresentationMode === 'function') {
             try {
-              ;(video as any).webkitSetPresentationMode('picture-in-picture')
+              ;(video as WebKitVideoElement).webkitSetPresentationMode!('picture-in-picture')
             } catch (err) {
               console.error('[MiniPlayer] WebKit PiP also failed:', err)
             }
@@ -104,9 +110,9 @@ export function MiniPlayer() {
     }
 
     // WebKit-only PiP API (macOS WKWebView)
-    if (typeof (video as any).webkitSetPresentationMode === 'function') {
+    if (typeof (video as WebKitVideoElement).webkitSetPresentationMode === 'function') {
       try {
-        ;(video as any).webkitSetPresentationMode('picture-in-picture')
+        ;(video as WebKitVideoElement).webkitSetPresentationMode!('picture-in-picture')
         console.log('[MiniPlayer] WebKit PiP entered')
       } catch (err) {
         console.error('[MiniPlayer] WebKit PiP failed:', err)
@@ -345,7 +351,7 @@ export function MiniPlayer() {
       programmaticExitRef.current = false
     }
     const onWebkitPipChange = () => {
-      const mode = (video as any).webkitPresentationMode
+      const mode = (video as WebKitVideoElement).webkitPresentationMode
       if (mode === 'picture-in-picture') {
         setIsNativePip(true)
       } else if (mode === 'inline') {
