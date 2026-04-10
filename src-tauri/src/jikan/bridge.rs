@@ -4,8 +4,9 @@ use std::collections::HashSet;
 
 const ALLANIME_API: &str = "https://api.allanime.day/api";
 const ALLANIME_REFERER: &str = "https://allanime.to";
+const ALLANIME_ORIGIN: &str = "https://allanime.to";
 const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
 
 /// Inline GraphQL query for AllAnime search (avoids persisted query hash rotation).
 /// Based on the approach used by GoAnime/Curd projects.
@@ -236,45 +237,42 @@ fn search_allanime(query: &str, media_type: &str) -> Result<Vec<AllAnimeEdge>, S
         "countryOrigin": "ALL"
     });
 
-    let variables_str = serde_json::to_string(&variables)
-        .map_err(|e| format!("Failed to serialize variables: {}", e))?;
-
-    // Manga uses persisted query hash; anime uses inline GraphQL
-    let url = if is_manga {
-        let extensions = serde_json::json!({
-            "persistedQuery": {
-                "version": 1,
-                "sha256Hash": MANGA_SEARCH_HASH
+    // Use POST with JSON body instead of GET with URL-encoded query params.
+    // Long GET URLs with inline GraphQL trigger CloudFlare WAF 403 blocks.
+    let body = if is_manga {
+        serde_json::json!({
+            "variables": variables,
+            "extensions": {
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": MANGA_SEARCH_HASH
+                }
             }
-        });
-        let extensions_str = serde_json::to_string(&extensions)
-            .map_err(|e| format!("Failed to serialize extensions: {}", e))?;
-        format!(
-            "{}?variables={}&extensions={}",
-            ALLANIME_API,
-            urlencoding::encode(&variables_str),
-            urlencoding::encode(&extensions_str)
-        )
+        })
     } else {
-        format!(
-            "{}?variables={}&query={}",
-            ALLANIME_API,
-            urlencoding::encode(&variables_str),
-            urlencoding::encode(ANIME_SEARCH_GQL)
-        )
+        serde_json::json!({
+            "variables": variables,
+            "query": ANIME_SEARCH_GQL
+        })
     };
 
-    let response = ureq::get(&url)
+    let body_str = serde_json::to_string(&body)
+        .map_err(|e| format!("Failed to serialize request body: {}", e))?;
+
+    let response = ureq::post(ALLANIME_API)
         .set("User-Agent", USER_AGENT)
         .set("Referer", ALLANIME_REFERER)
-        .call()
+        .set("Origin", ALLANIME_ORIGIN)
+        .set("Accept", "application/json")
+        .set("Content-Type", "application/json")
+        .send_string(&body_str)
         .map_err(|e| format!("AllAnime search request failed: {}", e))?;
 
-    let body = response
+    let resp_body = response
         .into_string()
         .map_err(|e| format!("Failed to read AllAnime response: {}", e))?;
 
-    let parsed: AllAnimeSearchResponse = serde_json::from_str(&body)
+    let parsed: AllAnimeSearchResponse = serde_json::from_str(&resp_body)
         .map_err(|e| format!("Failed to parse AllAnime response: {}", e))?;
 
     // Extract edges from either shows or mangas depending on query type

@@ -12,6 +12,56 @@ use rquickjs::{Context, Runtime};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Convert an AllAnime GET URL with query params into a POST JSON body.
+/// Extracts `variables`, `query`, and `extensions` from the URL query string
+/// and returns (base_url, json_body).
+fn convert_allanime_get_to_post(url: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = url.splitn(2, '?').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let base_url = parts[0].to_string();
+    let query_string = parts[1];
+
+    let mut variables_raw: Option<String> = None;
+    let mut query_raw: Option<String> = None;
+    let mut extensions_raw: Option<String> = None;
+
+    for param in query_string.split('&') {
+        let kv: Vec<&str> = param.splitn(2, '=').collect();
+        if kv.len() == 2 {
+            let key = kv[0];
+            let value = urlencoding::decode(kv[1]).unwrap_or_else(|_| kv[1].into());
+            match key {
+                "variables" => variables_raw = Some(value.into_owned()),
+                "query" => query_raw = Some(value.into_owned()),
+                "extensions" => extensions_raw = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+    }
+
+    // Build JSON body from extracted params
+    let mut body = serde_json::Map::new();
+    if let Some(vars) = variables_raw {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&vars) {
+            body.insert("variables".to_string(), parsed);
+        }
+    }
+    if let Some(q) = query_raw {
+        body.insert("query".to_string(), serde_json::Value::String(q));
+    }
+    if let Some(ext) = extensions_raw {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&ext) {
+            body.insert("extensions".to_string(), parsed);
+        }
+    }
+
+    let json_body = serde_json::to_string(&serde_json::Value::Object(body)).ok()?;
+    log::info!("__fetch: converted AllAnime GET to POST for {}", base_url);
+    Some((base_url, json_body))
+}
+
 /// Extension runtime for executing JavaScript code safely
 pub struct ExtensionRuntime {
     extension: Arc<Extension>,
@@ -89,13 +139,35 @@ impl ExtensionRuntime {
                     .unwrap_or(None)
                     .unwrap_or_else(|| "GET".to_string());
 
+                // Intercept GET requests to api.allanime.day and convert to POST.
+                // CloudFlare blocks GET requests with long URL-encoded GraphQL queries.
+                let (effective_url, effective_method, synthetic_body) =
+                    if method == "GET" && url.contains("api.allanime.day/api?") {
+                        match convert_allanime_get_to_post(&url) {
+                            Some((base, body)) => (base, "POST".to_string(), Some(body)),
+                            None => (url.clone(), method, None),
+                        }
+                    } else {
+                        (url.clone(), method, None)
+                    };
+
                 // Build request using ureq
-                let mut request = match method.as_str() {
-                    "POST" => ureq::post(&url),
-                    _ => ureq::get(&url),
+                let mut request = match effective_method.as_str() {
+                    "POST" => ureq::post(&effective_url),
+                    _ => ureq::get(&effective_url),
                 };
 
-                // Add headers if provided
+                // For converted AllAnime requests, set proper headers
+                if synthetic_body.is_some() {
+                    request = request
+                        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0")
+                        .set("Referer", "https://allanime.to")
+                        .set("Origin", "https://allanime.to")
+                        .set("Accept", "application/json")
+                        .set("Content-Type", "application/json");
+                }
+
+                // Add headers if provided (may override the defaults above)
                 if let Ok(Some(headers)) = options.get::<_, Option<rquickjs::Object>>("headers") {
                     for key in headers.keys::<String>() {
                         if let Ok(k) = key {
@@ -110,10 +182,13 @@ impl ExtensionRuntime {
                 let body = options.get::<_, Option<String>>("body")
                     .unwrap_or(None);
 
+                // Use synthetic body (from GET→POST conversion) or original body
+                let effective_body = synthetic_body.or(body);
+
                 // Execute request (send body for POST, call() for GET)
                 // Use send_bytes to preserve the Content-Type header set by the extension
                 // (send_string overrides Content-Type to text/plain, which breaks JSON APIs)
-                let result = match body {
+                let result = match effective_body {
                     Some(b) => request.send_bytes(b.as_bytes()),
                     None => request.call(),
                 };
