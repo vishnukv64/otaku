@@ -5,6 +5,38 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-10
+
+### Added
+- **Watch History Page** — Full history page with timeline and series views, unified watch/read tracking
+- **Activity Statistics Dashboard** — Charts, genre breakdowns, watch streaks, and daily activity tracking
+- **History & Stats Navigation** — New nav links for History and Stats pages
+- **History & Stats Backend** — SQLite modules for unified timeline, series queries, summary stats, genre analysis, and streak calculations
+- **Recharts Integration** — Activity chart with period toggles (7D/30D/90D/All)
+
+### Changed
+- **Major UI Overhaul** — Redesigned browse, manga reader, and mini player; enhanced TopNav and media modals with enrichment tabs
+- **AllAnime API Transport** — Switched all API calls from GET to POST with JSON body to bypass CloudFlare WAF 403 blocks
+- **Extension Fetch Interceptor** — Auto-converts extension GET requests to `api.allanime.day` into POST transparently at the Rust transport layer
+- **System Stats Relocated** — Moved system stats from standalone page to Settings developer section
+
+### Fixed
+- **CloudFlare 403 Blocks** — Added Origin, Content-Type, Accept headers and updated User-Agent to Firefox 131 for all AllAnime requests
+- **PiP Bluetooth Audio** — Added MediaSession API for proper audio routing in Picture-in-Picture mode
+- **Release Checker Reliability** — Prevent stuck checks, add timeouts, filter non-airing media from release checks
+- **Stats Query Bugs** — Simplified stats queries, fixed Jikan page parameter issue, removed incorrect `localtime` modifier from SQLite DATE() calls
+- **Activity Chart Loading** — Resolved perpetual loading spinner and 'All' time period loading issue
+- **Stats Page Styling** — Polished with color differentiation, animations, accents, and app design language alignment
+
+### Security
+- Updated vite 6.4.1 → 6.4.2 (arbitrary file read via WebSocket)
+- Updated dompurify 3.3.1 → 3.3.3 (mutation-XSS, prototype pollution)
+- Added pnpm overrides for picomatch, minimatch, rollup, flatted, ajv, brace-expansion (22 vulnerabilities → 0)
+
+### Maintenance
+- Resolved all CI lint errors: WebKit PiP `any` types → proper interface, unused catch bindings, static component-in-render, setState-in-effect
+- TypeScript types and command wrappers for history and stats Tauri commands
+
 ## [1.0.0] - 2026-02-18
 
 ### Breaking Changes
