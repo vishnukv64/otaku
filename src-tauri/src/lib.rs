@@ -539,6 +539,19 @@ pub fn run() {
       commands::get_streak_stats,
       commands::get_activity_patterns,
       commands::get_binge_stats,
+      // New stats
+      commands::get_peak_hours,
+      commands::get_completion_rate,
+      commands::get_score_distribution,
+      commands::get_content_type_breakdown,
+      commands::get_seasonal_trends,
+      commands::get_watch_completion_rate,
+      commands::get_favorites_stats,
+      commands::get_time_to_completion,
+      commands::get_year_distribution,
+      commands::get_milestones,
+      commands::get_monthly_recap,
+      commands::get_rating_comparison,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

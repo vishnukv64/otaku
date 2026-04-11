@@ -1212,6 +1212,108 @@ export interface BingeStats {
   max_chapters_date: string
 }
 
+// ==================== New Stats Types ====================
+
+export interface HourlyActivity {
+  hour: number
+  day_of_week: number
+  minutes: number
+}
+
+export interface CompletionRateStats {
+  anime_started: number
+  anime_completed: number
+  anime_rate: number
+  manga_started: number
+  manga_completed: number
+  manga_rate: number
+}
+
+export interface ScoreDistEntry {
+  score: number
+  count: number
+}
+
+export interface ScoreDistribution {
+  entries: ScoreDistEntry[]
+  average_score: number
+  total_rated: number
+}
+
+export interface ContentTypeEntry {
+  content_type: string
+  count: number
+  time_seconds: number
+}
+
+export interface SeasonEntry {
+  season: string
+  year: number
+  count: number
+}
+
+export interface WatchCompletionRateStats {
+  avg_completion_percent: number
+  fully_watched_percent: number
+  total_episodes: number
+}
+
+export interface FavoritesStats {
+  total_favorites: number
+  anime_favorites: number
+  manga_favorites: number
+  top_genres: string[]
+  recent_favorite_title: string | null
+}
+
+export interface TimeToCompletion {
+  avg_days: number
+  fastest_title: string
+  fastest_days: number
+  slowest_title: string
+  slowest_days: number
+  total_completed: number
+}
+
+export interface YearDistEntry {
+  year: number
+  anime_count: number
+  manga_count: number
+}
+
+export interface Milestone {
+  id: string
+  title: string
+  description: string
+  achieved: boolean
+  progress: number
+  target: number
+  current: number
+}
+
+export interface MilestoneStats {
+  milestones: Milestone[]
+  total_achieved: number
+}
+
+export interface MonthlyRecap {
+  month: string
+  episodes_watched: number
+  chapters_read: number
+  time_watched_seconds: number
+  new_series_started: number
+  series_completed: number
+  top_genre: string
+}
+
+export interface RatingComparisonEntry {
+  title: string
+  cover_url: string | null
+  user_score: number
+  public_rating: number
+  difference: number
+}
+
 /**
  * Save media details to database
  */
@@ -2737,4 +2839,54 @@ export async function getActivityPatterns(): Promise<ActivityPatterns> {
 
 export async function getBingeStats(): Promise<BingeStats> {
   return invoke<BingeStats>('get_binge_stats')
+}
+
+// ==================== New Stats Commands ====================
+
+export async function getPeakHours(): Promise<HourlyActivity[]> {
+  return invoke<HourlyActivity[]>('get_peak_hours')
+}
+
+export async function getCompletionRate(): Promise<CompletionRateStats> {
+  return invoke<CompletionRateStats>('get_completion_rate')
+}
+
+export async function getScoreDistribution(): Promise<ScoreDistribution> {
+  return invoke<ScoreDistribution>('get_score_distribution')
+}
+
+export async function getContentTypeBreakdown(): Promise<ContentTypeEntry[]> {
+  return invoke<ContentTypeEntry[]>('get_content_type_breakdown')
+}
+
+export async function getSeasonalTrends(): Promise<SeasonEntry[]> {
+  return invoke<SeasonEntry[]>('get_seasonal_trends')
+}
+
+export async function getWatchCompletionRate(): Promise<WatchCompletionRateStats> {
+  return invoke<WatchCompletionRateStats>('get_watch_completion_rate')
+}
+
+export async function getFavoritesStats(): Promise<FavoritesStats> {
+  return invoke<FavoritesStats>('get_favorites_stats')
+}
+
+export async function getTimeToCompletion(): Promise<TimeToCompletion> {
+  return invoke<TimeToCompletion>('get_time_to_completion')
+}
+
+export async function getYearDistribution(): Promise<YearDistEntry[]> {
+  return invoke<YearDistEntry[]>('get_year_distribution')
+}
+
+export async function getMilestones(): Promise<MilestoneStats> {
+  return invoke<MilestoneStats>('get_milestones')
+}
+
+export async function getMonthlyRecap(): Promise<MonthlyRecap> {
+  return invoke<MonthlyRecap>('get_monthly_recap')
+}
+
+export async function getRatingComparison(): Promise<RatingComparisonEntry[]> {
+  return invoke<RatingComparisonEntry[]>('get_rating_comparison')
 }

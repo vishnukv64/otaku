@@ -97,6 +97,122 @@ pub struct BingeStats {
     pub max_chapters_date: String,
 }
 
+// ==================== New Stats Types ====================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HourlyActivity {
+    pub hour: i32,
+    pub day_of_week: i32,
+    pub minutes: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionRateStats {
+    pub anime_started: i32,
+    pub anime_completed: i32,
+    pub anime_rate: f64,
+    pub manga_started: i32,
+    pub manga_completed: i32,
+    pub manga_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoreDistEntry {
+    pub score: i32,
+    pub count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoreDistribution {
+    pub entries: Vec<ScoreDistEntry>,
+    pub average_score: f64,
+    pub total_rated: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentTypeEntry {
+    pub content_type: String,
+    pub count: i32,
+    pub time_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeasonEntry {
+    pub season: String,
+    pub year: i32,
+    pub count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchCompletionRateStats {
+    pub avg_completion_percent: f64,
+    pub fully_watched_percent: f64,
+    pub total_episodes: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FavoritesStats {
+    pub total_favorites: i32,
+    pub anime_favorites: i32,
+    pub manga_favorites: i32,
+    pub top_genres: Vec<String>,
+    pub recent_favorite_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeToCompletion {
+    pub avg_days: f64,
+    pub fastest_title: String,
+    pub fastest_days: f64,
+    pub slowest_title: String,
+    pub slowest_days: f64,
+    pub total_completed: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YearDistEntry {
+    pub year: i32,
+    pub anime_count: i32,
+    pub manga_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Milestone {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub achieved: bool,
+    pub progress: f64,
+    pub target: i32,
+    pub current: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MilestoneStats {
+    pub milestones: Vec<Milestone>,
+    pub total_achieved: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonthlyRecap {
+    pub month: String,
+    pub episodes_watched: i32,
+    pub chapters_read: i32,
+    pub time_watched_seconds: f64,
+    pub new_series_started: i32,
+    pub series_completed: i32,
+    pub top_genre: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RatingComparisonEntry {
+    pub title: String,
+    pub cover_url: Option<String>,
+    pub user_score: f64,
+    pub public_rating: f64,
+    pub difference: f64,
+}
+
 pub async fn get_watch_stats_summary(pool: &SqlitePool) -> Result<WatchStatsSummary> {
     let row = sqlx::query(
         "SELECT
@@ -562,4 +678,405 @@ pub async fn get_binge_stats(pool: &SqlitePool) -> Result<BingeStats> {
         max_chapters_manga_title: ch_row.as_ref().map(|r| r.get::<String, _>("title")).unwrap_or_default(),
         max_chapters_date: ch_row.as_ref().map(|r| r.get::<String, _>("day")).unwrap_or_default(),
     })
+}
+
+// ==================== New Stats Functions ====================
+
+pub async fn get_peak_hours(pool: &SqlitePool) -> Result<Vec<HourlyActivity>> {
+    let rows = sqlx::query(
+        &format!(
+            "SELECT hour, day_of_week, SUM(minutes) as minutes FROM (
+                SELECT CAST(strftime('%H', last_watched) AS INTEGER) as hour,
+                    CAST(strftime('%w', last_watched) AS INTEGER) as day_of_week,
+                    progress_seconds / 60.0 as minutes
+                FROM watch_history WHERE last_watched IS NOT NULL
+                UNION ALL
+                SELECT CAST(strftime('%H', last_read) AS INTEGER) as hour,
+                    CAST(strftime('%w', last_read) AS INTEGER) as day_of_week,
+                    (CASE WHEN completed = 1 THEN COALESCE(total_pages, 0) ELSE current_page END) * {} as minutes
+                FROM reading_history WHERE last_read IS NOT NULL
+            ) GROUP BY hour, day_of_week",
+            READING_MINUTES_PER_PAGE
+        )
+    )
+    .fetch_all(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(rows.iter().map(|row| HourlyActivity {
+        hour: row.get("hour"),
+        day_of_week: row.get("day_of_week"),
+        minutes: row.get("minutes"),
+    }).collect())
+}
+
+pub async fn get_completion_rate(pool: &SqlitePool) -> Result<CompletionRateStats> {
+    let row = sqlx::query(
+        "SELECT
+            (SELECT COUNT(DISTINCT media_id) FROM watch_history) as anime_started,
+            (SELECT COUNT(*) FROM library l JOIN media m ON l.media_id = m.id
+             WHERE l.status = 'completed' AND m.media_type = 'anime') as anime_completed,
+            (SELECT COUNT(DISTINCT media_id) FROM reading_history) as manga_started,
+            (SELECT COUNT(*) FROM library l JOIN media m ON l.media_id = m.id
+             WHERE l.status = 'completed' AND m.media_type = 'manga') as manga_completed"
+    )
+    .fetch_one(pool)
+    .await?;
+
+    use sqlx::Row;
+    let anime_started: i32 = row.get("anime_started");
+    let anime_completed: i32 = row.get("anime_completed");
+    let manga_started: i32 = row.get("manga_started");
+    let manga_completed: i32 = row.get("manga_completed");
+
+    Ok(CompletionRateStats {
+        anime_started,
+        anime_completed,
+        anime_rate: if anime_started > 0 { anime_completed as f64 / anime_started as f64 * 100.0 } else { 0.0 },
+        manga_started,
+        manga_completed,
+        manga_rate: if manga_started > 0 { manga_completed as f64 / manga_started as f64 * 100.0 } else { 0.0 },
+    })
+}
+
+pub async fn get_score_distribution(pool: &SqlitePool) -> Result<ScoreDistribution> {
+    let rows = sqlx::query(
+        "SELECT CAST(l.score AS INTEGER) as score, COUNT(*) as count
+         FROM library l
+         WHERE l.score > 0
+         GROUP BY CAST(l.score AS INTEGER)
+         ORDER BY score"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let avg_row = sqlx::query(
+        "SELECT COALESCE(AVG(CAST(l.score AS REAL)), 0) as avg_score,
+                COUNT(*) as total
+         FROM library l WHERE l.score > 0"
+    )
+    .fetch_one(pool)
+    .await?;
+
+    use sqlx::Row;
+    let entries: Vec<ScoreDistEntry> = rows.iter().map(|row| ScoreDistEntry {
+        score: row.get("score"),
+        count: row.get("count"),
+    }).collect();
+
+    Ok(ScoreDistribution {
+        entries,
+        average_score: avg_row.get("avg_score"),
+        total_rated: avg_row.get("total"),
+    })
+}
+
+pub async fn get_content_type_breakdown(pool: &SqlitePool) -> Result<Vec<ContentTypeEntry>> {
+    let rows = sqlx::query(
+        "SELECT
+            COALESCE(m.content_type, 'Unknown') as content_type,
+            COUNT(DISTINCT m.id) as count,
+            COALESCE(SUM(w_time.total_time), 0) as time_seconds
+         FROM library l
+         JOIN media m ON l.media_id = m.id
+         LEFT JOIN (
+             SELECT media_id, SUM(progress_seconds) as total_time
+             FROM watch_history GROUP BY media_id
+         ) w_time ON w_time.media_id = m.id
+         WHERE m.media_type = 'anime'
+         GROUP BY COALESCE(m.content_type, 'Unknown')
+         ORDER BY count DESC"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(rows.iter().map(|row| ContentTypeEntry {
+        content_type: row.get("content_type"),
+        count: row.get("count"),
+        time_seconds: row.get("time_seconds"),
+    }).collect())
+}
+
+pub async fn get_seasonal_trends(pool: &SqlitePool) -> Result<Vec<SeasonEntry>> {
+    let rows = sqlx::query(
+        "SELECT
+            COALESCE(m.season_quarter, 'unknown') as season,
+            COALESCE(m.season_year, m.year, 0) as year,
+            COUNT(*) as count
+         FROM library l
+         JOIN media m ON l.media_id = m.id
+         WHERE m.media_type = 'anime'
+           AND (m.season_quarter IS NOT NULL OR m.season_year IS NOT NULL)
+         GROUP BY season, year
+         ORDER BY year DESC,
+            CASE LOWER(COALESCE(m.season_quarter, ''))
+                WHEN 'winter' THEN 1
+                WHEN 'spring' THEN 2
+                WHEN 'summer' THEN 3
+                WHEN 'fall' THEN 4
+                ELSE 5
+            END DESC
+         LIMIT 20"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(rows.iter().map(|row| SeasonEntry {
+        season: row.get("season"),
+        year: row.get("year"),
+        count: row.get("count"),
+    }).collect())
+}
+
+pub async fn get_watch_completion_rate(pool: &SqlitePool) -> Result<WatchCompletionRateStats> {
+    let row = sqlx::query(
+        "SELECT
+            COALESCE(AVG(CASE WHEN duration > 0 THEN (progress_seconds * 100.0 / duration) ELSE NULL END), 0) as avg_pct,
+            COALESCE(
+                COUNT(CASE WHEN duration > 0 AND progress_seconds >= duration * 0.9 THEN 1 END) * 100.0
+                / NULLIF(COUNT(CASE WHEN duration > 0 THEN 1 END), 0),
+            0) as fully_pct,
+            COUNT(*) as total
+         FROM watch_history"
+    )
+    .fetch_one(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(WatchCompletionRateStats {
+        avg_completion_percent: row.get("avg_pct"),
+        fully_watched_percent: row.get("fully_pct"),
+        total_episodes: row.get("total"),
+    })
+}
+
+pub async fn get_favorites_stats(pool: &SqlitePool) -> Result<FavoritesStats> {
+    let counts = sqlx::query(
+        "SELECT
+            COUNT(*) as total,
+            COUNT(CASE WHEN m.media_type = 'anime' THEN 1 END) as anime_fav,
+            COUNT(CASE WHEN m.media_type = 'manga' THEN 1 END) as manga_fav
+         FROM library l
+         JOIN media m ON l.media_id = m.id
+         WHERE l.favorite = 1"
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let genre_rows = sqlx::query(
+        "SELECT j.value as genre
+         FROM library l
+         JOIN media m ON l.media_id = m.id, json_each(m.genres) j
+         WHERE l.favorite = 1 AND m.genres IS NOT NULL
+         GROUP BY j.value
+         ORDER BY COUNT(*) DESC
+         LIMIT 5"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let recent = sqlx::query(
+        "SELECT m.title FROM library l
+         JOIN media m ON l.media_id = m.id
+         WHERE l.favorite = 1
+         ORDER BY l.updated_at DESC LIMIT 1"
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(FavoritesStats {
+        total_favorites: counts.get("total"),
+        anime_favorites: counts.get("anime_fav"),
+        manga_favorites: counts.get("manga_fav"),
+        top_genres: genre_rows.iter().map(|r| r.get::<String, _>("genre")).collect(),
+        recent_favorite_title: recent.map(|r| r.get::<String, _>("title")),
+    })
+}
+
+pub async fn get_time_to_completion(pool: &SqlitePool) -> Result<TimeToCompletion> {
+    let rows = sqlx::query(
+        "SELECT
+            m.title,
+            JULIANDAY(MAX(w.last_watched)) - JULIANDAY(MIN(w.last_watched)) as days_to_complete
+         FROM watch_history w
+         JOIN media m ON w.media_id = m.id
+         JOIN library l ON l.media_id = m.id AND l.status = 'completed'
+         GROUP BY m.id
+         HAVING COUNT(*) > 1 AND days_to_complete >= 0
+         ORDER BY days_to_complete"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    use sqlx::Row;
+    if rows.is_empty() {
+        return Ok(TimeToCompletion {
+            avg_days: 0.0, fastest_title: String::new(), fastest_days: 0.0,
+            slowest_title: String::new(), slowest_days: 0.0, total_completed: 0,
+        });
+    }
+
+    let total = rows.len() as i32;
+    let avg: f64 = rows.iter().map(|r| r.get::<f64, _>("days_to_complete")).sum::<f64>() / total as f64;
+    let fastest = &rows[0];
+    let slowest = &rows[rows.len() - 1];
+
+    Ok(TimeToCompletion {
+        avg_days: avg,
+        fastest_title: fastest.get("title"),
+        fastest_days: fastest.get("days_to_complete"),
+        slowest_title: slowest.get("title"),
+        slowest_days: slowest.get("days_to_complete"),
+        total_completed: total,
+    })
+}
+
+pub async fn get_year_distribution(pool: &SqlitePool) -> Result<Vec<YearDistEntry>> {
+    let rows = sqlx::query(
+        "SELECT
+            COALESCE(m.year, m.aired_start_year) as release_year,
+            COUNT(CASE WHEN m.media_type = 'anime' THEN 1 END) as anime_count,
+            COUNT(CASE WHEN m.media_type = 'manga' THEN 1 END) as manga_count
+         FROM library l
+         JOIN media m ON l.media_id = m.id
+         WHERE COALESCE(m.year, m.aired_start_year) IS NOT NULL
+         GROUP BY release_year
+         ORDER BY release_year"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(rows.iter().map(|row| YearDistEntry {
+        year: row.get("release_year"),
+        anime_count: row.get("anime_count"),
+        manga_count: row.get("manga_count"),
+    }).collect())
+}
+
+fn make_milestone(id: &str, title: &str, description: &str, current: i32, target: i32) -> Milestone {
+    Milestone {
+        id: id.to_string(),
+        title: title.to_string(),
+        description: description.to_string(),
+        achieved: current >= target,
+        progress: (current as f64 / target as f64).min(1.0),
+        target,
+        current,
+    }
+}
+
+pub async fn get_milestones(pool: &SqlitePool) -> Result<MilestoneStats> {
+    use sqlx::Row;
+
+    let ep_count: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM watch_history WHERE completed = 1")
+        .fetch_one(pool).await?.get("cnt");
+    let ch_count: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM reading_history WHERE completed = 1")
+        .fetch_one(pool).await?.get("cnt");
+    let series_count: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM library WHERE status = 'completed'")
+        .fetch_one(pool).await?.get("cnt");
+    let genre_count: i32 = sqlx::query(
+        "SELECT COUNT(DISTINCT j.value) as cnt FROM library l
+         JOIN media m ON l.media_id = m.id, json_each(m.genres) j
+         WHERE m.genres IS NOT NULL"
+    ).fetch_one(pool).await?.get("cnt");
+
+    let milestones = vec![
+        make_milestone("ep_10", "First Steps", "Watch 10 episodes", ep_count, 10),
+        make_milestone("ep_100", "Century Club", "Watch 100 episodes", ep_count, 100),
+        make_milestone("ep_500", "Seasoned Viewer", "Watch 500 episodes", ep_count, 500),
+        make_milestone("ep_1000", "Otaku Legend", "Watch 1,000 episodes", ep_count, 1000),
+        make_milestone("ch_50", "Bookworm", "Read 50 chapters", ch_count, 50),
+        make_milestone("ch_500", "Manga Master", "Read 500 chapters", ch_count, 500),
+        make_milestone("series_5", "Getting Started", "Complete 5 series", series_count, 5),
+        make_milestone("series_25", "Dedicated Fan", "Complete 25 series", series_count, 25),
+        make_milestone("series_100", "Completionist", "Complete 100 series", series_count, 100),
+        make_milestone("genre_10", "Genre Explorer", "Explore 10 different genres", genre_count, 10),
+    ];
+
+    let total_achieved = milestones.iter().filter(|m| m.achieved).count() as i32;
+    Ok(MilestoneStats { milestones, total_achieved })
+}
+
+pub async fn get_monthly_recap(pool: &SqlitePool) -> Result<MonthlyRecap> {
+    let month_str = Local::now().format("%Y-%m").to_string();
+    let month_display = Local::now().format("%B %Y").to_string();
+
+    use sqlx::Row;
+
+    let watch_row = sqlx::query(
+        "SELECT COUNT(*) as eps_watched,
+                COALESCE(SUM(progress_seconds), 0) as time_seconds
+         FROM watch_history
+         WHERE strftime('%Y-%m', last_watched) = ?"
+    ).bind(&month_str).fetch_one(pool).await?;
+
+    let read_row = sqlx::query(
+        "SELECT COUNT(*) as chapters_read
+         FROM reading_history
+         WHERE strftime('%Y-%m', last_read) = ?"
+    ).bind(&month_str).fetch_one(pool).await?;
+
+    let new_series_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM (
+            SELECT media_id FROM watch_history
+            GROUP BY media_id
+            HAVING strftime('%Y-%m', MIN(last_watched)) = ?
+            UNION
+            SELECT media_id FROM reading_history
+            GROUP BY media_id
+            HAVING strftime('%Y-%m', MIN(last_read)) = ?
+        )"
+    ).bind(&month_str).bind(&month_str).fetch_one(pool).await?;
+
+    let completed_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM library l
+         WHERE l.status = 'completed' AND strftime('%Y-%m', l.updated_at) = ?"
+    ).bind(&month_str).fetch_one(pool).await?;
+
+    let genre_row = sqlx::query(
+        "SELECT j.value as genre, COUNT(*) as cnt
+         FROM watch_history w
+         JOIN media m ON w.media_id = m.id, json_each(m.genres) j
+         WHERE strftime('%Y-%m', w.last_watched) = ? AND m.genres IS NOT NULL
+         GROUP BY j.value ORDER BY cnt DESC LIMIT 1"
+    ).bind(&month_str).fetch_optional(pool).await?;
+
+    Ok(MonthlyRecap {
+        month: month_display,
+        episodes_watched: watch_row.get("eps_watched"),
+        chapters_read: read_row.get("chapters_read"),
+        time_watched_seconds: watch_row.get("time_seconds"),
+        new_series_started: new_series_row.get("cnt"),
+        series_completed: completed_row.get("cnt"),
+        top_genre: genre_row.map(|r| r.get::<String, _>("genre")).unwrap_or_default(),
+    })
+}
+
+pub async fn get_rating_comparison(pool: &SqlitePool) -> Result<Vec<RatingComparisonEntry>> {
+    let rows = sqlx::query(
+        "SELECT m.title, m.cover_url,
+                CAST(l.score AS REAL) as user_score,
+                CAST(m.rating AS REAL) as public_rating,
+                (CAST(l.score AS REAL) - CAST(m.rating AS REAL)) as difference
+         FROM library l
+         JOIN media m ON l.media_id = m.id
+         WHERE l.score > 0 AND m.rating IS NOT NULL AND CAST(m.rating AS REAL) > 0
+         ORDER BY ABS(CAST(l.score AS REAL) - CAST(m.rating AS REAL)) DESC
+         LIMIT 10"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    use sqlx::Row;
+    Ok(rows.iter().map(|row| RatingComparisonEntry {
+        title: row.get("title"),
+        cover_url: row.get("cover_url"),
+        user_score: row.get("user_score"),
+        public_rating: row.get("public_rating"),
+        difference: row.get("difference"),
+    }).collect())
 }

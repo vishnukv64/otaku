@@ -3521,3 +3521,99 @@ pub async fn get_binge_stats(
     let pool = state.database.pool();
     crate::database::stats::get_binge_stats(pool).await.map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn get_peak_hours(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::stats::HourlyActivity>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_peak_hours(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_completion_rate(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::CompletionRateStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_completion_rate(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_score_distribution(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::ScoreDistribution, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_score_distribution(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_content_type_breakdown(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::stats::ContentTypeEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_content_type_breakdown(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_seasonal_trends(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::stats::SeasonEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_seasonal_trends(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_watch_completion_rate(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::WatchCompletionRateStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_watch_completion_rate(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_favorites_stats(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::FavoritesStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_favorites_stats(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_time_to_completion(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::TimeToCompletion, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_time_to_completion(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_year_distribution(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::stats::YearDistEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_year_distribution(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_milestones(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::MilestoneStats, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_milestones(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_monthly_recap(
+    state: State<'_, AppState>,
+) -> Result<crate::database::stats::MonthlyRecap, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_monthly_recap(pool).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_rating_comparison(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::database::stats::RatingComparisonEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::stats::get_rating_comparison(pool).await.map_err(|e| e.to_string())
+}
