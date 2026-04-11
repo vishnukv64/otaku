@@ -1,3 +1,4 @@
+
 # Recommendation Engine Design
 
 ## Overview
@@ -8,28 +9,59 @@ Add a local recommendation engine to the Otaku app that suggests anime/manga bas
 
 ### A. Content-Based Filtering (Offline)
 
+Three sub-strategies that produce separate carousel rows:
+
+#### A1. "Recommended For You" — TF-IDF Genre Scoring
+
 **Endpoint:** `get_content_recommendations(limit: i32) -> Vec<RecommendationEntry>`
 
 **Algorithm:**
-1. Build a genre preference vector from the user's watch/reading history:
-   - For each genre, calculate: `weight = time_spent_seconds + (avg_user_score × 1000)`
+1. Build a genre preference vector using TF-IDF weighting:
+   - **TF (term frequency):** How much time the user spent on each genre (seconds)
+   - **IDF (inverse document frequency):** How rare the genre is in the media cache. Common genres like "Action" get downweighted; distinctive genres like "Psychological" get boosted.
+   - `genre_weight = tf × idf` where `idf = log(total_media / media_with_genre)`
+   - Apply **recency decay:** multiply each watch entry's contribution by `0.95^(days_since_watched / 30)` — content watched this month counts ~100%, 3 months ago ~86%, 6 months ago ~74%
    - Normalize weights to 0.0–1.0 range
 2. Query the local media cache for candidates:
    - Media NOT in the user's library (no entry in `library` table)
    - Has genres (non-null `genres` JSON array)
    - Has a public rating > 6.0
 3. Score each candidate:
-   - `score = Σ(genre_weight × genre_match_flag) + (public_rating / 10.0 × 0.3)`
-   - `genre_match_flag` = 1 if candidate has that genre, 0 otherwise
-4. Return top N by score, with a `reason` field listing the top 2 matched genres
+   - `score = Σ(genre_tfidf_weight × genre_match_flag) + (public_rating / 10.0 × 0.3)`
+4. Return top N by score, with a `reason` field: "Because you like {top_2_matched_genres}"
 
-**Return type:**
+#### A2. "Because You Watched X" — Per-Series Similarity
+
+**Endpoint:** `get_similar_to_watched(limit_per_series: i32) -> Vec<SimilarToEntry>`
+
+**Algorithm:**
+1. Pick the user's top 3 highest-rated series from library (by user score, fallback to time spent)
+2. For each series, find media in the cache that shares 3+ genres with it
+3. Exclude anything already in library
+4. Rank by genre overlap count + public rating
+5. Return grouped by source series: `{ source_title: "Demon Slayer", recommendations: [...] }`
+
+This creates Netflix-style "Because you watched Demon Slayer" rows.
+
+#### A3. Recency Weighting
+
+Both A1 and A2 apply recency decay to ensure recent taste dominates:
+- `decay_factor = 0.95^(days_ago / 30)`
+- Applied when building the genre vector (A1) and when selecting the "top 3 rated" series (A2 — prefer recently completed over old favorites)
+
+**Return types:**
 ```rust
 struct RecommendationEntry {
     media: MediaEntry,
     score: f64,
     reason: String,           // e.g. "Because you like Fantasy, Action"
     matched_genres: Vec<String>,
+}
+
+struct SimilarToGroup {
+    source_title: String,
+    source_cover_url: Option<String>,
+    recommendations: Vec<RecommendationEntry>,
 }
 ```
 
@@ -59,7 +91,7 @@ struct RecommendationEntry {
 
 ### Home Page Carousels
 
-Add 2 new carousels to the home page, positioned after "Continue Watching/Reading" and before generic trending carousels:
+Add 3-5 new carousels to the home page, positioned after "Continue Watching/Reading" and before generic trending carousels:
 
 1. **"Recommended For You"** — `get_content_recommendations(20)`
    - Uses existing carousel/card components
@@ -67,7 +99,13 @@ Add 2 new carousels to the home page, positioned after "Continue Watching/Readin
    - Skeleton loader while data loads
    - Hidden entirely if result is empty
 
-2. **"Trending in Your Genres"** — `get_genre_weighted_discover(20)`
+2. **"Because You Watched {Title}"** — `get_similar_to_watched(8)` (up to 3 rows)
+   - One carousel per source series (e.g. "Because you watched Demon Slayer")
+   - Shows the source series cover as a small avatar next to the row title
+   - Each card shows genre overlap count as pill: "4 genres in common"
+   - Hidden if no rated series or no similar media found
+
+3. **"Trending in Your Genres"** — `get_genre_weighted_discover(20)`
    - Same carousel pattern
    - Each card shows matched genre as pill tag
    - Hidden if offline or empty result
@@ -94,7 +132,7 @@ Two carousels render with recommendation reason tags
 
 ### Backend (Rust)
 - `src-tauri/src/database/recommendations.rs` — New module: genre vector builder, scoring, candidate queries
-- `src-tauri/src/commands.rs` — Add 2 new command handlers
+- `src-tauri/src/commands.rs` — Add 3 new command handlers
 - `src-tauri/src/lib.rs` — Register new commands
 - `src-tauri/src/database/mod.rs` — Add `pub mod recommendations;`
 
@@ -114,6 +152,6 @@ Two carousels render with recommendation reason tags
 ## Non-Goals
 
 - No collaborative filtering (no "users like you" data)
-- No ML models or external recommendation APIs
+- No ML models — uses TF-IDF genre weighting + recency decay instead (Netflix-comparable for single-user)
 - No dedicated recommendations page (can add later)
 - No recommendation history/dismissal tracking
