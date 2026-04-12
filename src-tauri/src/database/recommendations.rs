@@ -251,7 +251,7 @@ pub async fn get_content_recommendations(
         .map(|g| (g.genre.clone(), g.weight))
         .collect();
 
-    // Fetch candidate media: not in library, has genres, rating > 6.0
+    // Fetch candidate anime: not in library, has genres, rating > 6.0
     let candidates = sqlx::query(
         r#"
         SELECT m.*
@@ -259,6 +259,7 @@ pub async fn get_content_recommendations(
         WHERE m.genres IS NOT NULL
           AND m.genres != '[]'
           AND m.rating > 6.0
+          AND m.media_type = 'anime'
           AND m.id NOT IN (SELECT media_id FROM library)
         LIMIT 500
         "#
@@ -324,13 +325,14 @@ pub async fn get_similar_to_watched(
 ) -> Result<Vec<SimilarToGroup>> {
     use sqlx::Row;
 
-    // Get user's top 3 series by score (fallback: most recently added)
+    // Get user's top 3 anime series by score (fallback: most recently added)
     let top_series = sqlx::query(
         r#"
         SELECT m.*, l.score as user_score, l.added_at
         FROM library l
         JOIN media m ON l.media_id = m.id
         WHERE m.genres IS NOT NULL AND m.genres != '[]'
+          AND m.media_type = 'anime'
         ORDER BY COALESCE(l.score, 0) DESC, l.added_at DESC
         LIMIT 3
         "#
@@ -367,13 +369,14 @@ pub async fn get_similar_to_watched(
 
         let genre_threshold = if source_genres.len() < 4 { 2 } else { 3 };
 
-        // Fetch all media with genres (we'll filter in Rust for flexibility)
+        // Fetch anime candidates with genres (match source media type)
         let candidates = sqlx::query(
             r#"
             SELECT m.*
             FROM media m
             WHERE m.genres IS NOT NULL
               AND m.genres != '[]'
+              AND m.media_type = 'anime'
               AND m.id != ?
             LIMIT 500
             "#
