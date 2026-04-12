@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { loadExtension, jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular, getContentRecommendations, getSimilarToWatched } from '@/utils/tauri-commands'
+import { loadExtension, jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular, getContentRecommendations, getSimilarToWatched, getUserTopGenres, jikanGenresAnime, jikanSearchAnimeFiltered } from '@/utils/tauri-commands'
 import type { RecommendationEntry, SimilarToGroup } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
@@ -35,6 +35,11 @@ function HomeScreen() {
   const [similarGroups, setSimilarGroups] = useState<SimilarToGroup[]>([])
   const [recsLoading, setRecsLoading] = useState(true)
 
+  // Genre-weighted discover state
+  const [genreDiscoverItems, setGenreDiscoverItems] = useState<SearchResult[]>([])
+  const [genreDiscoverTitle, setGenreDiscoverTitle] = useState('')
+  const [genreDiscoverLoading, setGenreDiscoverLoading] = useState(true)
+
   // Load AllAnime extension lazily in background (for ContinueWatching and modal)
   useEffect(() => {
     loadExtension(ALLANIME_EXTENSION)
@@ -51,6 +56,42 @@ function HomeScreen() {
       setRecommendations(recs)
       setSimilarGroups(similar)
     }).finally(() => setRecsLoading(false))
+  }, [])
+
+  // Genre-weighted discover: fetch user's top genres, map to MAL IDs, search Jikan
+  useEffect(() => {
+    (async () => {
+      try {
+        const profile = await getUserTopGenres(3)
+        if (profile.top_genres.length === 0) return
+
+        const genreNames = profile.top_genres.map((g) => g.genre)
+        const { genres: allGenres } = await jikanGenresAnime()
+
+        // Map genre names to MAL genre IDs (case-insensitive)
+        const genreIds = genreNames
+          .map((name) => allGenres.find((g) => g.name.toLowerCase() === name.toLowerCase())?.id)
+          .filter((id): id is number => id != null)
+
+        if (genreIds.length === 0) return
+
+        setGenreDiscoverTitle(`Trending in ${genreNames.slice(0, 2).join(' & ')}`)
+
+        const result = await jikanSearchAnimeFiltered({
+          genres: genreIds.join(','),
+          orderBy: 'score',
+          sort: 'desc',
+          sfw: true,
+          status: 'airing',
+        })
+
+        setGenreDiscoverItems(result.results ?? [])
+      } catch {
+        // Silently ignore — genre discover is optional
+      } finally {
+        setGenreDiscoverLoading(false)
+      }
+    })()
   }, [])
 
   // SWR-cached data for each section
@@ -212,6 +253,16 @@ function HomeScreen() {
             onItemClick={handleMediaClick}
           />
         ))}
+
+        {/* Genre-weighted Discover */}
+        {genreDiscoverTitle && (
+          <MediaCarousel
+            title={genreDiscoverTitle}
+            items={genreDiscoverItems}
+            loading={genreDiscoverLoading}
+            onItemClick={handleMediaClick}
+          />
+        )}
 
         {/* Top 10 Anime */}
         <Top10Section
