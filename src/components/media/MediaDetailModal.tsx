@@ -1298,26 +1298,26 @@ export function MediaDetailModal({
                         >
                           <Heart className={`w-5 h-5 sm:w-6 sm:h-6 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
-                        {/* Thumbs up/down feedback buttons (only when in library) */}
+                        {/* Thumbs up/down feedback buttons */}
                         {inLibrary && (
                           <>
                             <button
-                              onClick={() => handleFeedback('liked')}
-                              className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
+                              onClick={(e) => { e.stopPropagation(); handleFeedback('liked') }}
+                              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-150 cursor-pointer ${
                                 feedback === 'liked'
-                                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
-                                  : 'glass text-[var(--color-text-muted)] hover:text-white'
+                                  ? 'bg-emerald-500 text-white border border-emerald-400'
+                                  : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] border border-[var(--color-glass-border)] hover:bg-[var(--color-glass-bg-hover)] hover:text-white'
                               }`}
                               aria-label={feedback === 'liked' ? 'Remove like' : 'Like this anime'}
                             >
                               <ThumbsUp className={`w-5 h-5 sm:w-6 sm:h-6 ${feedback === 'liked' ? 'fill-current' : ''}`} />
                             </button>
                             <button
-                              onClick={() => handleFeedback('disliked')}
-                              className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
+                              onClick={(e) => { e.stopPropagation(); handleFeedback('disliked') }}
+                              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-150 cursor-pointer ${
                                 feedback === 'disliked'
-                                  ? 'bg-red-500/15 text-red-400 border-red-500/40'
-                                  : 'glass text-[var(--color-text-muted)] hover:text-white'
+                                  ? 'bg-red-500 text-white border border-red-400'
+                                  : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] border border-[var(--color-glass-border)] hover:bg-[var(--color-glass-bg-hover)] hover:text-white'
                               }`}
                               aria-label={feedback === 'disliked' ? 'Remove dislike' : 'Dislike this anime'}
                             >
