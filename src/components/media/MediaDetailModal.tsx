@@ -10,10 +10,10 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Play, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Heart, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info, Clock } from 'lucide-react'
-import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
+import { X, Play, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Heart, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info, Clock, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { notifySuccess, notifyError, notifyInfo, toastSuccess } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, saveWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, saveWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, setMediaFeedback, getMediaFeedback, removeMediaFeedback, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
@@ -114,6 +114,7 @@ export function MediaDetailModal({
   const [episodePage, setEpisodePage] = useState(0)
   const [showNewBadge, setShowNewBadge] = useState(false)
   const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
+  const [feedback, setFeedback] = useState<'liked' | 'disliked' | null>(null)
 
   // Enrichment tab state
   const [activeTab, setActiveTab] = useState('overview')
@@ -574,6 +575,22 @@ export function MediaDetailModal({
     }
   }
 
+  const handleFeedback = async (sentiment: 'liked' | 'disliked') => {
+    try {
+      if (feedback === sentiment) {
+        // Toggle off — remove feedback
+        await removeMediaFeedback(media.id)
+        setFeedback(null)
+      } else {
+        await setMediaFeedback(media.id, sentiment)
+        setFeedback(sentiment)
+        toastSuccess('Feedback', 'Noted! This helps recommendations')
+      }
+    } catch (error) {
+      console.error('Failed to set feedback:', error)
+    }
+  }
+
   // Reset episode page and enrichment state when modal opens for a different anime
   useEffect(() => {
     setEpisodePage(0)
@@ -587,6 +604,7 @@ export function MediaDetailModal({
     setPictures(null)
     setNewsData(null)
     setRelatedAnime([])
+    setFeedback(null)
     loadedTabsRef.current = new Set()
   }, [media.id])
 
@@ -773,6 +791,11 @@ export function MediaDetailModal({
         setIsFavorite(mediaStatus.isFavorite)
         setIsTracked(mediaStatus.isTracked)
         setLibraryStatus(mediaStatus.libraryStatus || null)
+        // Load feedback status
+        if (status) {
+          const fb = await getMediaFeedback(media.id)
+          setFeedback(fb?.sentiment ?? null)
+        }
       } catch (error) {
         console.error('Failed to check library status:', error)
       }
@@ -1248,6 +1271,33 @@ export function MediaDetailModal({
                         >
                           <Heart className={`w-5 h-5 sm:w-6 sm:h-6 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
+                        {/* Thumbs up/down feedback buttons (only when in library) */}
+                        {inLibrary && (
+                          <>
+                            <button
+                              onClick={() => handleFeedback('liked')}
+                              className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
+                                feedback === 'liked'
+                                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
+                                  : 'glass text-[var(--color-text-muted)] hover:text-white'
+                              }`}
+                              aria-label={feedback === 'liked' ? 'Remove like' : 'Like this anime'}
+                            >
+                              <ThumbsUp className={`w-5 h-5 sm:w-6 sm:h-6 ${feedback === 'liked' ? 'fill-current' : ''}`} />
+                            </button>
+                            <button
+                              onClick={() => handleFeedback('disliked')}
+                              className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
+                                feedback === 'disliked'
+                                  ? 'bg-red-500/15 text-red-400 border-red-500/40'
+                                  : 'glass text-[var(--color-text-muted)] hover:text-white'
+                              }`}
+                              aria-label={feedback === 'disliked' ? 'Remove dislike' : 'Dislike this anime'}
+                            >
+                              <ThumbsDown className={`w-5 h-5 sm:w-6 sm:h-6 ${feedback === 'disliked' ? 'fill-current' : ''}`} />
+                            </button>
+                          </>
+                        )}
                         {/* Release tracking indicator */}
                         {isTracked && (
                           <div
