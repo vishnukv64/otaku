@@ -2890,3 +2890,47 @@ export async function getMonthlyRecap(): Promise<MonthlyRecap> {
 export async function getRatingComparison(): Promise<RatingComparisonEntry[]> {
   return invoke<RatingComparisonEntry[]>('get_rating_comparison')
 }
+
+// ==================== Recommendation Types ====================
+
+export interface GenrePreference {
+  genre: string
+  tf: number
+  idf: number
+  tfidf: number
+  weight: number
+}
+
+export interface RecommendationEntry {
+  media: MediaEntry
+  score: number
+  reason: string
+  matched_genres: string[]
+}
+
+export interface SimilarToGroup {
+  source_title: string
+  source_cover_url: string | null
+  source_id: string
+  recommendations: RecommendationEntry[]
+}
+
+export interface UserGenreProfile {
+  top_genres: GenrePreference[]
+  total_watch_time_seconds: number
+  total_series: number
+}
+
+// ==================== Recommendation Commands ====================
+
+export async function getContentRecommendations(limit: number): Promise<RecommendationEntry[]> {
+  return invoke<RecommendationEntry[]>('get_content_recommendations', { limit })
+}
+
+export async function getSimilarToWatched(limitPerSeries: number): Promise<SimilarToGroup[]> {
+  return invoke<SimilarToGroup[]>('get_similar_to_watched', { limitPerSeries })
+}
+
+export async function getUserTopGenres(limit: number): Promise<UserGenreProfile> {
+  return invoke<UserGenreProfile>('get_user_top_genres', { limit })
+}
