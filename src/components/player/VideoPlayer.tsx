@@ -91,6 +91,8 @@ export function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const sidebarEpisodeRef = useRef<HTMLDivElement>(null)
+  // Tracks when the episode first hit the completion threshold (for auto-delete cooldown)
+  const completedAtRef = useRef<number | null>(null)
 
   // Get settings from stores
   const playerSettings = usePlayerStore((state) => state.settings)
@@ -100,6 +102,11 @@ export function VideoPlayer({
 
   // Get updateSettings from playerStore for persisting volume
   const updatePlayerSettings = usePlayerStore((state) => state.updateSettings)
+
+  // Reset completion tracking when episode changes
+  useEffect(() => {
+    completedAtRef.current = null
+  }, [episodeId])
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -769,17 +776,9 @@ export function VideoPlayer({
           completed
         )
 
-        // Auto-delete downloaded episode if enabled and episode is completed
-        if (completed && autoDeleteWatched) {
-          try {
-            await deleteEpisodeDownload(mediaId, currentEpisode)
-            notifySuccess(
-              animeTitle || 'Episode Deleted',
-              `Episode ${currentEpisode} auto-deleted after watching`
-            )
-          } catch {
-            // Silently fail if episode wasn't downloaded - this is expected
-          }
+        // Track when episode first reaches completion threshold
+        if (completed && !completedAtRef.current) {
+          completedAtRef.current = Date.now()
         }
       } catch {
         // Silently fail - watch progress save is not critical
@@ -815,6 +814,25 @@ export function VideoPlayer({
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       video?.removeEventListener('pause', handlePauseSave)
       saveProgress()
+
+      // Auto-delete with 5-minute cooldown — only after leaving the player
+      if (autoDeleteWatched && completedAtRef.current && mediaId && currentEpisode) {
+        const elapsed = Date.now() - completedAtRef.current
+        const cooldownMs = 5 * 60 * 1000 // 5 minutes
+        const remainingMs = Math.max(0, cooldownMs - elapsed)
+        const epNum = currentEpisode
+        const mId = mediaId
+        const title = animeTitle || 'Episode'
+        // Schedule deletion after remaining cooldown (or immediately if 5min already passed)
+        setTimeout(async () => {
+          try {
+            await deleteEpisodeDownload(mId, epNum)
+            notifySuccess(title, `Episode ${epNum} auto-deleted after watching`)
+          } catch {
+            // Silently fail if episode wasn't downloaded
+          }
+        }, remainingMs)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId, episodeId, currentEpisode])
