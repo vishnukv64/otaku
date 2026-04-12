@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { loadExtension, jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular } from '@/utils/tauri-commands'
+import { loadExtension, jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular, getContentRecommendations, getSimilarToWatched } from '@/utils/tauri-commands'
+import type { RecommendationEntry, SimilarToGroup } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import { HeroSection } from '@/components/media/HeroSection'
 import { MobileHeroSection } from '@/components/media/MobileHeroSection'
@@ -10,6 +11,7 @@ import { isMobile } from '@/utils/platform'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { ContinueWatchingSection } from '@/components/media/ContinueWatchingSection'
 import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
+import { RecommendationCarousel, SimilarToCarousel } from '@/components/home/RecommendationCarousel'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
@@ -28,11 +30,27 @@ function HomeScreen() {
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
+  // Recommendation engine state
+  const [recommendations, setRecommendations] = useState<RecommendationEntry[]>([])
+  const [similarGroups, setSimilarGroups] = useState<SimilarToGroup[]>([])
+  const [recsLoading, setRecsLoading] = useState(true)
+
   // Load AllAnime extension lazily in background (for ContinueWatching and modal)
   useEffect(() => {
     loadExtension(ALLANIME_EXTENSION)
       .then(metadata => setAllanimeExtensionId(metadata.id))
       .catch(() => {})
+  }, [])
+
+  // Fetch personalized recommendations (fire-and-forget, errors silenced)
+  useEffect(() => {
+    Promise.all([
+      getContentRecommendations(20).catch(() => []),
+      getSimilarToWatched(8).catch(() => []),
+    ]).then(([recs, similar]) => {
+      setRecommendations(recs)
+      setSimilarGroups(similar)
+    }).finally(() => setRecsLoading(false))
   }, [])
 
   // SWR-cached data for each section
@@ -177,6 +195,23 @@ function HomeScreen() {
         {allanimeExtensionId && (
           <ContinueReadingSection extensionId={allanimeExtensionId} />
         )}
+
+        {/* Personalized Recommendations */}
+        <RecommendationCarousel
+          title="Recommended For You"
+          items={recommendations}
+          loading={recsLoading}
+          onItemClick={handleMediaClick}
+        />
+
+        {/* "Because you watched X" Carousels */}
+        {similarGroups.map((group) => (
+          <SimilarToCarousel
+            key={group.source_id}
+            group={group}
+            onItemClick={handleMediaClick}
+          />
+        ))}
 
         {/* Top 10 Anime */}
         <Top10Section
