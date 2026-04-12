@@ -2934,3 +2934,22 @@ export async function getSimilarToWatched(limitPerSeries: number): Promise<Simil
 export async function getUserTopGenres(limit: number): Promise<UserGenreProfile> {
   return invoke<UserGenreProfile>('get_user_top_genres', { limit })
 }
+
+// ==================== Feedback Types & Commands ====================
+
+export interface MediaFeedback {
+  media_id: string
+  sentiment: 'liked' | 'disliked'
+}
+
+export async function setMediaFeedback(mediaId: string, sentiment: 'liked' | 'disliked'): Promise<void> {
+  return invoke('set_media_feedback', { mediaId, sentiment })
+}
+
+export async function getMediaFeedback(mediaId: string): Promise<MediaFeedback | null> {
+  return invoke<MediaFeedback | null>('get_media_feedback', { mediaId })
+}
+
+export async function removeMediaFeedback(mediaId: string): Promise<void> {
+  return invoke('remove_media_feedback', { mediaId })
+}

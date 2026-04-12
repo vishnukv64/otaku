@@ -3645,3 +3645,32 @@ pub async fn get_user_top_genres(
     let pool = state.database.pool();
     crate::database::recommendations::get_user_top_genres(pool, limit).await.map_err(|e| e.to_string())
 }
+
+// Feedback
+#[tauri::command]
+pub async fn set_media_feedback(
+    state: State<'_, AppState>,
+    media_id: String,
+    sentiment: String,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    crate::database::feedback::set_feedback(pool, &media_id, &sentiment).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_media_feedback(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<Option<crate::database::feedback::MediaFeedback>, String> {
+    let pool = state.database.pool();
+    crate::database::feedback::get_feedback(pool, &media_id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_media_feedback(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> Result<(), String> {
+    let pool = state.database.pool();
+    crate::database::feedback::remove_feedback(pool, &media_id).await.map_err(|e| e.to_string())
+}

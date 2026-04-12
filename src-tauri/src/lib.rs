@@ -556,6 +556,10 @@ pub fn run() {
       commands::get_content_recommendations,
       commands::get_similar_to_watched,
       commands::get_user_top_genres,
+      // Feedback
+      commands::set_media_feedback,
+      commands::get_media_feedback,
+      commands::remove_media_feedback,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

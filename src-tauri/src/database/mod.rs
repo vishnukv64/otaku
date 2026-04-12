@@ -21,6 +21,7 @@ pub mod export_import;
 pub mod discover_cache;
 pub mod migration_runner;
 pub mod recommendations;
+pub mod feedback;
 
 /// Database manager with connection pooling
 pub struct Database {
