@@ -14,6 +14,7 @@ interface EpisodeListProps {
   onEpisodeSelect: (episodeId: string) => void
   animeTitle?: string
   collapsible?: boolean
+  coverUrl?: string
 }
 
 export function EpisodeList({
@@ -22,6 +23,7 @@ export function EpisodeList({
   onEpisodeSelect,
   animeTitle,
   collapsible = true,
+  coverUrl,
 }: EpisodeListProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [page, setPage] = useState(0)
@@ -113,15 +115,15 @@ export function EpisodeList({
                     <div className="flex gap-3 p-2 bg-[var(--color-bg-primary)] hover:bg-[var(--color-bg-hover)] transition-colors">
                       {/* Thumbnail */}
                       <div className="relative flex-shrink-0 w-24 aspect-video rounded overflow-hidden bg-[var(--color-bg-secondary)]">
-                        {episode.thumbnail ? (
+                        {(episode.thumbnail || coverUrl) ? (
                           <img
-                            src={episode.thumbnail}
+                            src={episode.thumbnail || coverUrl}
                             alt={episode.title || `Episode ${episode.number}`}
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Play size={20} className="text-[var(--color-text-muted)]" />
+                          <div className="w-full h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs font-medium">
+                            EP {episode.number}
                           </div>
                         )}
 

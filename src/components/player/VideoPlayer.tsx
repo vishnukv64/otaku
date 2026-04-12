@@ -2580,8 +2580,8 @@ export function VideoPlayer({
                     className="w-[110px] h-[62px] rounded-md overflow-hidden flex-shrink-0 relative"
                     style={{ background: '#1a1a1a' }}
                   >
-                    {ep.thumbnail ? (
-                      <img src={ep.thumbnail} alt="" className="w-full h-full object-cover block" />
+                    {(ep.thumbnail || posterUrl) ? (
+                      <img src={ep.thumbnail || posterUrl} alt="" className="w-full h-full object-cover block" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">
                         EP {ep.number}
