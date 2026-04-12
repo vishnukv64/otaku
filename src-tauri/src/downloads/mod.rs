@@ -9,6 +9,7 @@
 // - Chapter downloads for manga
 
 pub mod chapter_downloads;
+pub mod obfuscation;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -633,6 +634,9 @@ impl DownloadManager {
                 .context("Failed to create file")?
         };
 
+        // Determine if this file should be XOR-obfuscated (based on .otaku extension)
+        let is_obfuscated = file_path.ends_with(".otaku");
+
         // Download in chunks
         let mut stream = response.bytes_stream();
         let mut downloaded: u64 = if is_resume { resume_offset } else { 0 };
@@ -665,7 +669,15 @@ impl DownloadManager {
             }
 
             let chunk = chunk.context("Failed to read chunk")?;
-            file.write_all(&chunk).await.context("Failed to write chunk")?;
+
+            // XOR-obfuscate the chunk before writing to disk
+            if is_obfuscated {
+                let mut chunk_data = chunk.to_vec();
+                obfuscation::xor_transform(&mut chunk_data, downloaded);
+                file.write_all(&chunk_data).await.context("Failed to write chunk")?;
+            } else {
+                file.write_all(&chunk).await.context("Failed to write chunk")?;
+            }
             downloaded += chunk.len() as u64;
 
             // Calculate speed based on this session's download

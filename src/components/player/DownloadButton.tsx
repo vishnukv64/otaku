@@ -38,7 +38,7 @@ export function DownloadButton({
     setDownloading(source.quality)
 
     try {
-      const filename = `${animeTitle.replace(/[^a-zA-Z0-9]/g, '_')}_EP${episodeNumber}_${source.quality}.mp4`
+      const filename = `${animeTitle.replace(/[^a-zA-Z0-9]/g, '_')}_EP${episodeNumber}_${source.quality}.otaku`
       // Correct parameter order: mediaId, episodeId, episodeNumber, url, filename, customPath
       await startDownload(mediaId, episodeId, episodeNumber, source.url, filename, customDownloadLocation || undefined)
 

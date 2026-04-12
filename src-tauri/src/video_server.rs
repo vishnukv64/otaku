@@ -29,6 +29,8 @@ use tower_http::{
     services::ServeDir,
 };
 
+use crate::downloads::obfuscation;
+
 #[derive(Clone)]
 pub struct VideoServerState {
     pub access_token: String,
@@ -238,10 +240,16 @@ async fn serve_absolute_path(
     };
 
     // Determine content type from extension
+    // .otaku files are obfuscated MP4s — report as video/mp4 after decryption
+    let is_obfuscated = file_path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("otaku"))
+        .unwrap_or(false);
+
     let content_type = file_path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| match ext.to_lowercase().as_str() {
-            "mp4" => "video/mp4",
+            "mp4" | "otaku" => "video/mp4",
             "mkv" => "video/x-matroska",
             "webm" => "video/webm",
             "avi" => "video/x-msvideo",
@@ -249,9 +257,58 @@ async fn serve_absolute_path(
         })
         .unwrap_or("application/octet-stream");
 
-    if let Some((start, end)) = range {
-        // Partial content response
-        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    if is_obfuscated {
+        // For obfuscated files: read into memory, XOR-decrypt, then serve
+        let mut file = file;
+
+        let (start, length, is_range) = if let Some((s, e)) = range {
+            (s, e - s + 1, true)
+        } else {
+            (0, file_size, false)
+        };
+
+        // Seek to start position
+        if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+            log::error!("Failed to seek file: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to seek file").into_response();
+        }
+
+        // Read the requested range into memory
+        let mut buf = vec![0u8; length as usize];
+        if let Err(e) = file.read_exact(&mut buf).await {
+            log::error!("Failed to read file: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response();
+        }
+
+        // XOR-decrypt using the file offset so position-aware key alignment is correct
+        obfuscation::xor_transform(&mut buf, start);
+
+        let body = Body::from(buf);
+
+        if is_range {
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, content_type)
+                .header(header::CONTENT_LENGTH, length.to_string())
+                .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start, start + length - 1, file_size))
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .body(body)
+                .unwrap()
+        } else {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, content_type)
+                .header(header::CONTENT_LENGTH, file_size.to_string())
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .body(body)
+                .unwrap()
+        }
+    } else if let Some((start, end)) = range {
+        // Partial content response (unobfuscated / legacy .mp4)
         let mut file = file;
 
         // Seek to start position
@@ -277,7 +334,7 @@ async fn serve_absolute_path(
             .body(body)
             .unwrap()
     } else {
-        // Full file response
+        // Full file response (unobfuscated / legacy .mp4)
         let stream = tokio_util::io::ReaderStream::new(file);
         let body = Body::from_stream(stream);
 

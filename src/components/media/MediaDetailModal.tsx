@@ -346,7 +346,7 @@ export function MediaDetailModal({
       }
 
       // Generate filename
-      const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episodeNumber}.mp4`
+      const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episodeNumber}.otaku`
 
       // Start download with custom path if set
       await startDownload(media.id, episodeId, episodeNumber, videoUrl, filename, customDownloadLocation || undefined)
@@ -393,7 +393,7 @@ export function MediaDetailModal({
           const videoUrl = sources.sources[0].url
 
           // Generate filename
-          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.mp4`
+          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.otaku`
 
           // Start download with custom path if set
           await startDownload(media.id, episode.id, episode.number, videoUrl, filename, customDownloadLocation || undefined)
@@ -464,7 +464,7 @@ export function MediaDetailModal({
           const videoUrl = sources.sources[0].url
 
           // Generate filename
-          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.mp4`
+          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.otaku`
 
           // Start download with custom path if set
           await startDownload(media.id, episode.id, episode.number, videoUrl, filename, customDownloadLocation || undefined)
