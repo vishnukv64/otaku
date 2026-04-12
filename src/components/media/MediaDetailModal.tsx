@@ -1555,6 +1555,31 @@ export function MediaDetailModal({
                               {selectedEpisodes.size === details.episodes.length ? 'Deselect All' : 'Select All'}
                             </button>
                             <button
+                              onClick={async () => {
+                                if (!details) return
+                                const now = new Date().toISOString()
+                                const newHistory = new Map(episodeWatchHistory)
+                                for (const ep of details.episodes) {
+                                  if (selectedEpisodes.has(ep.id) && !episodeWatchHistory.get(ep.id)?.completed) {
+                                    await saveWatchProgress(media.id, ep.id, ep.number, 1, 1, true)
+                                    newHistory.set(ep.id, {
+                                      id: 0, media_id: media.id, episode_id: ep.id, episode_number: ep.number,
+                                      progress_seconds: 1, duration: 1, completed: true, last_watched: now, created_at: now,
+                                    })
+                                  }
+                                }
+                                setEpisodeWatchHistory(newHistory)
+                                toastSuccess(media.title, `${selectedEpisodes.size} episodes marked as watched`)
+                                setSelectionMode(false)
+                                setSelectedEpisodes(new Set())
+                              }}
+                              disabled={selectedEpisodes.size === 0}
+                              className="px-2 sm:px-3 py-1.5 bg-blue-600/80 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                              Mark Watched ({selectedEpisodes.size})
+                            </button>
+                            <button
                               onClick={handleDownloadSelected}
                               disabled={selectedEpisodes.size === 0}
                               className="px-2 sm:px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
