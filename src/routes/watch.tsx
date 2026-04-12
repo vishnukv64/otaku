@@ -492,6 +492,7 @@ function WatchPage() {
               onPreviousEpisode={handlePreviousEpisode}
               initialTime={resumeTime}
               autoPlay
+              posterUrl={currentEpisode?.thumbnail || details?.cover_url}
             />
           )}
           {!loading && !error && sources && sources.sources.length === 0 && (
@@ -574,6 +575,7 @@ function WatchPage() {
           onGoBack={handleGoBack}
           initialTime={resumeTime}
           autoPlay
+          posterUrl={currentEpisode?.thumbnail || details?.cover_url}
         />
       )}
 

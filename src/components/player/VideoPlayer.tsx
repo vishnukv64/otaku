@@ -67,6 +67,7 @@ interface VideoPlayerProps {
   onProgress?: (time: number) => void
   initialTime?: number
   autoPlay?: boolean
+  posterUrl?: string
 }
 
 export function VideoPlayer({
@@ -84,6 +85,7 @@ export function VideoPlayer({
   onProgress,
   initialTime = 0,
   autoPlay = true,
+  posterUrl,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1476,6 +1478,7 @@ export function VideoPlayer({
           className="absolute inset-0 w-full h-full"
           preload="auto"
           playsInline
+          poster={posterUrl}
           style={{
             objectFit: videoFitMode,
             willChange: 'transform',
