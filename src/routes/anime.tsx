@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Loader2, AlertCircle, Star, Tag as TagIcon } from 'lucide-react'
+import { Loader2, AlertCircle, Star, Tag as TagIcon, Search, X } from 'lucide-react'
 import { useMediaStore } from '@/store/mediaStore'
 import {
   loadExtension,
@@ -77,7 +77,7 @@ function AnimeScreen() {
   const seasonLoadMoreRef = useRef<HTMLDivElement>(null)
   const genreLoadMoreRef = useRef<HTMLDivElement>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
-  const [searchInput, _setSearchInput] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
 
   // Restore modal state when returning from watch page
@@ -688,6 +688,38 @@ function AnimeScreen() {
           sortBy={sidebarFilters.orderBy || 'popularity'}
           onSortChange={(sort) => setSidebarFilters((prev) => ({ ...prev, orderBy: sort }))}
         />
+
+        {/* Search Bar */}
+        <div className="relative mt-3 mb-3">
+          {searchLoading ? (
+            <Loader2
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-accent-primary)] animate-spin"
+              size={16}
+            />
+          ) : (
+            <Search
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              size={16}
+            />
+          )}
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search for anime..."
+            className="w-full pl-10 pr-10 py-2.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-md)] text-sm text-white placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)] transition-colors"
+          />
+          {searchInput && (
+            <button
+              onClick={() => { setSearchInput(''); clearSearch() }}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-white transition-colors"
+              aria-label="Clear search"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
 
         {/* Active Filter Chips */}
         <ActiveFilterChips
