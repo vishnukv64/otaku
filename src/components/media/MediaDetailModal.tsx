@@ -583,18 +583,26 @@ export function MediaDetailModal({
   }
 
   const handleFeedback = async (sentiment: 'liked' | 'disliked') => {
-    try {
-      if (feedback === sentiment) {
-        // Toggle off — remove feedback
+    const prev = feedback
+    if (feedback === sentiment) {
+      // Toggle off — optimistic update
+      setFeedback(null)
+      try {
         await removeMediaFeedback(media.id)
-        setFeedback(null)
-      } else {
-        await setMediaFeedback(media.id, sentiment)
-        setFeedback(sentiment)
-        toastSuccess('Feedback', 'Noted! This helps recommendations')
+      } catch (error) {
+        console.error('Failed to remove feedback:', error)
+        setFeedback(prev) // revert on error
       }
-    } catch (error) {
-      console.error('Failed to set feedback:', error)
+    } else {
+      // Set new — optimistic update
+      setFeedback(sentiment)
+      try {
+        await setMediaFeedback(media.id, sentiment)
+        toastSuccess('Feedback', 'Noted! This helps recommendations')
+      } catch (error) {
+        console.error('Failed to set feedback:', error)
+        setFeedback(prev) // revert on error
+      }
     }
   }
 
@@ -1247,7 +1255,12 @@ export function MediaDetailModal({
                               progress => progress.completed
                             ).length
 
-                            if (watchedCount < details.episodes.length && libraryStatus !== 'dropped') {
+                            if (
+                              watchedCount < details.episodes.length &&
+                              libraryStatus !== 'dropped' &&
+                              libraryStatus !== 'on_hold' &&
+                              libraryStatus !== 'plan_to_watch'
+                            ) {
                               smartDisplayStatus = 'watching'
                             } else if (
                               isAiring(details.status) &&
