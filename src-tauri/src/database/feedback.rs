@@ -58,7 +58,8 @@ pub async fn remove_feedback(pool: &SqlitePool, media_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Get all feedback entries (used by recommendation engine).
+/// Get all feedback entries (used by recommendation engine scoring).
+#[allow(dead_code)]
 pub async fn get_all_feedback(pool: &SqlitePool) -> Result<Vec<MediaFeedback>> {
     use sqlx::Row;
     let rows = sqlx::query("SELECT media_id, sentiment FROM feedback")
