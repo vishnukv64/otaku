@@ -552,6 +552,10 @@ pub fn run() {
       commands::get_milestones,
       commands::get_monthly_recap,
       commands::get_rating_comparison,
+      // Recommendations
+      commands::get_content_recommendations,
+      commands::get_similar_to_watched,
+      commands::get_user_top_genres,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

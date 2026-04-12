@@ -3617,3 +3617,31 @@ pub async fn get_rating_comparison(
     let pool = state.database.pool();
     crate::database::stats::get_rating_comparison(pool).await.map_err(|e| e.to_string())
 }
+
+// Recommendations
+#[tauri::command]
+pub async fn get_content_recommendations(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<crate::database::recommendations::RecommendationEntry>, String> {
+    let pool = state.database.pool();
+    crate::database::recommendations::get_content_recommendations(pool, limit).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_similar_to_watched(
+    state: State<'_, AppState>,
+    limit_per_series: i32,
+) -> Result<Vec<crate::database::recommendations::SimilarToGroup>, String> {
+    let pool = state.database.pool();
+    crate::database::recommendations::get_similar_to_watched(pool, limit_per_series).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_user_top_genres(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<crate::database::recommendations::UserGenreProfile, String> {
+    let pool = state.database.pool();
+    crate::database::recommendations::get_user_top_genres(pool, limit).await.map_err(|e| e.to_string())
+}
