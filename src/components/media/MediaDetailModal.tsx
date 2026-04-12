@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Play, Check, Loader2, Download, CheckCircle, CheckSquare, Square, Trash2, Heart, Bell, Sparkles, Tags, WifiOff, AlertTriangle, Database, Info, Clock, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo, toastSuccess } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
-import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, saveWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, setMediaFeedback, getMediaFeedback, removeMediaFeedback, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, jikanSearchAnime, loadExtension, resolveAllanimeId, isInLibrary, addToLibrary, removeFromLibrary, saveMediaDetails, saveEpisodes, getCachedMediaDetails, startDownload, isEpisodeDownloaded, getVideoSources, deleteEpisodeDownload, getBatchWatchProgress, saveWatchProgress, toggleFavorite, initializeReleaseTracking, getMediaTags, unassignLibraryTag, setMediaFeedback, getMediaFeedback, removeMediaFeedback, getContentRecommendations, type MediaEntry, type EpisodeEntry, type WatchHistory, type LibraryStatus, type LibraryTag, type RecommendationEntry, jikanAnimeCharacters, jikanAnimeStaff, jikanAnimeStatistics, jikanAnimeReviews, jikanAnimePictures, jikanAnimeNews, type JikanCharacterEntry, type JikanStaffEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews, jikanAnimeEpisodeDetail, type JikanEpisodeDetail } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
@@ -115,6 +115,7 @@ export function MediaDetailModal({
   const [showNewBadge, setShowNewBadge] = useState(false)
   const [usingCachedData, setUsingCachedData] = useState(false) // True when showing data from cache (API failed)
   const [feedback, setFeedback] = useState<'liked' | 'disliked' | null>(null)
+  const [completionRecs, setCompletionRecs] = useState<RecommendationEntry[]>([])
 
   // Enrichment tab state
   const [activeTab, setActiveTab] = useState('overview')
@@ -511,6 +512,12 @@ export function MediaDetailModal({
       setInLibrary(true)
       setLibraryStatus(status)
       notifySuccess(media.title, `Added to "${statusLabels[status]}" list`)
+      // Fetch post-completion recommendations
+      if (status === 'completed') {
+        getContentRecommendations(6)
+          .then(recs => setCompletionRecs(recs.filter(r => r.media.id !== media.id)))
+          .catch(() => {})
+      }
       // Initialize release tracking for ongoing anime
       if (details && details.episodes.length > 0) {
         try {
@@ -605,6 +612,7 @@ export function MediaDetailModal({
     setNewsData(null)
     setRelatedAnime([])
     setFeedback(null)
+    setCompletionRecs([])
     loadedTabsRef.current = new Set()
   }, [media.id])
 
@@ -795,6 +803,12 @@ export function MediaDetailModal({
         if (status) {
           const fb = await getMediaFeedback(media.id)
           setFeedback(fb?.sentiment ?? null)
+        }
+        // Load completion recs if already completed
+        if (mediaStatus.libraryStatus === 'completed') {
+          getContentRecommendations(6)
+            .then(recs => setCompletionRecs(recs.filter(r => r.media.id !== media.id)))
+            .catch(() => {})
         }
       } catch (error) {
         console.error('Failed to check library status:', error)
@@ -1946,6 +1960,51 @@ export function MediaDetailModal({
                 </div>
               </div>{/* close content column */}
             </div>{/* close two-column */}
+
+            {/* Post-completion recommendations */}
+            {libraryStatus === 'completed' && completionRecs.length > 0 && (
+              <div className="px-5 md:px-7 py-5 border-t border-[var(--color-glass-border)]">
+                <div className="bg-[var(--color-surface-subtle)] rounded-[var(--radius-md)] p-4">
+                  <h3 className="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider mb-3">What to watch next</h3>
+                  <div className="flex gap-3 overflow-x-auto pb-1">
+                    {completionRecs.slice(0, 6).map((rec) => (
+                      <div
+                        key={rec.media.id}
+                        className="flex-shrink-0 w-[100px] cursor-pointer group/rec"
+                        onClick={() => {
+                          const asSearchResult: SearchResult = {
+                            id: rec.media.id,
+                            title: rec.media.title,
+                            cover_url: rec.media.cover_url || '',
+                            year: rec.media.year,
+                            status: rec.media.status,
+                          }
+                          onMediaChange?.(asSearchResult)
+                        }}
+                      >
+                        <div className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] border border-[var(--color-glass-border)] group-hover/rec:border-[var(--color-accent-mid)] transition-all">
+                          {rec.media.cover_url ? (
+                            <img
+                              src={rec.media.cover_url}
+                              alt={rec.media.title}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[var(--color-text-dim)]">
+                              <Play size={20} />
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs font-medium text-[var(--color-text-secondary)] mt-1.5 line-clamp-2 leading-snug group-hover/rec:text-white transition-colors">
+                          {rec.media.title}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             </>
           ) : null}
     </>
