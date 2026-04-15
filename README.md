@@ -303,16 +303,34 @@ msiexec /i otaku_VERSION_x64_en-US.msi /quiet
 
 ### macOS Installation
 
-#### Determining Your Mac's Architecture
+#### Homebrew (Recommended)
 
-1. Click the Apple menu → "About This Mac"
-2. Look for "Chip" or "Processor":
-   - "Apple M1/M2/M3" → Download `aarch64.dmg`
-   - "Intel Core" → Download `x64.dmg`
+Otaku ships a Homebrew Cask (via the [`vishnukv64/homebrew-otaku`](https://github.com/vishnukv64/homebrew-otaku) tap) that auto-selects the right DMG for your Mac's architecture:
 
-#### Installation
+```bash
+brew tap vishnukv64/otaku
+brew install --cask otaku
+```
 
-1. Download the appropriate DMG file
+Or, in a single command:
+
+```bash
+brew install --cask vishnukv64/otaku/otaku
+```
+
+To upgrade later:
+
+```bash
+brew upgrade --cask otaku
+```
+
+The app also self-updates via the in-app updater.
+
+#### Manual DMG Install
+
+1. Determine your Mac's architecture: Apple menu → "About This Mac" → "Chip"
+   - "Apple M1/M2/M3" → download `aarch64.dmg`
+   - "Intel Core" → download `x64.dmg`
 2. Double-click to mount, drag Otaku to Applications
 3. On first launch, if blocked by Gatekeeper, run:
    ```bash

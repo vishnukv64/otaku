@@ -1,0 +1,127 @@
+name: Bump Homebrew Cask
+
+# Runs after a GitHub release is published. Downloads the macOS DMG assets
+# from this repo, computes their sha256s, then pushes an updated
+# Casks/otaku.rb into the vishnukv64/homebrew-otaku tap repo.
+#
+# Requires a repo secret named HOMEBREW_TAP_TOKEN: a PAT (classic, `repo`
+# scope — or a fine-grained token with Contents: Read & Write on
+# vishnukv64/homebrew-otaku). The built-in GITHUB_TOKEN cannot push to
+# another repo.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to bump to (e.g., v1.1.0)'
+        required: true
+        type: string
+
+env:
+  TAP_REPO: vishnukv64/homebrew-otaku
+  CASK_PATH: Casks/otaku.rb
+
+jobs:
+  bump-cask:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TAP_REPO }}
+          # PAT with write access to the tap repo. Must be present.
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.version }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          # Strip leading 'v' to get bare version
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Bumping cask to $TAG (version=$VERSION)"
+
+      - name: Download DMGs and compute sha256
+        id: hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          ARM_DMG="otaku_${VERSION}_aarch64.dmg"
+          X64_DMG="otaku_${VERSION}_x64.dmg"
+
+          # Download from the main otaku repo (where the release lives),
+          # not from the tap repo we just checked out.
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "$ARM_DMG" --pattern "$X64_DMG"
+
+          ARM_SHA=$(sha256sum "$ARM_DMG" | awk '{print $1}')
+          X64_SHA=$(sha256sum "$X64_DMG" | awk '{print $1}')
+          echo "arm_sha=$ARM_SHA" >> $GITHUB_OUTPUT
+          echo "x64_sha=$X64_SHA" >> $GITHUB_OUTPUT
+          echo "ARM:  $ARM_SHA"
+          echo "x64:  $X64_SHA"
+
+      - name: Rewrite Casks/otaku.rb in tap
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          ARM_SHA: ${{ steps.hashes.outputs.arm_sha }}
+          X64_SHA: ${{ steps.hashes.outputs.x64_sha }}
+          CASK_PATH: ${{ env.CASK_PATH }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = `tap/${process.env.CASK_PATH}`;
+          const version = process.env.VERSION;
+          const armSha = process.env.ARM_SHA;
+          const x64Sha = process.env.X64_SHA;
+
+          let cask = fs.readFileSync(path, 'utf8');
+
+          // version "x.y.z"
+          cask = cask.replace(/^(\s*version\s+)"[^"]+"/m, `$1"${version}"`);
+
+          // First sha256 is inside on_arm, second inside on_intel (file order matters)
+          let count = 0;
+          cask = cask.replace(/(sha256\s+)"[a-f0-9]+"/g, (_, p1) => {
+            const sha = count === 0 ? armSha : x64Sha;
+            count += 1;
+            return `${p1}"${sha}"`;
+          });
+
+          if (count !== 2) {
+            console.error(`Expected 2 sha256 lines, found ${count}`);
+            process.exit(1);
+          }
+
+          fs.writeFileSync(path, cask);
+          console.log(`✅ Cask bumped to ${version}`);
+          console.log(`   ARM sha256: ${armSha}`);
+          console.log(`   x64 sha256: ${x64Sha}`);
+          NODE
+
+      - name: Commit and push to tap
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          CASK_PATH: ${{ env.CASK_PATH }}
+        run: |
+          if git diff --quiet "$CASK_PATH"; then
+            echo "No changes to $CASK_PATH — tap already at $VERSION"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$CASK_PATH"
+          git commit -m "chore(cask): bump otaku to $VERSION"
+          git push origin HEAD:main

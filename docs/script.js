@@ -489,7 +489,15 @@ async function init() {
     // Update download info
     if (primaryAsset) {
         const downloadInfo = document.getElementById('download-info');
-        downloadInfo.textContent = `Version ${release.version} • ${formatSize(primaryAsset.size)}`;
+        const base = `Version ${release.version} • ${formatSize(primaryAsset.size)}`;
+        if (os === 'mac') {
+            // Surface the Homebrew Cask alternative for mac users.
+            downloadInfo.innerHTML =
+                `${base}<br><span class="brew-hint">or install via Homebrew: ` +
+                `<code>brew install --cask vishnukv64/otaku/otaku</code></span>`;
+        } else {
+            downloadInfo.textContent = base;
+        }
     }
 
     // Create platform links
