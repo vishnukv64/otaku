@@ -32,7 +32,14 @@ export function ContentTypeBreakdown({ data }: ContentTypeBreakdownProps) {
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
 
-  let cumulativeOffset = 0
+  // Precompute each segment's length and its starting offset so we never
+  // mutate a variable during render (react-hooks/immutability).
+  const segLengths = entries.map((e) => (e.count / total) * circumference)
+  const segments = entries.map((entry, i) => ({
+    entry,
+    segLength: segLengths[i],
+    offset: circumference - segLengths.slice(0, i).reduce((sum, len) => sum + len, 0),
+  }))
 
   return (
     <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
@@ -59,26 +66,21 @@ export function ContentTypeBreakdown({ data }: ContentTypeBreakdownProps) {
                 strokeWidth={strokeWidth}
               />
               {/* Segments */}
-              {entries.map((entry) => {
-                const segLength = (entry.count / total) * circumference
-                const offset = circumference - cumulativeOffset
-                cumulativeOffset += segLength
-                return (
-                  <circle
-                    key={entry.content_type}
-                    cx={size / 2}
-                    cy={size / 2}
-                    r={radius}
-                    fill="none"
-                    stroke={getColor(entry.content_type)}
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={`${segLength} ${circumference - segLength}`}
-                    strokeDashoffset={offset}
-                    strokeLinecap="round"
-                    className="transition-all duration-500"
-                  />
-                )
-              })}
+              {segments.map(({ entry, segLength, offset }) => (
+                <circle
+                  key={entry.content_type}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={radius}
+                  fill="none"
+                  stroke={getColor(entry.content_type)}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={`${segLength} ${circumference - segLength}`}
+                  strokeDashoffset={offset}
+                  strokeLinecap="round"
+                  className="transition-all duration-500"
+                />
+              ))}
             </svg>
             {/* Center total */}
             <div className="absolute inset-0 flex flex-col items-center justify-center">
