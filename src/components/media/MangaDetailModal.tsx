@@ -23,7 +23,42 @@ import {
   Bell,
   Tags,
 } from 'lucide-react'
-import { getMangaDetails, jikanMangaDetails, resolveAllanimeId, loadExtension, searchManga, saveMediaDetails, addToLibrary, removeFromLibrary, isInLibrary, toggleFavorite, getLatestReadingProgressForMedia, getBatchReadingProgress, saveReadingProgress, getChapterImages, startChapterDownload, isChapterDownloaded, deleteChapterDownload, initializeReleaseTracking, getMediaTags, unassignLibraryTag, type MediaEntry, type LibraryStatus, type LibraryTag, jikanMangaCharacters, jikanMangaStatistics, jikanMangaReviews, jikanMangaPictures, jikanMangaNews, jikanMangaRecommendations, type JikanCharacterEntry, type JikanStatistics, type JikanReview, type JikanPicture, type JikanNews } from '@/utils/tauri-commands'
+import {
+  getMangaDetails,
+  jikanMangaDetails,
+  resolveAllanimeId,
+  loadExtension,
+  searchManga,
+  saveMediaDetails,
+  addToLibrary,
+  removeFromLibrary,
+  isInLibrary,
+  toggleFavorite,
+  getLatestReadingProgressForMedia,
+  getBatchReadingProgress,
+  saveReadingProgress,
+  getChapterImages,
+  startChapterDownload,
+  isChapterDownloaded,
+  deleteChapterDownload,
+  initializeReleaseTracking,
+  getMediaTags,
+  unassignLibraryTag,
+  type MediaEntry,
+  type LibraryStatus,
+  type LibraryTag,
+  jikanMangaCharacters,
+  jikanMangaStatistics,
+  jikanMangaReviews,
+  jikanMangaPictures,
+  jikanMangaNews,
+  jikanMangaRecommendations,
+  type JikanCharacterEntry,
+  type JikanStatistics,
+  type JikanReview,
+  type JikanPicture,
+  type JikanNews,
+} from '@/utils/tauri-commands'
 import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
@@ -61,7 +96,7 @@ function isChapterRecentlyReleased(
   lastChNumber: number,
   releaseDate: string | undefined,
   lastUpdateEnd: string | undefined,
-  broadcastInterval: number | undefined,
+  broadcastInterval: number | undefined
 ): boolean {
   if (releaseDate) {
     const age = Date.now() - new Date(releaseDate).getTime()
@@ -98,7 +133,11 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
   const [chapterPage, setChapterPage] = useState(0)
-  const [readingProgress, setReadingProgress] = useState<{ chapterId: string; chapterNumber: number; page: number } | null>(null)
+  const [readingProgress, setReadingProgress] = useState<{
+    chapterId: string
+    chapterNumber: number
+    page: number
+  } | null>(null)
   const [downloadedChapters, setDownloadedChapters] = useState<Set<string>>(new Set())
   const [chapterReadSet, setChapterReadSet] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
@@ -139,7 +178,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     mediaId: manga?.id,
     onComplete: (download) => {
       // Add to downloaded chapters when a download completes
-      setDownloadedChapters(prev => new Set(prev).add(download.chapter_id))
+      setDownloadedChapters((prev) => new Set(prev).add(download.chapter_id))
     },
   })
 
@@ -155,7 +194,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   // Lazy-load AllAnime extension (needed for chapter fetching in MAL ID flow)
   useEffect(() => {
     loadExtension(ALLANIME_MANGA_EXTENSION)
-      .then(meta => setAllanimeExtId(meta.id))
+      .then((meta) => setAllanimeExtId(meta.id))
       .catch(() => {})
   }, [])
 
@@ -259,7 +298,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         // Load batch reading history for per-chapter read indicators
         try {
           const history = await getBatchReadingProgress(manga.id)
-          setChapterReadSet(new Set(history.filter(h => h.completed).map(h => h.chapter_id)))
+          setChapterReadSet(new Set(history.filter((h) => h.completed).map((h) => h.chapter_id)))
         } catch {
           // Ignore
         }
@@ -282,7 +321,15 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       try {
         // Step 1: Try bridge resolution (cached mappings)
         const bridgeId = await resolveAllanimeId(
-          details.title, 'manga', manga.id, details.english_name, details.year, details.title_synonyms, details.type, details.totalChapters, details.native_name
+          details.title,
+          'manga',
+          manga.id,
+          details.english_name,
+          details.year,
+          details.title_synonyms,
+          details.type,
+          details.totalChapters,
+          details.native_name
         )
         if (bridgeId) {
           setAllanimeShowId(bridgeId)
@@ -347,14 +394,14 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   }, [allanimeShowId, manga, readingProgress])
 
   // Effective chapters: AllAnime chapters for MAL flow, details.chapters for AllAnime flow
-  const effectiveChapters = malIdMode ? allanimeChapters : (details?.chapters || [])
+  const effectiveChapters = malIdMode ? allanimeChapters : details?.chapters || []
   // Effective extension ID for content operations (reading, downloads)
-  const effectiveExtId = malIdMode ? (allanimeExtId || extensionId) : extensionId
+  const effectiveExtId = malIdMode ? allanimeExtId || extensionId : extensionId
 
   // Auto-navigate to page containing latest read chapter
   useEffect(() => {
     if (!readingProgress || effectiveChapters.length === 0) return
-    const chapterIndex = effectiveChapters.findIndex(ch => ch.id === readingProgress.chapterId)
+    const chapterIndex = effectiveChapters.findIndex((ch) => ch.id === readingProgress.chapterId)
     if (chapterIndex >= 0) {
       setChapterPage(Math.floor(chapterIndex / CHAPTERS_PER_PAGE))
     }
@@ -440,7 +487,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       loadedTabsRef.current.add('recommendations')
       setRecommendationsLoading(true)
       jikanMangaRecommendations(malId)
-        .then(data => setRecommendations(data.results))
+        .then((data) => setRecommendations(data.results))
         .catch(() => setRecommendations([]))
         .finally(() => setRecommendationsLoading(false))
     }
@@ -464,7 +511,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     if (!manga) return
     try {
       await unassignLibraryTag(manga.id, tagId)
-      setMediaTags(prev => prev.filter(t => t.id !== tagId))
+      setMediaTags((prev) => prev.filter((t) => t.id !== tagId))
     } catch (error) {
       console.error('Failed to remove tag:', error)
       notifyError('Error', 'Failed to remove tag')
@@ -484,7 +531,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         search: {
           extensionId: effectiveExtId,
           mangaId: allanimeShowId,
-          chapterId: chapterId || (effectiveChapters[0]?.id),
+          chapterId: chapterId || effectiveChapters[0]?.id,
           malId: manga!.id,
         },
       })
@@ -495,7 +542,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         search: {
           extensionId,
           mangaId: manga!.id,
-          chapterId: chapterId || (details.chapters[0]?.id),
+          chapterId: chapterId || details.chapters[0]?.id,
         },
       })
     }
@@ -517,7 +564,11 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       if (isRead) {
         // Mark as unread: save with page 0, not completed
         await saveReadingProgress(mediaId, chapter.id, chapter.number, 0, undefined, false)
-        setChapterReadSet(prev => { const next = new Set(prev); next.delete(chapter.id); return next })
+        setChapterReadSet((prev) => {
+          const next = new Set(prev)
+          next.delete(chapter.id)
+          return next
+        })
         // If this was the latest read chapter, clear/update readingProgress
         if (readingProgress?.chapterId === chapter.id) {
           setReadingProgress(null)
@@ -525,7 +576,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       } else {
         // Mark as read: save with completed = true
         await saveReadingProgress(mediaId, chapter.id, chapter.number, 1, undefined, true)
-        setChapterReadSet(prev => new Set(prev).add(chapter.id))
+        setChapterReadSet((prev) => new Set(prev).add(chapter.id))
         // Update latest reading progress if this is newer
         if (!readingProgress || chapter.number >= readingProgress.chapterNumber) {
           setReadingProgress({ chapterId: chapter.id, chapterNumber: chapter.number, page: 1 })
@@ -598,7 +649,12 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       const chapterCount = effectiveChapters.length || details.chapters.length
       if (chapterCount > 0) {
         try {
-          await initializeReleaseTracking(manga.id, malIdMode ? 'jikan' : extensionId, 'manga', chapterCount)
+          await initializeReleaseTracking(
+            manga.id,
+            malIdMode ? 'jikan' : extensionId,
+            'manga',
+            chapterCount
+          )
         } catch (trackingError) {
           console.error('Failed to initialize release tracking:', trackingError)
         }
@@ -643,7 +699,12 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         const chapterCount = effectiveChapters.length || details.chapters.length
         if (chapterCount > 0) {
           try {
-            await initializeReleaseTracking(manga.id, malIdMode ? 'jikan' : extensionId, 'manga', chapterCount)
+            await initializeReleaseTracking(
+              manga.id,
+              malIdMode ? 'jikan' : extensionId,
+              'manga',
+              chapterCount
+            )
           } catch (trackingError) {
             console.error('Failed to initialize release tracking:', trackingError)
           }
@@ -651,7 +712,22 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       }
       const newFavorite = await toggleFavorite(manga.id)
       setIsFavorite(newFavorite)
-      notifySuccess(details.title, newFavorite ? 'Added to your favorites' : 'Removed from your favorites')
+      const notificationCover = details.cover_url || manga.cover_url
+      notifySuccess(
+        details.title,
+        newFavorite ? 'Added to your favorites' : 'Removed from your favorites',
+        {
+          metadata: {
+            media_id: manga.id,
+            ...(notificationCover
+              ? {
+                  thumbnail: notificationCover,
+                  image: notificationCover,
+                }
+              : {}),
+          },
+        }
+      )
       refreshMediaStatus()
     } catch (err) {
       notifyError('Favorites Error', `Failed to update favorites for "${details.title}"`)
@@ -660,7 +736,10 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   }
 
   // Handle chapter download
-  const handleDownloadChapter = async (e: React.MouseEvent, chapter: { id: string; number: number }) => {
+  const handleDownloadChapter = async (
+    e: React.MouseEvent,
+    chapter: { id: string; number: number }
+  ) => {
     e.stopPropagation()
     if (!details || !manga) return
 
@@ -670,7 +749,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         throw new Error('No images found for this chapter')
       }
 
-      const imageUrls = chapterImages.images.map(img => img.url)
+      const imageUrls = chapterImages.images.map((img) => img.url)
       await startChapterDownload(
         manga.id,
         details.title,
@@ -681,18 +760,24 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       )
     } catch (err) {
       console.error('Download failed:', err)
-      notifyError('Download Failed', `Failed to download "${details.title}" Chapter ${chapter.number}`)
+      notifyError(
+        'Download Failed',
+        `Failed to download "${details.title}" Chapter ${chapter.number}`
+      )
     }
   }
 
   // Handle chapter download deletion
-  const handleDeleteChapterDownload = async (e: React.MouseEvent, chapter: { id: string; number: number }) => {
+  const handleDeleteChapterDownload = async (
+    e: React.MouseEvent,
+    chapter: { id: string; number: number }
+  ) => {
     e.stopPropagation()
     if (!details || !manga) return
 
     try {
       await deleteChapterDownload(manga.id, chapter.id)
-      setDownloadedChapters(prev => {
+      setDownloadedChapters((prev) => {
         const next = new Set(prev)
         next.delete(chapter.id)
         return next
@@ -700,7 +785,10 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       notifySuccess(details.title, `Chapter ${chapter.number} download deleted`)
     } catch (err) {
       console.error('Delete failed:', err)
-      notifyError('Delete Failed', `Failed to delete "${details.title}" Chapter ${chapter.number} download`)
+      notifyError(
+        'Delete Failed',
+        `Failed to delete "${details.title}" Chapter ${chapter.number} download`
+      )
     }
   }
 
@@ -714,7 +802,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         throw new Error('No images found')
       }
 
-      const imageUrls = chapterImages.images.map(img => img.url)
+      const imageUrls = chapterImages.images.map((img) => img.url)
       await startChapterDownload(
         manga.id,
         details.title,
@@ -734,7 +822,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const handleDownloadAllChapters = async () => {
     if (!details || isDownloadingAll) return
 
-    const chaptersToDownload = effectiveChapters.filter(ch => !downloadedChapters.has(ch.id))
+    const chaptersToDownload = effectiveChapters.filter((ch) => !downloadedChapters.has(ch.id))
 
     if (chaptersToDownload.length === 0) {
       notifyInfo(details.title, 'All chapters are already downloaded')
@@ -749,11 +837,9 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     for (let i = 0; i < chaptersToDownload.length; i += concurrency) {
       const batch = chaptersToDownload.slice(i, i + concurrency)
 
-      const results = await Promise.all(
-        batch.map(chapter => downloadSingleChapter(chapter))
-      )
+      const results = await Promise.all(batch.map((chapter) => downloadSingleChapter(chapter)))
 
-      results.forEach(success => {
+      results.forEach((success) => {
         if (success) {
           successCount++
         } else {
@@ -765,9 +851,15 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     setIsDownloadingAll(false)
 
     if (failCount === 0) {
-      notifySuccess(details.title, `Successfully downloaded ${successCount} chapter${successCount > 1 ? 's' : ''}`)
+      notifySuccess(
+        details.title,
+        `Successfully downloaded ${successCount} chapter${successCount > 1 ? 's' : ''}`
+      )
     } else {
-      notifyError(details.title, `Downloaded ${successCount} chapter${successCount > 1 ? 's' : ''}, ${failCount} failed`)
+      notifyError(
+        details.title,
+        `Downloaded ${successCount} chapter${successCount > 1 ? 's' : ''}, ${failCount} failed`
+      )
     }
   }
 
@@ -841,7 +933,10 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
               />
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-deep)] via-[var(--color-deep)]/80 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-r from-[var(--color-deep)] to-transparent" style={{ opacity: 0.5 }} />
+            <div
+              className="absolute inset-0 bg-gradient-to-r from-[var(--color-deep)] to-transparent"
+              style={{ opacity: 0.5 }}
+            />
 
             {/* Close button */}
             {!mobile && (
@@ -868,16 +963,29 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
               <div className="flex flex-wrap gap-2">
                 {details.type && <span className="chip">{details.type}</span>}
                 {details.year && <span className="chip">{details.year}</span>}
-                {details.rating && <span className="chip chip-gold">★ {details.rating.toFixed(2)}</span>}
+                {details.rating && (
+                  <span className="chip chip-gold">★ {details.rating.toFixed(2)}</span>
+                )}
                 {details.status && details.status.toLowerCase() !== 'unknown' && (
-                  <span className={`chip ${details.status.toLowerCase().includes('publishing') ? 'chip-green' : ''}`}>{details.status}</span>
+                  <span
+                    className={`chip ${details.status.toLowerCase().includes('publishing') ? 'chip-green' : ''}`}
+                  >
+                    {details.status}
+                  </span>
                 )}
                 {(effectiveChapters.length > 0 || details.totalChapters) && (
-                  <span className="chip">{effectiveChapters.length > 0 ? effectiveChapters.length : details.totalChapters} CH</span>
+                  <span className="chip">
+                    {effectiveChapters.length > 0
+                      ? effectiveChapters.length
+                      : details.totalChapters}{' '}
+                    CH
+                  </span>
                 )}
                 {details.volumes && <span className="chip">{details.volumes} VOL</span>}
-                {details.genres.map(genre => (
-                  <span key={genre} className="chip">{genre}</span>
+                {details.genres.map((genre) => (
+                  <span key={genre} className="chip">
+                    {genre}
+                  </span>
                 ))}
               </div>
             </div>
@@ -892,7 +1000,9 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
                 className="flex items-center gap-2 px-5 py-2.5 text-white font-semibold rounded-[var(--radius-md)] transition-all duration-150 bg-[var(--color-accent-gradient)] shadow-[0_0_20px_rgba(229,9,20,0.3)] hover:shadow-[0_0_30px_rgba(229,9,20,0.45)] whitespace-nowrap text-sm"
               >
                 <BookOpen size={16} />
-                <span>Continue Ch. {readingProgress.chapterNumber} (p.{readingProgress.page})</span>
+                <span>
+                  Continue Ch. {readingProgress.chapterNumber} (p.{readingProgress.page})
+                </span>
               </button>
             ) : (
               <button
@@ -913,7 +1023,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
             {(() => {
               let smartDisplayStatus = libraryStatus
               if (details && libraryStatus && readingProgress && effectiveChapters.length > 0) {
-                const maxChapter = Math.max(...effectiveChapters.map(ch => ch.number))
+                const maxChapter = Math.max(...effectiveChapters.map((ch) => ch.number))
                 if (readingProgress.chapterNumber < maxChapter && libraryStatus !== 'dropped') {
                   smartDisplayStatus = 'reading'
                 }
@@ -987,7 +1097,11 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
               <DetailTabBar
                 tabs={[
                   { id: 'overview', label: 'Overview' },
-                  { id: 'chapters', label: 'Chapters', count: effectiveChapters.length || undefined },
+                  {
+                    id: 'chapters',
+                    label: 'Chapters',
+                    count: effectiveChapters.length || undefined,
+                  },
                   { id: 'characters', label: 'Characters' },
                   { id: 'stats', label: 'Stats' },
                   { id: 'reviews', label: 'Reviews' },
@@ -1001,336 +1115,433 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
             )}
 
             <div className="mt-4">
-            {/* Overview Tab */}
-            {activeTab === 'overview' && (
-              <div>
-                {details.description && (
-                  <Description content={details.description} className="text-[0.9375rem] leading-[1.75] text-[var(--color-text-secondary)] mb-5" />
-                )}
-                {details.background && (
-                  <div className="mb-5 p-4 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-glass-border)]">
-                    <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-1">Background</div>
-                    <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">{details.background}</p>
-                  </div>
-                )}
-                {/* Info Grid */}
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mb-5">
-                  {details.type && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Type</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.type}</div>
+              {/* Overview Tab */}
+              {activeTab === 'overview' && (
+                <div>
+                  {details.description && (
+                    <Description
+                      content={details.description}
+                      className="text-[0.9375rem] leading-[1.75] text-[var(--color-text-secondary)] mb-5"
+                    />
+                  )}
+                  {details.background && (
+                    <div className="mb-5 p-4 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-glass-border)]">
+                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-1">
+                        Background
+                      </div>
+                      <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                        {details.background}
+                      </p>
                     </div>
                   )}
-                  {(effectiveChapters.length > 0 || details.totalChapters) && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Chapters</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">
-                        {effectiveChapters.length > 0 ? effectiveChapters.length : details.totalChapters}
-                        {details.totalChapters && effectiveChapters.length > 0 && effectiveChapters.length !== details.totalChapters && (
-                          <span className="text-[var(--color-text-muted)] ml-1">/ {details.totalChapters}</span>
+                  {/* Info Grid */}
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mb-5">
+                    {details.type && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Type
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.type}
+                        </div>
+                      </div>
+                    )}
+                    {(effectiveChapters.length > 0 || details.totalChapters) && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Chapters
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {effectiveChapters.length > 0
+                            ? effectiveChapters.length
+                            : details.totalChapters}
+                          {details.totalChapters &&
+                            effectiveChapters.length > 0 &&
+                            effectiveChapters.length !== details.totalChapters && (
+                              <span className="text-[var(--color-text-muted)] ml-1">
+                                / {details.totalChapters}
+                              </span>
+                            )}
+                        </div>
+                      </div>
+                    )}
+                    {details.volumes && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Volumes
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.volumes}
+                        </div>
+                      </div>
+                    )}
+                    {details.status && details.status.toLowerCase() !== 'unknown' && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Status
+                        </div>
+                        <div
+                          className="text-sm font-medium capitalize"
+                          style={{
+                            color: details.status.toLowerCase().includes('finished')
+                              ? 'var(--color-green, #22c55e)'
+                              : 'var(--color-text-primary)',
+                          }}
+                        >
+                          {details.status}
+                        </div>
+                      </div>
+                    )}
+                    {details.year && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Year
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.year}
+                        </div>
+                      </div>
+                    )}
+                    {details.rating && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Score
+                        </div>
+                        <div className="text-sm font-medium text-yellow-400">
+                          ★ {details.rating.toFixed(2)}
+                        </div>
+                      </div>
+                    )}
+                    {details.authors && details.authors.length > 0 && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Authors
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.authors.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    {details.serializations && details.serializations.length > 0 && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Serialization
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.serializations.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    {details.english_name && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          English
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.english_name}
+                        </div>
+                      </div>
+                    )}
+                    {details.native_name && (
+                      <div>
+                        <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                          Native
+                        </div>
+                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                          {details.native_name}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Demographics & Themes as chips */}
+                  {((details.demographics && details.demographics.length > 0) ||
+                    (details.themes && details.themes.length > 0)) && (
+                    <div className="flex flex-wrap gap-2">
+                      {details.demographics?.map((d) => (
+                        <span key={d} className="chip chip-accent">
+                          {d}
+                        </span>
+                      ))}
+                      {details.themes?.map((t) => (
+                        <span key={t} className="chip">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Chapters */}
+              {activeTab === 'chapters' && (
+                <div>
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+                    <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
+                      <BookMarked className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--color-accent-primary)]" />
+                      Chapters {effectiveChapters.length > 0 ? `(${effectiveChapters.length})` : ''}
+                      {chaptersLoading && <Loader2 className="w-4 h-4 animate-spin inline ml-2" />}
+                    </h2>
+                    {effectiveChapters.length > 0 && (
+                      <button
+                        onClick={handleDownloadAllChapters}
+                        disabled={
+                          isDownloadingAll || downloadedChapters.size === effectiveChapters.length
+                        }
+                        className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                          downloadedChapters.size === effectiveChapters.length
+                            ? 'bg-green-600 text-white cursor-default'
+                            : isDownloadingAll
+                              ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] cursor-wait'
+                              : 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] text-white'
+                        }`}
+                      >
+                        {isDownloadingAll ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Downloading...
+                          </>
+                        ) : downloadedChapters.size === effectiveChapters.length ? (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            All Downloaded
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            Download All ({effectiveChapters.length - downloadedChapters.size})
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Chapters unavailable message (MAL flow, AllAnime resolution failed) */}
+                  {malIdMode &&
+                    !chaptersLoading &&
+                    effectiveChapters.length === 0 &&
+                    !allanimeShowId && (
+                      <div className="text-center py-6 text-[var(--color-text-secondary)]">
+                        <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">This manga is not available for reading yet.</p>
+                        {details.totalChapters && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                            {details.totalChapters} chapters on MyAnimeList
+                          </p>
                         )}
                       </div>
-                    </div>
-                  )}
-                  {details.volumes && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Volumes</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.volumes}</div>
-                    </div>
-                  )}
-                  {details.status && details.status.toLowerCase() !== 'unknown' && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Status</div>
-                      <div className="text-sm font-medium capitalize" style={{ color: details.status.toLowerCase().includes('finished') ? 'var(--color-green, #22c55e)' : 'var(--color-text-primary)' }}>
-                        {details.status}
-                      </div>
-                    </div>
-                  )}
-                  {details.year && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Year</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.year}</div>
-                    </div>
-                  )}
-                  {details.rating && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Score</div>
-                      <div className="text-sm font-medium text-yellow-400">★ {details.rating.toFixed(2)}</div>
-                    </div>
-                  )}
-                  {details.authors && details.authors.length > 0 && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Authors</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.authors.join(', ')}</div>
-                    </div>
-                  )}
-                  {details.serializations && details.serializations.length > 0 && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Serialization</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.serializations.join(', ')}</div>
-                    </div>
-                  )}
-                  {details.english_name && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">English</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.english_name}</div>
-                    </div>
-                  )}
-                  {details.native_name && (
-                    <div>
-                      <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">Native</div>
-                      <div className="text-sm font-medium text-[var(--color-text-primary)]">{details.native_name}</div>
-                    </div>
-                  )}
-                </div>
-                {/* Demographics & Themes as chips */}
-                {((details.demographics && details.demographics.length > 0) || (details.themes && details.themes.length > 0)) && (
-                  <div className="flex flex-wrap gap-2">
-                    {details.demographics?.map(d => (
-                      <span key={d} className="chip chip-accent">{d}</span>
-                    ))}
-                    {details.themes?.map(t => (
-                      <span key={t} className="chip">{t}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Chapters */}
-            {activeTab === 'chapters' && (
-            <div>
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
-                <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
-                  <BookMarked className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--color-accent-primary)]" />
-                  Chapters {effectiveChapters.length > 0 ? `(${effectiveChapters.length})` : ''}
-                  {chaptersLoading && (
-                    <Loader2 className="w-4 h-4 animate-spin inline ml-2" />
-                  )}
-                </h2>
-                {effectiveChapters.length > 0 && (
-                  <button
-                    onClick={handleDownloadAllChapters}
-                    disabled={isDownloadingAll || downloadedChapters.size === effectiveChapters.length}
-                    className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
-                      downloadedChapters.size === effectiveChapters.length
-                        ? 'bg-green-600 text-white cursor-default'
-                        : isDownloadingAll
-                          ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] cursor-wait'
-                          : 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] text-white'
-                    }`}
-                  >
-                    {isDownloadingAll ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Downloading...
-                      </>
-                    ) : downloadedChapters.size === effectiveChapters.length ? (
-                      <>
-                        <CheckCircle className="w-4 h-4" />
-                        All Downloaded
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        Download All ({effectiveChapters.length - downloadedChapters.size})
-                      </>
                     )}
-                  </button>
-                )}
-              </div>
 
-              {/* Chapters unavailable message (MAL flow, AllAnime resolution failed) */}
-              {malIdMode && !chaptersLoading && effectiveChapters.length === 0 && !allanimeShowId && (
-                <div className="text-center py-6 text-[var(--color-text-secondary)]">
-                  <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">This manga is not available for reading yet.</p>
-                  {details.totalChapters && (
-                    <p className="text-xs text-[var(--color-text-muted)] mt-1">{details.totalChapters} chapters on MyAnimeList</p>
-                  )}
-                </div>
-              )}
+                  {effectiveChapters.length > 0 && (
+                    <>
+                      {/* Pagination controls */}
+                      {effectiveChapters.length > CHAPTERS_PER_PAGE && (
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm text-[var(--color-text-muted)]">
+                            {chapterPage * CHAPTERS_PER_PAGE + 1}–
+                            {Math.min(
+                              (chapterPage + 1) * CHAPTERS_PER_PAGE,
+                              effectiveChapters.length
+                            )}{' '}
+                            of {effectiveChapters.length}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setChapterPage((p) => Math.max(0, p - 1))}
+                              disabled={chapterPage === 0}
+                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
+                            >
+                              Prev
+                            </button>
+                            <span className="text-sm text-[var(--color-text-secondary)] tabular-nums">
+                              {chapterPage + 1} / {totalChapterPages}
+                            </span>
+                            <button
+                              onClick={() =>
+                                setChapterPage((p) => Math.min(totalChapterPages - 1, p + 1))
+                              }
+                              disabled={chapterPage >= totalChapterPages - 1}
+                              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
-              {effectiveChapters.length > 0 && (
-                <>
-                  {/* Pagination controls */}
-                  {effectiveChapters.length > CHAPTERS_PER_PAGE && (
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm text-[var(--color-text-muted)]">
-                        {chapterPage * CHAPTERS_PER_PAGE + 1}–{Math.min((chapterPage + 1) * CHAPTERS_PER_PAGE, effectiveChapters.length)} of {effectiveChapters.length}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setChapterPage(p => Math.max(0, p - 1))}
-                          disabled={chapterPage === 0}
-                          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
-                        >
-                          Prev
-                        </button>
-                        <span className="text-sm text-[var(--color-text-secondary)] tabular-nums">
-                          {chapterPage + 1} / {totalChapterPages}
-                        </span>
-                        <button
-                          onClick={() => setChapterPage(p => Math.min(totalChapterPages - 1, p + 1))}
-                          disabled={chapterPage >= totalChapterPages - 1}
-                          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-colors text-sm font-medium"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                        {paginatedChapters.map((chapter: Chapter) => {
+                          const isDownloaded = downloadedChapters.has(chapter.id)
+                          const isDownloading = downloadingChapters.has(chapter.id)
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                    {paginatedChapters.map((chapter: Chapter) => {
-                      const isDownloaded = downloadedChapters.has(chapter.id)
-                      const isDownloading = downloadingChapters.has(chapter.id)
+                          return (
+                            <div
+                              key={chapter.id}
+                              className="relative p-3 bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors group"
+                            >
+                              <button
+                                onClick={() => handleReadNow(chapter.id)}
+                                className="w-full text-left"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium group-hover:text-[var(--color-accent-primary)]">
+                                    Ch. {chapter.number}
+                                  </span>
+                                  {isDownloaded && (
+                                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                  )}
+                                  {chapter.number > (readingProgress?.chapterNumber ?? 0) &&
+                                    isChapterRecentlyReleased(
+                                      chapter.number,
+                                      effectiveChapters[effectiveChapters.length - 1]?.number ??
+                                        chapter.number,
+                                      chapter.releaseDate,
+                                      details?.last_update_end,
+                                      details?.broadcast_interval
+                                    ) && (
+                                      <span className="px-1.5 py-0.5 bg-emerald-500/90 rounded text-[10px] font-bold uppercase tracking-wide text-white">
+                                        NEW
+                                      </span>
+                                    )}
+                                </div>
+                                {chapter.title && (
+                                  <p className="text-xs text-[var(--color-text-muted)] truncate mt-1">
+                                    {chapter.title}
+                                  </p>
+                                )}
+                              </button>
 
-                      return (
-                        <div
-                          key={chapter.id}
-                          className="relative p-3 bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors group"
-                        >
-                          <button
-                            onClick={() => handleReadNow(chapter.id)}
-                            className="w-full text-left"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium group-hover:text-[var(--color-accent-primary)]">
-                                Ch. {chapter.number}
-                              </span>
-                              {isDownloaded && (
-                                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                              )}
-                              {chapter.number > (readingProgress?.chapterNumber ?? 0) &&
-                                isChapterRecentlyReleased(
-                                  chapter.number,
-                                  effectiveChapters[effectiveChapters.length - 1]?.number ?? chapter.number,
-                                  chapter.releaseDate,
-                                  details?.last_update_end,
-                                  details?.broadcast_interval,
-                                ) && (
-                                <span className="px-1.5 py-0.5 bg-emerald-500/90 rounded text-[10px] font-bold uppercase tracking-wide text-white">
-                                  NEW
-                                </span>
+                              {/* Download button */}
+                              <button
+                                onClick={(e) =>
+                                  isDownloaded
+                                    ? handleDeleteChapterDownload(e, chapter)
+                                    : handleDownloadChapter(e, chapter)
+                                }
+                                disabled={isDownloading}
+                                className={`absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all ${
+                                  isDownloaded
+                                    ? 'bg-green-600 hover:bg-red-600 text-white'
+                                    : 'bg-[var(--color-bg-hover)] hover:bg-[var(--color-accent-primary)] text-[var(--color-text-secondary)] hover:text-white'
+                                }`}
+                                title={isDownloaded ? 'Delete download' : 'Download chapter'}
+                              >
+                                {isDownloading ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : isDownloaded ? (
+                                  <Trash2 className="w-4 h-4" />
+                                ) : (
+                                  <Download className="w-4 h-4" />
+                                )}
+                              </button>
+
+                              {/* Read toggle button */}
+                              {chapterReadSet.has(chapter.id) ? (
+                                <button
+                                  onClick={(e) => handleToggleChapterRead(e, chapter)}
+                                  className="absolute bottom-2 right-2 px-2 py-0.5 bg-blue-600/90 hover:bg-red-600/90 rounded text-[10px] font-bold flex items-center gap-1 transition-colors z-10"
+                                  title="Click to mark as unread"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Read
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => handleToggleChapterRead(e, chapter)}
+                                  className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 hover:bg-blue-600 rounded text-[10px] font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10"
+                                  title="Mark as read"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Read
+                                </button>
                               )}
                             </div>
-                            {chapter.title && (
-                              <p className="text-xs text-[var(--color-text-muted)] truncate mt-1">
-                                {chapter.title}
-                              </p>
-                            )}
-                          </button>
-
-                          {/* Download button */}
-                          <button
-                            onClick={(e) => isDownloaded
-                              ? handleDeleteChapterDownload(e, chapter)
-                              : handleDownloadChapter(e, chapter)
-                            }
-                            disabled={isDownloading}
-                            className={`absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all ${
-                              isDownloaded
-                                ? 'bg-green-600 hover:bg-red-600 text-white'
-                                : 'bg-[var(--color-bg-hover)] hover:bg-[var(--color-accent-primary)] text-[var(--color-text-secondary)] hover:text-white'
-                            }`}
-                            title={isDownloaded ? 'Delete download' : 'Download chapter'}
-                          >
-                            {isDownloading ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : isDownloaded ? (
-                              <Trash2 className="w-4 h-4" />
-                            ) : (
-                              <Download className="w-4 h-4" />
-                            )}
-                          </button>
-
-                          {/* Read toggle button */}
-                          {chapterReadSet.has(chapter.id) ? (
-                            <button
-                              onClick={(e) => handleToggleChapterRead(e, chapter)}
-                              className="absolute bottom-2 right-2 px-2 py-0.5 bg-blue-600/90 hover:bg-red-600/90 rounded text-[10px] font-bold flex items-center gap-1 transition-colors z-10"
-                              title="Click to mark as unread"
-                            >
-                              <Check className="w-3 h-3" />
-                              Read
-                            </button>
-                          ) : (
-                            <button
-                              onClick={(e) => handleToggleChapterRead(e, chapter)}
-                              className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 hover:bg-blue-600 rounded text-[10px] font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10"
-                              title="Mark as read"
-                            >
-                              <Check className="w-3 h-3" />
-                              Read
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-            )}
-
-            {/* Characters Tab */}
-            {activeTab === 'characters' && (
-              <CharacterGrid characters={characters || []} loading={charactersLoading || !characters} />
-            )}
-
-            {/* Stats Tab */}
-            {activeTab === 'stats' && (
-              <ScoreDistribution statistics={statistics || {} as JikanStatistics} loading={statisticsLoading || !statistics} mediaType="manga" />
-            )}
-
-            {/* Reviews Tab */}
-            {activeTab === 'reviews' && (
-              <ReviewList reviews={mangaReviews || []} loading={reviewsLoading || !mangaReviews} />
-            )}
-
-            {/* Gallery Tab */}
-            {activeTab === 'gallery' && (
-              <GalleryGrid pictures={mangaPictures || []} loading={picturesLoading || !mangaPictures} />
-            )}
-
-            {/* News Tab */}
-            {activeTab === 'news' && (
-              <NewsList news={mangaNews || []} loading={newsLoading || !mangaNews} />
-            )}
-
-            {/* Recommendations Tab */}
-            {activeTab === 'recommendations' && (
-              recommendationsLoading || !recommendations ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className="aspect-[2/3] bg-[var(--color-bg-secondary)] rounded-lg animate-pulse" />
-                  ))}
-                </div>
-              ) : recommendations.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {recommendations.map((rec) => (
-                    <div
-                      key={rec.id}
-                      className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] relative group cursor-pointer"
-                      onClick={() => {
-                        // Could open this manga's detail modal
-                      }}
-                    >
-                      {rec.cover_url && (
-                        <img src={rec.cover_url} alt={rec.title} className="w-full h-full object-cover" loading="lazy" />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                      <div className="absolute bottom-0 left-0 right-0 p-2">
-                        <p className="text-xs font-medium text-white line-clamp-2">{rec.title}</p>
+                          )
+                        })}
                       </div>
-                    </div>
-                  ))}
+                    </>
+                  )}
                 </div>
-              ) : (
-                <p className="text-center py-8 text-[var(--color-text-secondary)]">No recommendations available</p>
-              )
-            )}
+              )}
+
+              {/* Characters Tab */}
+              {activeTab === 'characters' && (
+                <CharacterGrid
+                  characters={characters || []}
+                  loading={charactersLoading || !characters}
+                />
+              )}
+
+              {/* Stats Tab */}
+              {activeTab === 'stats' && (
+                <ScoreDistribution
+                  statistics={statistics || ({} as JikanStatistics)}
+                  loading={statisticsLoading || !statistics}
+                  mediaType="manga"
+                />
+              )}
+
+              {/* Reviews Tab */}
+              {activeTab === 'reviews' && (
+                <ReviewList
+                  reviews={mangaReviews || []}
+                  loading={reviewsLoading || !mangaReviews}
+                />
+              )}
+
+              {/* Gallery Tab */}
+              {activeTab === 'gallery' && (
+                <GalleryGrid
+                  pictures={mangaPictures || []}
+                  loading={picturesLoading || !mangaPictures}
+                />
+              )}
+
+              {/* News Tab */}
+              {activeTab === 'news' && (
+                <NewsList news={mangaNews || []} loading={newsLoading || !mangaNews} />
+              )}
+
+              {/* Recommendations Tab */}
+              {activeTab === 'recommendations' &&
+                (recommendationsLoading || !recommendations ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {[...Array(6)].map((_, i) => (
+                      <div
+                        key={i}
+                        className="aspect-[2/3] bg-[var(--color-bg-secondary)] rounded-lg animate-pulse"
+                      />
+                    ))}
+                  </div>
+                ) : recommendations.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {recommendations.map((rec) => (
+                      <div
+                        key={rec.id}
+                        className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] relative group cursor-pointer"
+                        onClick={() => {
+                          // Could open this manga's detail modal
+                        }}
+                      >
+                        {rec.cover_url && (
+                          <img
+                            src={rec.cover_url}
+                            alt={rec.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                        <div className="absolute bottom-0 left-0 right-0 p-2">
+                          <p className="text-xs font-medium text-white line-clamp-2">{rec.title}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center py-8 text-[var(--color-text-secondary)]">
+                    No recommendations available
+                  </p>
+                ))}
             </div>
           </div>
         </>
