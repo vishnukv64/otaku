@@ -10,28 +10,160 @@ const extensionObject = {
   language: "en",
   baseUrl: "https://api.allanime.day",
 
+  // Decode AllAnime's hex-encoded sourceUrl paths.
+  //
+  // Algorithm: for each hex byte, XOR with 56 (0x38) and cast to ASCII.
+  // This is the canonical algorithm used by ani-cli, anipy-cli, and viu.
+  // (The previous lookup-map approach silently dropped unmapped bytes,
+  //  which broke whenever AllAnime introduced a new char in the path.)
   hexDecode: function(hexString) {
-    const decodeMap = {
-      '79': 'A', '7a': 'B', '7b': 'C', '7c': 'D', '7d': 'E', '7e': 'F', '7f': 'G',
-      '70': 'H', '71': 'I', '72': 'J', '73': 'K', '74': 'L', '75': 'M', '76': 'N',
-      '77': 'O', '68': 'P', '69': 'Q', '6a': 'R', '6b': 'S', '6c': 'T', '6d': 'U',
-      '6e': 'V', '6f': 'W', '60': 'X', '61': 'Y', '62': 'Z', '59': 'a', '5a': 'b',
-      '5b': 'c', '5c': 'd', '5d': 'e', '5e': 'f', '5f': 'g', '50': 'h', '51': 'i',
-      '52': 'j', '53': 'k', '54': 'l', '55': 'm', '56': 'n', '57': 'o', '48': 'p',
-      '49': 'q', '4a': 'r', '4b': 's', '4c': 't', '4d': 'u', '4e': 'v', '4f': 'w',
-      '40': 'x', '41': 'y', '42': 'z', '08': '0', '09': '1', '0a': '2', '0b': '3',
-      '0c': '4', '0d': '5', '0e': '6', '0f': '7', '00': '8', '01': '9', '15': '-',
-      '16': '.', '67': '_', '46': '~', '02': ':', '17': '/', '07': '?', '1b': '#',
-      '63': '[', '65': ']', '78': '@', '19': '!', '1c': '$', '1e': '&', '10': '(',
-      '11': ')', '12': '*', '13': '+', '14': ',', '03': ';', '05': '=', '1d': '%'
-    };
-
     let decoded = '';
     for (let i = 0; i < hexString.length; i += 2) {
-      const hexPair = hexString.substr(i, 2);
-      decoded += decodeMap[hexPair] || '';
+      const byte = parseInt(hexString.substr(i, 2), 16);
+      if (isNaN(byte)) continue;
+      decoded += String.fromCharCode(byte ^ 56);
     }
     return decoded;
+  },
+
+  // Parse an AllAnime API response body, transparently handling the
+  // encrypted 'tobeparsed' wrapper when present.
+  //
+  // Input: raw HTTP response body string from api.allanime.day.
+  // Output: normalised JSON object with shape { data: {...} }.
+  //
+  // AllAnime returns either:
+  //   (A) Plaintext: { data: { episode: {...} | shows: {...} | ... } }
+  //   (B) Encrypted: { data: { _m: "b7", tobeparsed: "<base64-AES-GCM>" } }
+  // For (B), we call the Rust-side decryptor and rewrap so downstream code
+  // can keep using data.data.<...> uniformly.
+  parseAllanimeBody: function(bodyStr) {
+    try {
+      const raw = JSON.parse(bodyStr);
+      if (raw && raw.data && typeof raw.data.tobeparsed === 'string' && raw.data.tobeparsed.length > 0) {
+        try {
+          const decryptedJson = __decryptAllanime(raw.data.tobeparsed);
+          if (decryptedJson && decryptedJson.length > 0) {
+            try { __log('[AllAnime] decrypted tobeparsed: ' + decryptedJson.length + ' bytes'); } catch (_) {}
+            return { data: JSON.parse(decryptedJson) };
+          }
+          try { __log('[AllAnime] __decryptAllanime returned empty'); } catch (_) {}
+        } catch (e) {
+          try { __log('[AllAnime] tobeparsed decrypt/parse failed: ' + (e && e.message ? e.message : String(e))); } catch (_) {}
+        }
+      }
+      return raw;
+    } catch (e) {
+      try { __log('[AllAnime] parseAllanimeBody: body not JSON'); } catch (_) {}
+      return {};
+    }
+  },
+
+  // Resolve a decoded /apivtwo/clock path into actual playable URLs by
+  // hitting the /clock.json endpoint. Returns an array of VideoSource-shaped
+  // objects or an empty array on failure. Never throws.
+  //
+  // Response shape (from AllAnime /clock.json):
+  //   { links: [{ link, hls, resolutionStr, fromCache, subtitles?, headers? }] }
+  resolveClockJson: function(decodedPath, serverName) {
+    try {
+      // Transform "/apivtwo/clock?id=X" -> "/apivtwo/clock.json?id=X".
+      // Using string replace of 'clock' -> 'clock.json' matches ani-cli/anipy-cli.
+      const jsonPath = decodedPath.replace('/clock', '/clock.json');
+      const url = 'https://allanime.day' + (jsonPath.startsWith('/') ? jsonPath : '/' + jsonPath);
+
+      const responseStr = __fetch(url, {
+        method: 'GET',
+        headers: {
+          'Referer': 'https://allmanga.to/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0'
+        }
+      });
+
+      const response = JSON.parse(responseStr);
+      if (response.status !== 200 || !response.body) {
+        try { __log('[AllAnime] clock.json non-200: ' + response.status + ' for ' + url); } catch (_) {}
+        return [];
+      }
+
+      let data;
+      try {
+        data = JSON.parse(response.body);
+      } catch (e) {
+        try { __log('[AllAnime] clock.json body not JSON for ' + url); } catch (_) {}
+        return [];
+      }
+
+      const links = (data && data.links) || [];
+      if (!Array.isArray(links) || links.length === 0) {
+        try { __log('[AllAnime] clock.json returned no links for ' + serverName); } catch (_) {}
+        return [];
+      }
+
+      const out = [];
+      for (const l of links) {
+        if (!l || typeof l.link !== 'string' || l.link.length === 0) continue;
+
+        const isHls = l.hls === true || l.link.toLowerCase().indexOf('.m3u8') !== -1;
+        const resolution = l.resolutionStr || 'Auto';
+
+        // WixMP "repackager" URLs embed multiple resolutions in the path,
+        // e.g. https://repackager.wixmp.com/.../,720p,1080p,480p,/mp4/file.mp4.urlset/...
+        // Split these into individual per-resolution MP4 URLs.
+        if (!isHls && l.link.indexOf('repackager.wixmp.com') !== -1 && l.link.indexOf(',/mp4') !== -1) {
+          const qualities = extensionObject.expandWixmpUrl(l.link);
+          if (qualities.length > 0) {
+            for (const q of qualities) {
+              out.push({ url: q.url, quality: q.quality, type: 'mp4', server: serverName });
+            }
+            continue;
+          }
+        }
+
+        out.push({
+          url: l.link,
+          quality: resolution,
+          type: isHls ? 'hls' : 'mp4',
+          server: serverName
+        });
+      }
+      return out;
+    } catch (e) {
+      try { __log('[AllAnime] resolveClockJson threw: ' + (e && e.message ? e.message : String(e))); } catch (_) {}
+      return [];
+    }
+  },
+
+  // Expand a WixMP repackager URL into individual per-quality MP4 URLs.
+  // Input:  https://repackager.wixmp.com/.../,480p,720p,1080p,/mp4/file.mp4.urlset/master.m3u8
+  // Output: [{ url: "https://.../720p/mp4/file.mp4", quality: "720p" }, ...]
+  expandWixmpUrl: function(url) {
+    try {
+      const mp4Idx = url.indexOf(',/mp4/');
+      if (mp4Idx < 0) return [];
+      const urlsetIdx = url.indexOf('.urlset/', mp4Idx);
+      if (urlsetIdx < 0) return [];
+      const afterMp4 = url.substring(mp4Idx + 6, urlsetIdx);
+      const filename = afterMp4.substring(0, afterMp4.lastIndexOf('.'));
+      if (!filename) return [];
+
+      let qualitiesStart = url.lastIndexOf('/', mp4Idx - 1);
+      if (qualitiesStart < 0) return [];
+      const prefix = url.substring(0, qualitiesStart + 1);
+      const qualitiesPart = url.substring(qualitiesStart + 1, mp4Idx);
+      const qualityList = qualitiesPart.split(',').filter(function(q) { return q.length > 0; });
+
+      const results = [];
+      for (const q of qualityList) {
+        results.push({
+          url: prefix + q + '/mp4/' + filename + '.mp4',
+          quality: q
+        });
+      }
+      return results;
+    } catch (e) {
+      return [];
+    }
   },
 
   search: (query, page) => {
@@ -506,16 +638,27 @@ const extensionObject = {
   },
 
   getSources: (episodeId) => {
-    const parts = episodeId.split('::');
-    const showId = parts[0];
-    const episodeString = parts[1];
-
-    const sourcesQuery = \`query($showId: String! $translationType: VaildTranslationTypeEnumType! $episodeString: String!) { episode(showId: $showId translationType: $translationType episodeString: $episodeString) { episodeString sourceUrls } }\`;
-
-    const variables = { showId: showId, translationType: "sub", episodeString: episodeString };
-    const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(sourcesQuery)}\`;
-
     try {
+      try { __log('[AllAnime] getSources ENTER: ' + String(episodeId)); } catch (_) {}
+
+      if (typeof episodeId !== 'string' || episodeId.length === 0) {
+        try { __log('[AllAnime] getSources: invalid episodeId (type=' + typeof episodeId + ')'); } catch (_) {}
+        return { sources: [], subtitles: [] };
+      }
+
+      const parts = episodeId.split('::');
+      const showId = parts[0];
+      const episodeString = parts[1];
+      if (!showId || !episodeString) {
+        try { __log('[AllAnime] getSources: malformed episodeId (missing showId or episodeString): ' + episodeId); } catch (_) {}
+        return { sources: [], subtitles: [] };
+      }
+
+      const sourcesQuery = \`query($showId: String! $translationType: VaildTranslationTypeEnumType! $episodeString: String!) { episode(showId: $showId translationType: $translationType episodeString: $episodeString) { episodeString sourceUrls } }\`;
+
+      const variables = { showId: showId, translationType: "sub", episodeString: episodeString };
+      const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(sourcesQuery)}\`;
+
       const responseStr = __fetch(url, {
         method: 'GET',
         headers: {
@@ -525,69 +668,90 @@ const extensionObject = {
       });
 
       const response = JSON.parse(responseStr);
-      const data = JSON.parse(response.body);
+      const data = extensionObject.parseAllanimeBody(response.body);
       const sourceUrls = data?.data?.episode?.sourceUrls || [];
+
+      // Preferred streamers (by reliability/quality). Sources from these providers
+      // are tried first; anything else is tried as a fallback.
+      // Matches the priority list used by ani-cli and anipy-cli.
+      const preferredStreamers = ['Default', 'Yt-mp4', 'S-mp4', 'Luf-mp4', 'Sak', 'Kir', 'Ak'];
+      const streamerRank = (name) => {
+        const idx = preferredStreamers.indexOf(name || '');
+        return idx === -1 ? 999 : idx;
+      };
+
+      const sorted = sourceUrls.slice().sort((a, b) => {
+        const ra = streamerRank(a.sourceName);
+        const rb = streamerRank(b.sourceName);
+        if (ra !== rb) return ra - rb;
+        return (b.priority || 0) - (a.priority || 0);
+      });
+
+      try { __log('[AllAnime] getSources: ' + showId + '/' + episodeString + ' got ' + sorted.length + ' providers: ' + sorted.map(s => s.sourceName).join(',')); } catch (_) {}
+
       const sources = [];
+      const subtitles = [];
 
-      // Sort sources by priority (higher priority first)
-      const sortedSources = sourceUrls.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      for (const source of sorted) {
+        if (!source || !source.sourceUrl) {
+          try { __log('[AllAnime] skip (no sourceUrl): ' + (source && source.sourceName)); } catch (_) {}
+          continue;
+        }
 
-      for (const source of sortedSources) {
-        if (!source.sourceUrl) continue;
-
-        // Skip download URLs for now - they return HTML player pages, not JSON
-        // We'll rely on the hex-encoded sourceUrls instead
-
-        // Handle hex-encoded sourceUrls (starting with --)
         if (source.sourceUrl.startsWith('--')) {
-          const hexPart = source.sourceUrl.substring(2);
-          const decodedPath = extensionObject.hexDecode(hexPart);
-
-          // Check if decoded path is already a full URL or a relative path
-          let baseUrl;
-          if (decodedPath.startsWith('http://') || decodedPath.startsWith('https://')) {
-            // Already a complete URL - use it directly (keep double slashes intact!)
-            baseUrl = decodedPath;
-          } else {
-            // Relative path - prepend base URL
-            baseUrl = 'https://blog.allanime.day' + (decodedPath.startsWith('/') ? decodedPath : '/' + decodedPath);
-          }
-
-          // Skip /apivtwo/clock URLs - they consistently return 404
-          if (baseUrl.includes('/apivtwo/clock')) {
+          const decodedPath = extensionObject.hexDecode(source.sourceUrl.substring(2));
+          if (!decodedPath) {
+            try { __log('[AllAnime] skip (hex decode empty): ' + source.sourceName); } catch (_) {}
             continue;
           }
 
+          if (decodedPath.indexOf('/apivtwo/clock') !== -1) {
+            const resolved = extensionObject.resolveClockJson(decodedPath, source.sourceName || 'Server');
+            if (resolved.length === 0) {
+              try { __log('[AllAnime] clock.json returned 0 links: ' + source.sourceName); } catch (_) {}
+              continue;
+            }
+            for (const r of resolved) sources.push(r);
+            continue;
+          }
+
+          const directUrl = (decodedPath.startsWith('http://') || decodedPath.startsWith('https://'))
+            ? decodedPath
+            : 'https://allanime.day' + (decodedPath.startsWith('/') ? decodedPath : '/' + decodedPath);
+
           sources.push({
-            url: baseUrl,
+            url: directUrl,
             quality: source.sourceName || 'Auto',
-            type: 'hls',
+            type: directUrl.toLowerCase().indexOf('.m3u8') !== -1 ? 'hls' : 'mp4',
             server: source.sourceName || 'Server'
           });
+          continue;
         }
-        // Handle plain URL sources (already decoded)
-        else if (source.sourceUrl.startsWith('http://') || source.sourceUrl.startsWith('https://')) {
-          // Skip iframe embeds - they're not direct video URLs
+
+        if (source.sourceUrl.startsWith('http://') || source.sourceUrl.startsWith('https://')) {
           if (source.type === 'iframe') {
+            try { __log('[AllAnime] skip (iframe embed, not directly playable): ' + source.sourceName); } catch (_) {}
             continue;
           }
 
           sources.push({
             url: source.sourceUrl,
             quality: source.sourceName || 'Default',
-            type: 'hls',
+            type: source.sourceUrl.toLowerCase().indexOf('.m3u8') !== -1 ? 'hls' : 'mp4',
             server: source.sourceName || 'Direct'
           });
+          continue;
         }
+
+        try { __log('[AllAnime] skip (unrecognized sourceUrl format): ' + source.sourceName + ' = ' + source.sourceUrl.substring(0, 40)); } catch (_) {}
       }
 
-      return {
-        sources: sources.length > 0 ? sources : [{ url: '', quality: 'No sources', type: 'hls', server: 'None' }],
-        subtitles: []
-      };
+      try { __log('[AllAnime] getSources: resolved ' + sources.length + ' playable sources'); } catch (_) {}
+
+      return { sources: sources, subtitles: subtitles };
     } catch (error) {
-      console.error('Failed to get sources:', error);
-      return { sources: [{ url: '', quality: 'Error', type: 'hls', server: 'Error' }], subtitles: [] };
+      try { __log('[AllAnime] getSources threw: ' + (error && error.message ? error.message : String(error))); } catch (_) {}
+      return { sources: [], subtitles: [] };
     }
   },
 

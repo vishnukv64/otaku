@@ -315,8 +315,15 @@ function WatchPage() {
         }
 
         // Step 2: Load video sources AFTER watch progress is loaded
-        // Check if episode is downloaded first
-        const filePath = await getEpisodeFilePath(malId, currentEpisode.number)
+        // Check if episode is downloaded first (never let this throw kill the
+        // whole flow - fall back to streaming if the check errors).
+        let filePath: string | null = null
+        try {
+          filePath = await getEpisodeFilePath(malId, currentEpisode.number)
+        } catch (fpErr) {
+          console.warn('[Watch] getEpisodeFilePath failed, falling back to streaming', fpErr)
+          filePath = null
+        }
         let localSourceLoaded = false
 
         if (filePath && isAndroid()) {
@@ -406,7 +413,17 @@ function WatchPage() {
         }
         didComplete = true
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load video sources')
+        // Tauri rejects with a String (from Result<T, String>), not an Error.
+        // Extract the actual message instead of falling back to a generic one,
+        // so users see the real failure reason in the UI.
+        const msg = err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : err && typeof err === 'object' && 'message' in err
+              ? String((err as { message: unknown }).message)
+              : `Failed to load video sources (${String(err)})`
+        setError(msg)
         didComplete = true
       } finally {
         // Only clear loading if we actually finished (not waiting for allanimeId)

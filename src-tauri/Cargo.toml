@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.1.0"
+version = "1.2.1"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -59,6 +59,11 @@ tokio-util = { version = "0.7", features = ["io"] }
 
 # Jikan API
 lazy_static = "1.5"
+
+# AllAnime `tobeparsed` response decryption (AES-256-GCM + SHA-256 + base64)
+aes-gcm = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
 
 # sysinfo is desktop-only (moved to target-specific deps below)
 
