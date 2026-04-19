@@ -2061,6 +2061,15 @@ pub async fn get_local_video_url(
     Ok(video_server.local_url(&filename))
 }
 
+/// Get file size for a downloaded file path.
+#[tauri::command]
+pub async fn get_local_file_size(path: String) -> Result<u64, String> {
+    tokio::fs::metadata(&path)
+        .await
+        .map(|m| m.len())
+        .map_err(|e| format!("Failed to stat file: {}", e))
+}
+
 /// Get proxy URL for a remote video
 #[tauri::command]
 pub async fn get_proxy_video_url(

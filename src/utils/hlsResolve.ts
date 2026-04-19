@@ -7,6 +7,11 @@ export interface HlsVariant {
   resolution: number
 }
 
+export interface ResolvedVariant {
+  url: string
+  resolution: number
+}
+
 // Parse an HLS master playlist (m3u8 text) into its #EXT-X-STREAM-INF
 // variants, resolving each relative URI against the master's base URL.
 //
@@ -50,6 +55,11 @@ export function pickHlsVariant(
   return exact ?? sorted[sorted.length - 1]
 }
 
+export async function listAdaptiveVariants(source: VideoSource): Promise<ResolvedVariant[]> {
+  const text = await proxyHlsPlaylist(source.url)
+  return parseHlsMaster(text, source.url)
+}
+
 // Given an adaptive HLS VideoSource and a quality preference, fetch the
 // master playlist (via the Rust video proxy so CORS and Referer are
 // correctly handled), parse it, and return the concrete variant URL.
@@ -61,18 +71,13 @@ export function pickHlsVariant(
 export async function resolveAdaptiveToVariant(
   source: VideoSource,
   preferred: QualityPreference,
-): Promise<{ url: string; resolution?: number }> {
+): Promise<{ url: string; resolution: number } | null> {
   try {
-    // proxyHlsPlaylist fetches the m3u8 server-side (handles CORS + Referer)
-    // and returns text with segment URLs already rewritten to route through
-    // the proxy. The STREAM-INF variant URIs inside stay as-is, which is
-    // what we want (we're extracting the direct variant URLs).
-    const text = await proxyHlsPlaylist(source.url)
-    const variants = parseHlsMaster(text, source.url)
+    const variants = await listAdaptiveVariants(source)
     const pick = pickHlsVariant(variants, preferred)
     if (pick) return { url: pick.url, resolution: pick.resolution }
   } catch (err) {
-    console.warn('[hlsResolve] master parse failed, falling back to master URL', err)
+    console.warn('[hlsResolve] master parse failed', err)
   }
-  return { url: source.url }
+  return null
 }

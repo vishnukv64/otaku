@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { useMobileLayout } from '@/hooks/useMobileLayout'
-import { jikanAnimeDetails, loadExtension, resolveAllanimeId, clearAllanimeMapping, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
+import { jikanAnimeDetails, loadExtension, resolveAllanimeId, clearAllanimeMapping, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getLocalFileSize, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
@@ -325,6 +325,21 @@ function WatchPage() {
           filePath = null
         }
         let localSourceLoaded = false
+
+        if (filePath) {
+          try {
+            const fileSize = await getLocalFileSize(filePath)
+            // Guard against earlier buggy downloads that saved only the HLS
+            // playlist text (~tens of KB) instead of the actual media.
+            if (fileSize < 1_000_000) {
+              console.warn('[Watch] Local download too small to be valid video, ignoring', { filePath, fileSize })
+              filePath = null
+            }
+          } catch (sizeErr) {
+            console.warn('[Watch] Failed to stat local file, ignoring offline copy', sizeErr)
+            filePath = null
+          }
+        }
 
         if (filePath && isAndroid()) {
           // Android: Use convertFileSrc to serve via https://asset.localhost/

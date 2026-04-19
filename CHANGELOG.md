@@ -5,6 +5,19 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-04-19
+
+### Fixed
+- **Adaptive HLS downloads always fell back to master URL** — When variant resolution failed, `resolveAdaptiveToVariant` silently returned the master `.m3u8` URL, reintroducing the 1.3.0 bug of saving playlist text as `.mp4`. Return type is now `{ url, resolution } | null` so callers explicitly surface failure with "Could not resolve a concrete HLS variant" instead of silently saving a broken file.
+- **Corrupted offline copies kept being replayed** — Watch page now stats the on-disk episode via the new `get_local_file_size` command and ignores files under 1 MB (leftovers from the pre-1.3.0 playlist-as-video bug), falling through to streaming instead of crashing the player on open.
+
+### Changed
+- **Download quality menu lists real HLS variants** — Instead of showing one opaque entry per server, opening the download menu now fetches each adaptive source's master playlist and expands it into per-resolution options (360p / 480p / 720p / 1080p), deduped by `(server, resolution)`. A "Resolving downloadable variants..." spinner covers the fetch window, and an explicit "No downloadable variants available" empty state replaces silent-disable.
+
+### Added
+- **`get_local_file_size` Tauri command** — Thin async wrapper over `tokio::fs::metadata(...).len()` so the frontend can validate local media before use.
+- **`listAdaptiveVariants` helper** (`src/utils/hlsResolve.ts`) — Extracted from `resolveAdaptiveToVariant` for reuse by the download menu.
+
 ## [1.3.0] - 2026-04-19
 
 ### Added

@@ -4,13 +4,13 @@
  * Allows users to download the current episode with quality selection
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Download, Check, X, Loader2, Star } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { isAdaptive, qualityLabel, parseQualityPreference } from '@/utils/pickSource'
-import { resolveAdaptiveToVariant } from '@/utils/hlsResolve'
+import { listAdaptiveVariants, resolveAdaptiveToVariant } from '@/utils/hlsResolve'
 
 interface DownloadButtonProps {
   sources: VideoSource[]
@@ -34,6 +34,71 @@ export function DownloadButton({
   const [showOptions, setShowOptions] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [completed, setCompleted] = useState(false)
+  const [resolvingOptions, setResolvingOptions] = useState(false)
+  const [downloadOptions, setDownloadOptions] = useState<VideoSource[]>([])
+  const hasAnySource = sources.some((s) => s.url && s.url.trim() !== '')
+
+  useEffect(() => {
+    if (!showOptions) return
+    let cancelled = false
+
+    const buildOptions = async () => {
+      setResolvingOptions(true)
+      const seen = new Set<string>()
+      const out: VideoSource[] = []
+
+      for (const source of sources) {
+        if (!source.url || source.url.trim() === '') continue
+
+        if (isAdaptive(source)) {
+          try {
+            const variants = await listAdaptiveVariants(source)
+            for (const variant of variants) {
+              const key = `${source.server}|${variant.resolution}`
+              if (seen.has(key)) continue
+              seen.add(key)
+              out.push({
+                ...source,
+                url: variant.url,
+                resolution: variant.resolution,
+                quality: `${variant.resolution}p`,
+              })
+            }
+          } catch (err) {
+            console.warn('[DownloadButton] failed to expand adaptive variants', err)
+          }
+          continue
+        }
+
+        const key = `${source.server}|${source.resolution ?? 'adaptive'}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(source)
+      }
+
+      out.sort((a, b) => {
+        if (a.server !== b.server) return a.server.localeCompare(b.server)
+        return (b.resolution ?? 0) - (a.resolution ?? 0)
+      })
+
+      if (!cancelled) {
+        setDownloadOptions(out)
+        setResolvingOptions(false)
+      }
+    }
+
+    buildOptions().catch((err) => {
+      console.error('[DownloadButton] buildOptions failed', err)
+      if (!cancelled) {
+        setDownloadOptions([])
+        setResolvingOptions(false)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [showOptions, sources])
 
   const handleDownload = async (source: VideoSource) => {
     const label = qualityLabel(source)
@@ -49,8 +114,11 @@ export function DownloadButton({
       if (isAdaptive(source)) {
         const pref = parseQualityPreference(defaultDownloadQuality)
         const resolved = await resolveAdaptiveToVariant(source, pref)
+        if (!resolved) {
+          throw new Error('Could not resolve a concrete HLS variant for download')
+        }
         downloadUrl = resolved.url
-        if (resolved.resolution) resolvedLabel = `${resolved.resolution}p`
+        resolvedLabel = `${resolved.resolution}p`
       }
 
       const safeTitle = animeTitle.replace(/[^a-zA-Z0-9]/g, '_')
@@ -67,26 +135,7 @@ export function DownloadButton({
       setDownloading(null)
     }
   }
-
-  // Filter sources to get unique quality options. Dedup by (server, resolution)
-  // so the user sees one entry per distinct quality per provider rather than
-  // duplicates from clock.json returning the same variant twice.
-  const downloadOptions = (() => {
-    const seen = new Set<string>()
-    const out: VideoSource[] = []
-    for (const s of sources) {
-      if (!s.url || s.url.trim() === '') continue
-      const key = `${s.server}|${s.resolution ?? 'adaptive'}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      out.push(s)
-    }
-    return out
-  })()
-
-  if (downloadOptions.length === 0) {
-    return null
-  }
+  if (!hasAnySource) return null
 
   return (
     <div className="relative">
@@ -127,6 +176,17 @@ export function DownloadButton({
             </div>
 
             <div className="space-y-1">
+              {resolvingOptions && (
+                <div className="px-3 py-4 text-sm text-[var(--color-text-muted)] flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" />
+                  Resolving downloadable variants...
+                </div>
+              )}
+              {!resolvingOptions && downloadOptions.length === 0 && (
+                <div className="px-3 py-4 text-sm text-[var(--color-text-muted)]">
+                  No downloadable variants available for this episode.
+                </div>
+              )}
               {downloadOptions.map((source, index) => {
                 const label = qualityLabel(source)
                 // Default is preferred when:

@@ -433,6 +433,7 @@ pub fn run() {
       // Video Server
       commands::get_video_server_info,
       commands::get_local_video_url,
+      commands::get_local_file_size,
       commands::get_proxy_video_url,
       // System Stats
       commands::get_system_stats,

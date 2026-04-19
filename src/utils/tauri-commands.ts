@@ -1421,6 +1421,10 @@ export async function getLocalVideoUrl(filename: string): Promise<string> {
   return await invoke('get_local_video_url', { filename })
 }
 
+export async function getLocalFileSize(path: string): Promise<number> {
+  return await invoke('get_local_file_size', { path })
+}
+
 /**
  * Get proxy URL for a remote video
  * Uses the embedded HTTP server for proper streaming
