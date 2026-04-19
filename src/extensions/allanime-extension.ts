@@ -100,12 +100,24 @@ const extensionObject = {
         return [];
       }
 
+      // Default referrer demanded by AllAnime CDNs; individual link entries
+      // may override via their own headers.Referer field.
+      const defaultReferer = (data && data.headers && data.headers.Referer) || 'https://allmanga.to/';
+
       const out = [];
       for (const l of links) {
         if (!l || typeof l.link !== 'string' || l.link.length === 0) continue;
 
         const isHls = l.hls === true || l.link.toLowerCase().indexOf('.m3u8') !== -1;
-        const resolution = l.resolutionStr || 'Auto';
+        const linkReferer = (l.headers && l.headers.Referer) || defaultReferer;
+        const linkSubs = extensionObject.parseSubtitles(l.subtitles);
+
+        // Integer height preferred: link.resolution is a real number when
+        // present; otherwise parse "720p" out of resolutionStr. Adaptive
+        // HLS masters stay as undefined so pickSource treats them as
+        // adaptive rather than a fixed variant.
+        const resolutionInt = extensionObject.parseResolution(l.resolution, l.resolutionStr);
+        const qualityLabel = l.resolutionStr || (resolutionInt ? (resolutionInt + 'p') : 'Auto');
 
         // WixMP "repackager" URLs embed multiple resolutions in the path,
         // e.g. https://repackager.wixmp.com/.../,720p,1080p,480p,/mp4/file.mp4.urlset/...
@@ -114,17 +126,41 @@ const extensionObject = {
           const qualities = extensionObject.expandWixmpUrl(l.link);
           if (qualities.length > 0) {
             for (const q of qualities) {
-              out.push({ url: q.url, quality: q.quality, type: 'mp4', server: serverName });
+              const qRes = extensionObject.parseResolution(null, q.quality);
+              out.push({
+                url: q.url,
+                quality: q.quality,
+                type: 'mp4',
+                server: serverName,
+                resolution: qRes || undefined,
+                referrer: linkReferer,
+                subtitles: linkSubs
+              });
             }
             continue;
           }
         }
 
+        // Fast4speed direct URLs are always 1080p per AllAnime convention
+        // (matches anipy-cli's allanime_provider.py handling).
+        let effectiveRes = resolutionInt;
+        if (!effectiveRes && l.link.indexOf('tools.fast4speed.rsvp') !== -1) {
+          effectiveRes = 1080;
+        }
+
+        // HLS master playlists are adaptive (HLS.js discovers variants at
+        // playback time via hls.levels), so we intentionally leave
+        // resolution undefined. Non-HLS fixed URLs get a concrete int.
+        const finalRes = isHls ? undefined : (effectiveRes || undefined);
+
         out.push({
           url: l.link,
-          quality: resolution,
+          quality: qualityLabel,
           type: isHls ? 'hls' : 'mp4',
-          server: serverName
+          server: serverName,
+          resolution: finalRes,
+          referrer: linkReferer,
+          subtitles: linkSubs
         });
       }
       return out;
@@ -132,6 +168,40 @@ const extensionObject = {
       try { __log('[AllAnime] resolveClockJson threw: ' + (e && e.message ? e.message : String(e))); } catch (_) {}
       return [];
     }
+  },
+
+  // Parse a resolution value from AllAnime clock.json link object.
+  // Tries the numeric resolution field first, then strips the 'p' off
+  // resolutionStr ("720p" becomes 720). Returns 0 when unparseable so
+  // callers can treat 0 the same as missing (no concrete resolution).
+  parseResolution: function(numericField, strField) {
+    if (typeof numericField === 'number' && isFinite(numericField) && numericField > 0) {
+      return Math.round(numericField);
+    }
+    if (typeof strField === 'string' && strField.length > 0) {
+      const m = /^(\\d+)/.exec(strField);
+      if (m && m[1]) {
+        const n = parseInt(m[1], 10);
+        if (isFinite(n) && n > 0) return n;
+      }
+    }
+    return 0;
+  },
+
+  // Convert AllAnime clock.json subtitles array into the Subtitle shape
+  // Otaku expects. Empty array when missing/invalid.
+  parseSubtitles: function(rawSubs) {
+    if (!Array.isArray(rawSubs)) return [];
+    const out = [];
+    for (const s of rawSubs) {
+      if (!s || typeof s.src !== 'string' || s.src.length === 0) continue;
+      out.push({
+        url: s.src,
+        language: String(s.lang || s.label || 'unknown'),
+        label: String(s.label || s.lang || 'Subtitle')
+      });
+    }
+    return out;
   },
 
   // Expand a WixMP repackager URL into individual per-quality MP4 URLs.
@@ -719,11 +789,15 @@ const extensionObject = {
             ? decodedPath
             : 'https://allanime.day' + (decodedPath.startsWith('/') ? decodedPath : '/' + decodedPath);
 
+          const isDirectHls = directUrl.toLowerCase().indexOf('.m3u8') !== -1;
           sources.push({
             url: directUrl,
             quality: source.sourceName || 'Auto',
-            type: directUrl.toLowerCase().indexOf('.m3u8') !== -1 ? 'hls' : 'mp4',
-            server: source.sourceName || 'Server'
+            type: isDirectHls ? 'hls' : 'mp4',
+            server: source.sourceName || 'Server',
+            resolution: undefined,
+            referrer: 'https://allmanga.to/',
+            subtitles: []
           });
           continue;
         }
@@ -734,11 +808,15 @@ const extensionObject = {
             continue;
           }
 
+          const isPlainHls = source.sourceUrl.toLowerCase().indexOf('.m3u8') !== -1;
           sources.push({
             url: source.sourceUrl,
             quality: source.sourceName || 'Default',
-            type: source.sourceUrl.toLowerCase().indexOf('.m3u8') !== -1 ? 'hls' : 'mp4',
-            server: source.sourceName || 'Direct'
+            type: isPlainHls ? 'hls' : 'mp4',
+            server: source.sourceName || 'Direct',
+            resolution: undefined,
+            referrer: 'https://allmanga.to/',
+            subtitles: []
           });
           continue;
         }

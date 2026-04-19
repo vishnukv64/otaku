@@ -31,6 +31,13 @@ import { useSettingsStore } from '@/store/settingsStore'
 import { usePipStore } from '@/store/pipStore'
 import { notifySuccess } from '@/utils/notify'
 import { isMobile, isAndroid, isIOS } from '@/utils/platform'
+import {
+  pickSource,
+  resolutionsForServer,
+  parseQualityPreference,
+  isAdaptive,
+  type QualityPreference,
+} from '@/utils/pickSource'
 
 // Helper to create proxy URL for HLS streaming via embedded video server
 function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
@@ -176,8 +183,15 @@ export function VideoPlayer({
   const navigatePip = useNavigate()
 
   const [selectedServer, setSelectedServer] = useState(0)
-  const [selectedQuality, setSelectedQuality] = useState('Auto')
-  const [availableQualities, setAvailableQualities] = useState<string[]>(['Auto'])
+  // Quality preference as a structured value - 'Auto' / 'best' / 'worst' / number
+  // Persisted to playerStore.preferredQuality; parsed defensively to tolerate
+  // legacy string values ("720p", "1080p") written by pre-v1.3 builds.
+  const [qualityPref, setQualityPref] = useState<QualityPreference>(
+    parseQualityPreference(playerSettings.preferredQuality),
+  )
+  // HLS variant heights discovered at playback time (adaptive sources only).
+  // Empty for fixed-MP4 sources; those expose resolutions via sources[] instead.
+  const [hlsLevels, setHlsLevels] = useState<number[]>([])
   const [videoServer, setVideoServer] = useState<VideoServerUrls | null>(null)
 
   // New mock-matching UI state
@@ -210,6 +224,39 @@ export function VideoPlayer({
     [serverGroups, servers, selectedServer]
   )
 
+  // The concrete VideoSource actually fed to the video element. For adaptive
+  // HLS this is the master playlist (HLS.js picks levels internally); for
+  // fixed MP4 it is the exact variant matching qualityPref.
+  const currentSource = useMemo(() => {
+    const serverName = servers[selectedServer]
+    if (!serverName) return undefined
+    return pickSource(sources, serverName, qualityPref)
+  }, [sources, servers, selectedServer, qualityPref])
+
+  // Fixed-variant resolutions available on the currently selected server.
+  // UI uses this to render quality options for non-HLS sources; adaptive
+  // HLS servers rely on hlsLevels populated by the MANIFEST_PARSED event.
+  const fixedResolutions = useMemo(
+    () => (servers[selectedServer] ? resolutionsForServer(sources, servers[selectedServer]) : []),
+    [sources, servers, selectedServer],
+  )
+
+  // Unified quality options exposed to the UI. Label '' is the 'Auto' entry.
+  const availableQualities = useMemo(() => {
+    const out = ['Auto']
+    const seen = new Set<number>()
+    for (const h of hlsLevels) if (!seen.has(h)) { seen.add(h); out.push(`${h}p`) }
+    for (const h of fixedResolutions) if (!seen.has(h)) { seen.add(h); out.push(`${h}p`) }
+    return out
+  }, [hlsLevels, fixedResolutions])
+
+  // The display label for the currently-selected quality preference.
+  const selectedQuality = useMemo(() => {
+    if (qualityPref === 'Auto') return 'Auto'
+    if (qualityPref === 'best' || qualityPref === 'worst') return qualityPref
+    return `${qualityPref}p`
+  }, [qualityPref])
+
   // Load video server info on mount
   useEffect(() => {
     getVideoServerInfo()
@@ -222,7 +269,6 @@ export function VideoPlayer({
     const video = videoRef.current
     if (!video || sources.length === 0) return
 
-    const currentSource = currentServerSources[0]
     if (!currentSource || !currentSource.url) {
       // Defer setState to avoid synchronous setState in effect body
       const timeoutId = setTimeout(() => {
@@ -295,9 +341,35 @@ export function VideoPlayer({
           hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
             setLoading(false)
 
-            // Extract available qualities
-            const qualities = ['Auto', ...data.levels.map((level) => `${level.height}p`)]
-            setAvailableQualities(qualities)
+            // Capture HLS variant heights discovered at manifest parse time.
+            // These feed the quality dropdown alongside any fixed-variant
+            // resolutions from sources[] (dedup happens in the UI memo).
+            const heights = data.levels.map((level) => level.height).filter((h) => h > 0)
+            setHlsLevels(heights)
+
+            // Apply preferred quality now that levels are known. pickSource
+            // would have returned the HLS master (adaptive) for qualityPref
+            // 'Auto'; for an explicit numeric preference we need to tell
+            // HLS.js which variant to lock to.
+            if (typeof qualityPref === 'number') {
+              const idx = data.levels.findIndex((lvl) => lvl.height === qualityPref)
+              if (idx !== -1) hls.currentLevel = idx
+            } else if (qualityPref === 'best') {
+              const maxIdx = data.levels.reduce(
+                (best, lvl, i) => (lvl.height > data.levels[best].height ? i : best),
+                0,
+              )
+              hls.currentLevel = maxIdx
+            } else if (qualityPref === 'worst') {
+              const minIdx = data.levels.reduce(
+                (worst, lvl, i) => (lvl.height < data.levels[worst].height ? i : worst),
+                0,
+              )
+              hls.currentLevel = minIdx
+            } else {
+              // 'Auto' - let HLS.js ABR decide.
+              hls.currentLevel = -1
+            }
 
             if (autoPlay) {
               video.play().catch((e) => console.error('Autoplay failed:', e))
@@ -499,8 +571,10 @@ export function VideoPlayer({
         video.load()
       }
     }
+    // currentSource?.url as a primitive dep avoids re-running when the
+    // memoized object reference changes but the URL does not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServer, sources, videoServer])
+  }, [selectedServer, sources, videoServer, currentSource?.url])
 
   // Close MiniPlayer when VideoPlayer starts playing (user navigated to /watch manually)
   useEffect(() => {
@@ -1277,17 +1351,37 @@ export function VideoPlayer({
   }
 
   const changeQuality = (quality: string) => {
+    // Convert UI label back to a structured preference.
+    const next: QualityPreference =
+      quality === 'Auto' || quality === 'best' || quality === 'worst'
+        ? (quality as QualityPreference)
+        : parseQualityPreference(quality)
+
+    setQualityPref(next)
+    updatePlayerSettings({ preferredQuality: String(next) })
+
+    // For adaptive HLS, flip the HLS.js level in-session (no reload). For a
+    // fixed-variant change the currentSource memo will re-pick and the
+    // loadVideo effect will swap the URL - nothing more to do here.
     const hls = hlsRef.current
-    if (!hls) return
-
-    setSelectedQuality(quality)
-
-    if (quality === 'Auto') {
-      hls.currentLevel = -1 // Auto quality
-    } else {
-      const levelIndex = hls.levels.findIndex((level) => `${level.height}p` === quality)
-      if (levelIndex !== -1) {
-        hls.currentLevel = levelIndex
+    if (hls && currentSource && isAdaptive(currentSource)) {
+      if (next === 'Auto') {
+        hls.currentLevel = -1
+      } else if (typeof next === 'number') {
+        const idx = hls.levels.findIndex((lvl) => lvl.height === next)
+        if (idx !== -1) hls.currentLevel = idx
+      } else if (next === 'best') {
+        const maxIdx = hls.levels.reduce(
+          (best, lvl, i) => (lvl.height > hls.levels[best].height ? i : best),
+          0,
+        )
+        hls.currentLevel = maxIdx
+      } else if (next === 'worst') {
+        const minIdx = hls.levels.reduce(
+          (worst, lvl, i) => (lvl.height < hls.levels[worst].height ? i : worst),
+          0,
+        )
+        hls.currentLevel = minIdx
       }
     }
 

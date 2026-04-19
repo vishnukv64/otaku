@@ -113,6 +113,17 @@ export interface VideoSource {
   quality: string
   type: string // 'hls' | 'mp4' | 'dash'
   server: string // Server name (e.g., 'Wixmp', 'Default', etc.)
+  // Height in pixels (720, 1080, ...). Undefined for adaptive HLS master
+  // playlists where the variant ladder is discovered at playback time via
+  // HLS.js `levels[]`. This is the authoritative field for quality
+  // selection logic; `quality` above is display/legacy only.
+  resolution?: number
+  // Custom Referer required by some CDNs (wixmp, fast4speed). Attached to
+  // the HTTP request when fetching/downloading this source.
+  referrer?: string
+  // Per-source subtitle sidecars (not the top-level VideoSources.subtitles,
+  // which are provider-wide). Rust side mirrors this as Vec<Subtitle>.
+  subtitles?: Subtitle[]
 }
 
 export interface Subtitle {

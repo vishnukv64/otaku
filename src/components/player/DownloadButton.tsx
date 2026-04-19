@@ -9,6 +9,8 @@ import { Download, Check, X, Loader2, Star } from 'lucide-react'
 import type { VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
+import { isAdaptive, qualityLabel, parseQualityPreference } from '@/utils/pickSource'
+import { resolveAdaptiveToVariant } from '@/utils/hlsResolve'
 
 interface DownloadButtonProps {
   sources: VideoSource[]
@@ -34,13 +36,26 @@ export function DownloadButton({
   const [completed, setCompleted] = useState(false)
 
   const handleDownload = async (source: VideoSource) => {
+    const label = qualityLabel(source)
     setShowOptions(false)
-    setDownloading(source.quality)
+    setDownloading(label)
 
     try {
-      const filename = `${animeTitle.replace(/[^a-zA-Z0-9]/g, '_')}_EP${episodeNumber}_${source.quality}.otaku`
-      // Correct parameter order: mediaId, episodeId, episodeNumber, url, filename, customPath
-      await startDownload(mediaId, episodeId, episodeNumber, source.url, filename, customDownloadLocation || undefined)
+      // Adaptive HLS sources point at the master playlist - downloading that
+      // URL would save a text file, not the video. Resolve just-in-time to
+      // a concrete variant URL matching the user's preferred quality.
+      let downloadUrl = source.url
+      let resolvedLabel = label
+      if (isAdaptive(source)) {
+        const pref = parseQualityPreference(defaultDownloadQuality)
+        const resolved = await resolveAdaptiveToVariant(source, pref)
+        downloadUrl = resolved.url
+        if (resolved.resolution) resolvedLabel = `${resolved.resolution}p`
+      }
+
+      const safeTitle = animeTitle.replace(/[^a-zA-Z0-9]/g, '_')
+      const filename = `${safeTitle}_EP${episodeNumber}_${resolvedLabel}.otaku`
+      await startDownload(mediaId, episodeId, episodeNumber, downloadUrl, filename, customDownloadLocation || undefined)
 
       setCompleted(true)
       setTimeout(() => {
@@ -53,8 +68,21 @@ export function DownloadButton({
     }
   }
 
-  // Filter sources to get unique quality options
-  const downloadOptions = sources.filter((s) => s.url && s.url.trim() !== '')
+  // Filter sources to get unique quality options. Dedup by (server, resolution)
+  // so the user sees one entry per distinct quality per provider rather than
+  // duplicates from clock.json returning the same variant twice.
+  const downloadOptions = (() => {
+    const seen = new Set<string>()
+    const out: VideoSource[] = []
+    for (const s of sources) {
+      if (!s.url || s.url.trim() === '') continue
+      const key = `${s.server}|${s.resolution ?? 'adaptive'}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(s)
+    }
+    return out
+  })()
 
   if (downloadOptions.length === 0) {
     return null
@@ -100,11 +128,15 @@ export function DownloadButton({
 
             <div className="space-y-1">
               {downloadOptions.map((source, index) => {
-                // Check if this matches the default quality (or auto = first available)
+                const label = qualityLabel(source)
+                // Default is preferred when:
+                //  - setting is 'auto' and source has no concrete resolution (adaptive), OR
+                //  - setting matches this source's resolution (e.g. '1080p' === `${resolution}p`).
                 const isDefault =
                   defaultDownloadQuality === 'auto'
-                    ? index === 0
-                    : source.quality.toLowerCase().includes(defaultDownloadQuality);
+                    ? (source.resolution === undefined && index === 0) ||
+                      (source.resolution !== undefined && index === 0)
+                    : label.toLowerCase() === defaultDownloadQuality;
 
                 return (
                   <button
@@ -116,7 +148,7 @@ export function DownloadButton({
                   >
                     <div>
                       <div className="font-medium flex items-center gap-2">
-                        {source.quality}
+                        {label}
                         {isDefault && (
                           <Star size={12} className="text-[var(--color-accent-primary)]" fill="currentColor" />
                         )}

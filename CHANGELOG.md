@@ -5,6 +5,33 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-19
+
+### Added
+- **Multi-resolution streaming & downloads** — Videos can now be watched and downloaded at specific resolutions (360p / 480p / 720p / 1080p) rather than a single opaque stream per provider. Modelled on anipy-cli's proven approach: each `VideoSource` carries an explicit `resolution` (height in pixels), and a shared selector picks the best match with graceful fallback to highest available.
+- **`resolution`, `referrer`, `subtitles` fields on `VideoSource`** — New optional fields on both TS and Rust sides. `resolution === undefined` on HLS master playlists signals "adaptive" (HLS.js handles variant switching); fixed MP4 sources carry a concrete integer height.
+- **WixMP multi-quality expansion** — `repackager.wixmp.com` URLs with `,480p,720p,1080p,` path segments are now split into distinct per-resolution MP4 entries, each selectable independently.
+- **Fast4speed provider default** — Sources under `tools.fast4speed.rsvp` default to 1080p resolution (matches anipy-cli's convention).
+- **Subtitle metadata capture** — Per-source subtitle tracks from AllAnime's `clock.json` (`links[].subtitles`) are now parsed and attached to each `VideoSource`. Full playback/download subtitle UX deferred.
+- **Custom referrer plumbing** — Per-source `Referer` header requirement (needed by some CDNs) is captured at the extension layer and available to downstream requests.
+- **`pickSource` selector utility** (`src/utils/pickSource.ts`) — Single source of truth for quality selection. Semantics mirror anipy-cli's `Anime.get_video`: exact match → fall back to best available. Reused by player load + download pipeline.
+- **`resolveAdaptiveToVariant` JIT resolver** (`src/utils/hlsResolve.ts`) — Fetches an HLS master playlist, parses `#EXT-X-STREAM-INF` variants, and returns the concrete variant URL for a chosen resolution. Used when downloading adaptive HLS sources so the saved file is video, not a `.m3u8` text file.
+
+### Changed
+- **Player quality selector** — Quality dropdown now unifies HLS variants (discovered at manifest parse time) and fixed MP4 resolutions (populated from sources) into a single deduped list. The player reads `playerStore.preferredQuality` on load, applies it via `pickSource`, and locks the HLS variant when preference is non-Auto.
+- **Preferred quality persistence** — `playerStore.preferredQuality` is now actually applied on episode load (previously ignored; player always started in 'Auto'). Legacy string values (`"720p"`, `"Auto"`) continue to work via defensive parsing.
+- **Download default matching** — Download options dialog highlights the default-quality entry via exact `${resolution}p` matching instead of fragile substring checks.
+- **AllAnime extension `getSources`** — Now populates `resolution`, `referrer`, and per-source `subtitles` on every emitted source, including clock.json, direct-hex, and plain HTTP fallback paths.
+
+### Fixed
+- **HLS master playlist download bug** — Downloading an adaptive HLS source previously saved the `.m3u8` manifest text file (≈few KB), not the actual video. Now resolves to a concrete variant URL just-in-time before invoking the Rust download pipeline.
+- **Quality selection with HLS + non-HLS mixed sources** — Switching between a server with adaptive HLS and one with fixed MP4 variants no longer loses the user's resolution preference.
+- **Duplicate sources in download menu** — Dedup by `(server, resolution)` so clock.json returning the same variant twice no longer shows up as two identical options.
+
+### Maintenance
+- Shared quality/resolution parsing via `parseQualityPreference` so every call site migrates old string values the same way.
+- No new npm/cargo dependencies — HLS master parsing is a minimal text-level scan (no full m3u8 library required).
+
 ## [1.2.1] - 2026-04-19
 
 ### Fixed

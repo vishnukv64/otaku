@@ -161,7 +161,21 @@ pub struct MediaDetails {
     pub broadcast_interval: Option<u64>,
 }
 
-/// Video quality
+/// A single playable video source.
+///
+/// `resolution` is the authoritative field for quality selection:
+///   * `Some(720)` = concrete fixed variant (MP4), quality pickable.
+///   * `None`      = adaptive HLS master playlist; variant ladder is
+///                   discovered at playback time by HLS.js `levels[]`.
+///
+/// `quality` is a human-readable display label only — do NOT use it for
+/// selection logic. New callers should read `resolution` instead.
+///
+/// `referrer` is required by some CDNs (wixmp, fast4speed); attach it as
+/// the `Referer` HTTP header when fetching/downloading this source.
+///
+/// `subtitles` are per-source sidecars (distinct from provider-wide
+/// `VideoSources.subtitles`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoSource {
     pub url: String,
@@ -169,6 +183,12 @@ pub struct VideoSource {
     #[serde(rename = "type")]
     pub source_type: String, // "hls", "mp4", "dash"
     pub server: String, // Server name (e.g., 'Wixmp', 'Default', etc.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referrer: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitles: Vec<Subtitle>,
 }
 
 /// Subtitle track
