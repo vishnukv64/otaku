@@ -7,6 +7,7 @@ mod extensions;
 mod jikan;
 mod media;
 mod notifications;
+mod request_headers;
 mod release_checker;
 mod status_normalizer;
 mod trackers;

@@ -21,16 +21,13 @@ import {
   getReadingProgress,
   isChapterDownloaded,
   getDownloadedChapterImages,
-  resolveAllanimeId,
-  loadExtension,
-  searchManga,
   type MediaEntry,
   type EpisodeEntry,
 } from '@/utils/tauri-commands'
-import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { MangaDetails, ChapterImages } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
+import { resolveJikanToMangakakalot } from '@/utils/manga-extensions'
 
 interface ReadSearch {
   extensionId: string
@@ -55,7 +52,7 @@ function ReadPage() {
   const { extensionId, mangaId, chapterId: initialChapterId, malId } = Route.useSearch()
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
 
-  // Use MAL ID for progress/library tracking when available, otherwise fall back to AllAnime ID
+  // Use the original route manga ID for tracking/history compatibility.
   const trackingId = malId || mangaId
 
   // Debug logging for ContinueReading navigation issues
@@ -71,95 +68,62 @@ function ReadPage() {
   const [readChapters, setReadChapters] = useState<Set<string>>(new Set())
   const shownResumeToastRef = useRef<string | null>(null)
 
-  // AllAnime ID resolution for Jikan (MAL ID) entries
-  // When malId is provided and equals mangaId, we need to resolve the AllAnime ID
-  const needsResolution = malId !== undefined && malId === mangaId
+  const needsResolution = /^\d+$/.test(mangaId)
   const [resolvedMangaId, setResolvedMangaId] = useState<string | null>(needsResolution ? null : mangaId)
-  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
 
-  // Load AllAnime extension when resolution is needed
+  // Resolve old numeric manga IDs into Mangakakalot slugs using cached title / current title.
   useEffect(() => {
     if (!needsResolution) {
       setResolvedMangaId(mangaId)
       return
     }
 
-    loadExtension(ALLANIME_MANGA_EXTENSION)
-      .then(meta => setAllanimeExtId(meta.id))
-      .catch(err => {
-        console.error('[Read] Failed to load AllAnime extension:', err)
-        setError('Failed to load manga reader extension')
-      })
-  }, [needsResolution, mangaId])
-
-  // Resolve AllAnime ID from MAL ID (bridge + fallback search)
-  useEffect(() => {
-    if (!needsResolution || !allanimeExtId) return
+    if (!extensionId) {
+      setError('Missing extension ID or manga ID')
+      setLoading(false)
+      return
+    }
 
     const resolve = async () => {
       try {
-        // Try cached media details to get the title for bridge resolution
         let title = ''
-        let englishTitle: string | undefined
-        let year: number | undefined
 
         try {
           const cached = await getCachedMediaDetails(malId!)
           title = cached?.media.title || ''
-          englishTitle = cached?.media.english_name ?? undefined
-          year = cached?.media.year ?? undefined
         } catch (cacheErr) {
-          console.warn('[Read] Cache lookup failed, will try bridge with MAL ID only:', cacheErr)
+          console.warn('[Read] Cache lookup failed, will try title search:', cacheErr)
         }
 
-        if (title) {
-          // Step 1: Bridge resolution (SQLite cache + GraphQL search)
-          const bridgeId = await resolveAllanimeId(title, 'manga', malId!, englishTitle, year)
-          if (bridgeId) {
-            console.log('[Read] Resolved AllAnime ID via bridge:', bridgeId)
-            setResolvedMangaId(bridgeId)
-            return
-          }
-
-          // Step 2: Fallback — search AllAnime directly
-          const searchResults = await searchManga(allanimeExtId, title, 1, true)
-          if (searchResults.results.length > 0) {
-            console.log('[Read] Resolved AllAnime ID via search:', searchResults.results[0].id)
-            setResolvedMangaId(searchResults.results[0].id)
-            return
-          }
-        }
-
-        // Step 3: If no cached title, try bridge with just the MAL ID (it may have a cached mapping)
         if (!title) {
-          const bridgeId = await resolveAllanimeId('', 'manga', malId!, undefined, undefined)
-          if (bridgeId) {
-            console.log('[Read] Resolved AllAnime ID via bridge (no title):', bridgeId)
-            setResolvedMangaId(bridgeId)
-            return
-          }
+          title = mangaId
         }
 
-        console.error('[Read] Could not resolve AllAnime ID for MAL ID:', malId)
+        const resolved = await resolveJikanToMangakakalot(extensionId, title)
+        if (resolved) {
+          setResolvedMangaId(resolved.id)
+          return
+        }
+
+        console.error('[Read] Could not resolve Mangakakalot ID for legacy manga ID:', mangaId)
         setError('Could not find this manga for reading. Try opening it from the manga page.')
         setLoading(false)
       } catch (err) {
-        console.error('[Read] AllAnime ID resolution failed:', err)
+        console.error('[Read] Mangakakalot ID resolution failed:', err)
         setError('Failed to resolve manga source for reading')
         setLoading(false)
       }
     }
 
     resolve()
-  }, [needsResolution, allanimeExtId, malId])
+  }, [needsResolution, extensionId, malId, mangaId])
 
-  // Effective extension ID: use AllAnime extension for Jikan entries, otherwise the passed extensionId
-  const effectiveExtId = needsResolution ? (allanimeExtId || extensionId) : extensionId
+  const effectiveExtId = extensionId
 
   // Load manga details
   useEffect(() => {
     if (!effectiveExtId || !resolvedMangaId) {
-      if (!needsResolution && (!extensionId || !mangaId)) {
+      if (!extensionId || !mangaId) {
         setError('Missing extension ID or manga ID')
       }
       return
@@ -197,7 +161,7 @@ function ReadPage() {
 
           const mediaEntry: MediaEntry = {
             id: trackingId,
-            extension_id: malId ? 'jikan' : extensionId,
+            extension_id: extensionId,
             title: result.title,
             english_name: result.english_name,
             native_name: result.native_name,
@@ -228,7 +192,7 @@ function ReadPage() {
             const chapterEntries: EpisodeEntry[] = result.chapters.map(ch => ({
               id: ch.id,
               media_id: trackingId,
-              extension_id: malId ? 'jikan' : extensionId,
+              extension_id: extensionId,
               number: ch.number,
               title: ch.title,
               description: undefined,

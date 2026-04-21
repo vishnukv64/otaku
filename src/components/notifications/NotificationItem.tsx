@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X, Info } from 'lucide-react'
 import type { Notification } from '@/store/notificationStore'
 import { getNotifCategory } from './NotificationCenter'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
 
 interface NotificationItemProps {
   notification: Notification
@@ -62,6 +63,7 @@ export function NotificationItem({
   const category = getNotifCategory(notification)
   const badge = getBadgeConfig(category)
   const thumbnail = coverUrl || (notification.metadata?.thumbnail || notification.metadata?.image) as string | undefined
+  const { src: thumbnailSrc } = useProxiedImage(thumbnail || '')
   const isUnread = !notification.read
   const isRead = notification.read
 
@@ -77,9 +79,9 @@ export function NotificationItem({
       onClick={handleClick}
     >
       {/* Thumbnail or icon */}
-      {thumbnail && !imgError ? (
+      {thumbnailSrc && !imgError ? (
         <img
-          src={thumbnail}
+          src={thumbnailSrc}
           alt=""
           className="w-[38px] h-[52px] rounded-[var(--radius-sm)] object-cover bg-white/5 flex-shrink-0"
           onError={() => setImgError(true)}

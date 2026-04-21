@@ -1658,6 +1658,7 @@ export async function listChapterDownloads(
  */
 export interface DownloadedMangaWithMedia {
   media_id: string
+  extension_id: string
   title: string
   cover_url?: string
   chapter_count: number

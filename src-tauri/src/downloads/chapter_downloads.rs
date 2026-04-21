@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use tokio::fs;
 use tauri::{AppHandle, Emitter};
 use crate::notifications;
+use crate::request_headers::build_image_request;
 
 /// Event name for chapter download progress updates
 pub const CHAPTER_DOWNLOAD_PROGRESS_EVENT: &str = "chapter-download-progress";
@@ -286,9 +287,7 @@ pub async fn start_chapter_download(
 async fn download_image(url: &str, path: &PathBuf) -> Result<()> {
     use std::io::Read;
 
-    let request = ureq::get(url)
-        .set("Referer", "https://allmanga.to")
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0");
+    let request = build_image_request(url).map_err(anyhow::Error::msg)?;
 
     let response = request.call()?;
 
@@ -624,6 +623,7 @@ pub async fn list_all_chapter_downloads(pool: &SqlitePool) -> Result<Vec<Chapter
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadedManga {
     pub media_id: String,
+    pub extension_id: String,
     pub title: String,
     pub cover_url: Option<String>,
     pub chapter_count: i32,
@@ -639,6 +639,7 @@ pub async fn get_all_downloaded_manga(pool: &SqlitePool) -> Result<Vec<Downloade
         r#"
         SELECT
             cd.media_id,
+            COALESCE(m.extension_id, 'com.mangakakalot.source') as extension_id,
             m.title,
             m.cover_url,
             COUNT(*) as chapter_count,
@@ -661,6 +662,7 @@ pub async fn get_all_downloaded_manga(pool: &SqlitePool) -> Result<Vec<Downloade
         use sqlx::Row;
 
         let media_id: String = row.try_get("media_id")?;
+        let extension_id: String = row.try_get("extension_id")?;
         let title: Option<String> = row.try_get("title").ok();
         let cover_url: Option<String> = row.try_get("cover_url").ok().flatten();
         let chapter_count: i32 = row.try_get("chapter_count")?;
@@ -692,6 +694,7 @@ pub async fn get_all_downloaded_manga(pool: &SqlitePool) -> Result<Vec<Downloade
 
         results.push(DownloadedManga {
             media_id: media_id.clone(),
+            extension_id,
             title: title.unwrap_or_else(|| media_id.replace('_', " ")),
             cover_url,
             chapter_count,

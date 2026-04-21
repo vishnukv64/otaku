@@ -14,20 +14,46 @@ import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MangaDetailModal } from './MangaDetailModal'
 import type { SearchResult } from '@/types/extension'
 import { notifySuccess, notifyError } from '@/utils/notify'
+import { loadBundledMangaExtensions, resolveMangaExtensionId, type MangaExtensionIds } from '@/utils/manga-extensions'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
 
-interface ContinueReadingSectionProps {
+interface SelectedManga {
+  manga: SearchResult
   extensionId: string
 }
 
-export function ContinueReadingSection({ extensionId }: ContinueReadingSectionProps) {
+function ContinueReadingCardImage({ url, title }: { url?: string; title: string }) {
+  const { src } = useProxiedImage(url || '')
+
+  if (!src) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <BookOpen size={24} className="text-[var(--color-text-dim)]" />
+      </div>
+    )
+  }
+
+  return <img src={src} alt={title} className="w-full h-full object-cover" loading="lazy" />
+}
+
+export function ContinueReadingSection() {
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [continueReading, setContinueReading] = useState<ContinueReadingEntry[]>([])
+  const [extensionIds, setExtensionIds] = useState<Partial<MangaExtensionIds>>({})
   const [loading, setLoading] = useState(true)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
-  const [selectedManga, setSelectedManga] = useState<SearchResult | null>(null)
+  const [selectedManga, setSelectedManga] = useState<SelectedManga | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    loadBundledMangaExtensions()
+      .then(setExtensionIds)
+      .catch((error) => {
+        console.error('Failed to load manga extensions:', error)
+      })
+  }, [])
 
   useEffect(() => {
     const loadContinueReading = async () => {
@@ -38,7 +64,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
           results,
           entry => entry.media.genres,
           nsfwFilter,
-          entry => entry.media.title
+          entry => `${entry.media.title || ''} ${entry.media.description || ''}`
         )
         setContinueReading(filtered)
       } catch (error) {
@@ -89,11 +115,17 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
 
   const handleContinueReading = (entry: ContinueReadingEntry) => {
     const isJikanEntry = entry.media.extension_id === 'jikan'
+    const effectiveExtensionId = resolveMangaExtensionId(entry.media.extension_id, extensionIds)
+
+    if (!effectiveExtensionId) {
+      notifyError('Source unavailable', 'The manga source is still loading. Try again in a moment.')
+      return
+    }
 
     navigate({
       to: '/read',
       search: {
-        extensionId,
+        extensionId: effectiveExtensionId,
         mangaId: entry.media.id,
         chapterId: entry.chapter_id,
         ...(isJikanEntry ? { malId: entry.media.id } : {}),
@@ -101,12 +133,27 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
     })
   }
 
-  const handleRemove = async (e: React.MouseEvent, mediaId: string, title: string) => {
+  const handleRemove = async (
+    e: React.MouseEvent,
+    mediaId: string,
+    title: string,
+    coverUrl?: string
+  ) => {
     e.stopPropagation() // Prevent card click
     try {
       await removeFromContinueReadingManga(mediaId)
       setContinueReading(prev => prev.filter(entry => entry.media.id !== mediaId))
-      notifySuccess('Removed', `Removed "${title}" from Continue Reading`)
+      notifySuccess('Removed', `Removed "${title}" from Continue Reading`, {
+        metadata: coverUrl
+          ? {
+              media_id: mediaId,
+              thumbnail: coverUrl,
+              image: coverUrl,
+            }
+          : {
+              media_id: mediaId,
+            },
+      })
     } catch (error) {
       console.error('Failed to remove from continue reading:', error)
       notifyError('Remove Failed', 'Failed to remove from Continue Reading')
@@ -201,12 +248,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                     {/* 16:9 Thumbnail */}
                     <div className="relative w-full h-[135px] bg-[var(--color-panel)]">
                       {media.cover_url ? (
-                        <img
-                          src={media.cover_url}
-                          alt={media.title}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
+                        <ContinueReadingCardImage url={media.cover_url} title={media.title} />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <BookOpen size={24} className="text-[var(--color-text-dim)]" />
@@ -249,7 +291,12 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    setSelectedManga(media)
+                    const effectiveExtensionId = resolveMangaExtensionId(entry.media.extension_id, extensionIds)
+                    if (!effectiveExtensionId) {
+                      notifyError('Source unavailable', 'The manga source is still loading. Try again in a moment.')
+                      return
+                    }
+                    setSelectedManga({ manga: media, extensionId: effectiveExtensionId })
                   }}
                   className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                   title="View Details"
@@ -258,7 +305,7 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
                 </button>
                 {/* Remove button */}
                 <button
-                  onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
+                  onClick={(e) => handleRemove(e, entry.media.id, entry.media.title, entry.media.cover_url)}
                   className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
                   title="Remove from Continue Reading"
                 >
@@ -273,8 +320,8 @@ export function ContinueReadingSection({ extensionId }: ContinueReadingSectionPr
       {/* Manga Detail Modal */}
       {selectedManga && (
         <MangaDetailModal
-          manga={selectedManga}
-          extensionId={extensionId}
+          manga={selectedManga.manga}
+          extensionId={selectedManga.extensionId}
           onClose={() => setSelectedManga(null)}
         />
       )}

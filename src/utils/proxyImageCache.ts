@@ -15,6 +15,19 @@
 
 import { proxyImageRequest } from '@/utils/tauri-commands'
 
+function guessImageMimeType(url: string): string {
+  const clean = url.split('?')[0].split('#')[0].toLowerCase()
+
+  if (clean.endsWith('.webp')) return 'image/webp'
+  if (clean.endsWith('.png')) return 'image/png'
+  if (clean.endsWith('.gif')) return 'image/gif'
+  if (clean.endsWith('.avif')) return 'image/avif'
+  if (clean.endsWith('.svg')) return 'image/svg+xml'
+  if (clean.endsWith('.jpeg') || clean.endsWith('.jpg')) return 'image/jpeg'
+
+  return 'application/octet-stream'
+}
+
 /** url → blob URL */
 const cache = new Map<string, string>()
 
@@ -58,7 +71,7 @@ export async function preloadImage(url: string): Promise<string> {
       console.log(`[preload] fetching ${url.slice(-40)} (active: ${activeCount}/${MAX_CONCURRENT}, queued: ${queue.length})`)
       proxyImageRequest(url)
         .then((buffer) => {
-          const blob = new Blob([buffer])
+          const blob = new Blob([buffer], { type: guessImageMimeType(url) })
           const blobUrl = URL.createObjectURL(blob)
           cache.set(url, blobUrl)
           inflight.delete(url)

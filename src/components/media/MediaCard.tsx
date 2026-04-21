@@ -13,6 +13,7 @@ import type { MediaStatus } from '@/contexts/MediaStatusContext'
 import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusContext'
 import { Heart, BookmarkCheck, Bell } from 'lucide-react'
 import { useReleaseState } from '@/hooks/useReleaseStates'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -55,6 +56,8 @@ interface MediaCardProps {
 }
 
 export function MediaCard({ media, onClick, progress, status, rank }: MediaCardProps) {
+  const { src: coverSrc } = useProxiedImage(media.cover_url || '')
+
   // Use unified release state hook (V2) for NEW badge
   // Only fetch release state if user is tracking/watching this media
   const shouldCheckRelease = !progress && (status?.isTracked || status?.isWatching) && isAiring(media.status)
@@ -97,9 +100,9 @@ export function MediaCard({ media, onClick, progress, status, rank }: MediaCardP
           className="relative w-full aspect-[2/3] rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-card)] transition-shadow duration-300 group-hover/card:shadow-[0_16px_60px_rgba(0,0,0,0.6),0_0_30px_rgba(229,9,20,0.25),0_0_0_1px_rgba(255,255,255,0.16)]"
         >
           {/* Cover Image */}
-          {media.cover_url ? (
+          {coverSrc ? (
             <img
-              src={media.cover_url}
+              src={coverSrc}
               alt={media.title}
               className="w-full h-full object-cover"
               loading="lazy"

@@ -233,9 +233,7 @@ function HomeScreen() {
         <ContinueWatchingSection extensionId={allanimeExtensionId || undefined} />
 
         {/* Continue Reading Section */}
-        {allanimeExtensionId && (
-          <ContinueReadingSection extensionId={allanimeExtensionId} />
-        )}
+        <ContinueReadingSection />
 
         {/* Personalized Recommendations */}
         <RecommendationCarousel

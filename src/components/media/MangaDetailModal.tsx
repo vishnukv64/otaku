@@ -25,10 +25,6 @@ import {
 } from 'lucide-react'
 import {
   getMangaDetails,
-  jikanMangaDetails,
-  resolveAllanimeId,
-  loadExtension,
-  searchManga,
   saveMediaDetails,
   addToLibrary,
   removeFromLibrary,
@@ -47,36 +43,21 @@ import {
   type MediaEntry,
   type LibraryStatus,
   type LibraryTag,
-  jikanMangaCharacters,
-  jikanMangaStatistics,
-  jikanMangaReviews,
-  jikanMangaPictures,
-  jikanMangaNews,
-  jikanMangaRecommendations,
-  type JikanCharacterEntry,
-  type JikanStatistics,
-  type JikanReview,
-  type JikanPicture,
-  type JikanNews,
 } from '@/utils/tauri-commands'
-import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { savePendingReturn } from '@/utils/return-media'
+import { resolveJikanToMangakakalot } from '@/utils/manga-extensions'
 import { TagSelector, TagChips } from '@/components/library'
 import { Description } from '@/components/ui/Description'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { useChapterDownloadEvents } from '@/hooks/useChapterDownloadEvents'
-import { hasNsfwGenres } from '@/utils/nsfw-filter'
+import { useProxiedImage } from '@/hooks/useProxiedImage'
+import { isNsfwContent } from '@/utils/nsfw-filter'
 import type { SearchResult, MangaDetails, Chapter } from '@/types/extension'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
 import { BottomSheet } from '@/components/ui/BottomSheet'
 import { isMobile } from '@/utils/platform'
 import { DetailTabBar } from './DetailTabBar'
-import { CharacterGrid } from './CharacterGrid'
-import { ScoreDistribution } from './ScoreDistribution'
-import { ReviewList } from './ReviewCard'
-import { GalleryGrid } from './GalleryGrid'
-import { NewsList } from './NewsCard'
 import { LibraryDropdown } from './LibraryDropdown'
 
 /** MAL IDs are purely numeric; AllAnime IDs contain letters/hyphens */
@@ -142,30 +123,16 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const [chapterReadSet, setChapterReadSet] = useState<Set<string>>(new Set())
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
-  // Enrichment tab state
   const [activeTab, setActiveTab] = useState('overview')
-  const [characters, setCharacters] = useState<JikanCharacterEntry[] | null>(null)
-  const [charactersLoading, setCharactersLoading] = useState(false)
-  const [statistics, setStatistics] = useState<JikanStatistics | null>(null)
-  const [statisticsLoading, setStatisticsLoading] = useState(false)
-  const [mangaReviews, setMangaReviews] = useState<JikanReview[] | null>(null)
-  const [reviewsLoading, setReviewsLoading] = useState(false)
-  const [mangaPictures, setMangaPictures] = useState<JikanPicture[] | null>(null)
-  const [picturesLoading, setPicturesLoading] = useState(false)
-  const [mangaNews, setMangaNews] = useState<JikanNews[] | null>(null)
-  const [newsLoading, setNewsLoading] = useState(false)
-  const [recommendations, setRecommendations] = useState<SearchResult[] | null>(null)
-  const [recommendationsLoading, setRecommendationsLoading] = useState(false)
-  const loadedTabsRef = useRef<Set<string>>(new Set())
 
-  // Hybrid Jikan + AllAnime state
-  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
-  const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
-  const [allanimeChapters, setAllanimeChapters] = useState<Chapter[]>([])
+  const [resolvedMangaId, setResolvedMangaId] = useState<string | null>(manga?.id || null)
   const [chaptersLoading, setChaptersLoading] = useState(false)
+  const coverImageUrl = details?.cover_url || manga?.cover_url || ''
+  const { src: bannerSrc } = useProxiedImage(coverImageUrl)
 
-  // Determine if this manga was sourced from Jikan (MAL ID) vs AllAnime
-  const malIdMode = manga ? isMalId(manga.id) : false
+  // Backward compatibility: old manga entries may still use numeric MAL-era IDs.
+  // Resolve those to a Mangakakalot slug using the stored title.
+  const needsLegacyIdResolution = manga ? isMalId(manga.id) : false
 
   // Tag state
   const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
@@ -191,37 +158,60 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  // Lazy-load AllAnime extension (needed for chapter fetching in MAL ID flow)
-  useEffect(() => {
-    loadExtension(ALLANIME_MANGA_EXTENSION)
-      .then((meta) => setAllanimeExtId(meta.id))
-      .catch(() => {})
-  }, [])
-
-  // Load manga details — branches on MAL ID vs AllAnime ID
   useEffect(() => {
     if (!manga) return
 
+    if (!needsLegacyIdResolution) {
+      setResolvedMangaId(manga.id)
+      return
+    }
+
+    if (!extensionId) {
+      setResolvedMangaId(null)
+      return
+    }
+
+    const resolveLegacyId = async () => {
+      setChaptersLoading(true)
+      try {
+        const resolved = await resolveJikanToMangakakalot(extensionId, manga.title)
+        setResolvedMangaId(resolved?.id || null)
+      } catch {
+        setResolvedMangaId(null)
+      } finally {
+        setChaptersLoading(false)
+      }
+    }
+
+    resolveLegacyId()
+  }, [manga, extensionId, needsLegacyIdResolution])
+
+  // Load manga details - Mangakakalot only
+  useEffect(() => {
+    if (!manga) return
+
+    setActiveTab('chapters')
+
     const loadDetails = async () => {
+      if (!extensionId || !resolvedMangaId) {
+        setError('Could not find this manga in Mangakakalot')
+        setLoading(false)
+        return
+      }
+
       setLoading(true)
       setError(null)
 
       try {
-        let result: MangaDetails
-
-        if (isMalId(manga.id)) {
-          // MAL ID flow: use Jikan for metadata
-          result = await jikanMangaDetails(parseInt(manga.id))
-        } else {
-          // AllAnime ID flow: existing behavior
-          result = await getMangaDetails(extensionId, manga.id, !nsfwFilter)
-        }
+        const result: MangaDetails = await getMangaDetails(extensionId, resolvedMangaId, !nsfwFilter)
 
         setDetails(result)
 
         // Check if content is NSFW and should be blocked
         if (nsfwFilter) {
-          setIsNsfwBlocked(hasNsfwGenres(result.genres))
+          setIsNsfwBlocked(
+            isNsfwContent(result.genres, `${result.title || ''} ${result.description || ''}`)
+          )
         } else {
           setIsNsfwBlocked(false)
         }
@@ -230,7 +220,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         try {
           const mediaEntry: MediaEntry = {
             id: manga.id,
-            extension_id: isMalId(manga.id) ? 'jikan' : extensionId,
+            extension_id: extensionId,
             title: result.title,
             english_name: result.english_name,
             native_name: result.native_name,
@@ -310,93 +300,10 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     }
 
     loadDetails()
-  }, [manga, extensionId, nsfwFilter, getStatus])
+  }, [manga, extensionId, resolvedMangaId, nsfwFilter, getStatus])
 
-  // For MAL-sourced manga: resolve AllAnime ID with 2-step fallback
-  useEffect(() => {
-    if (!details || !manga || !isMalId(manga.id) || !allanimeExtId) return
-
-    const resolveId = async () => {
-      setChaptersLoading(true)
-      try {
-        // Step 1: Try bridge resolution (cached mappings)
-        const bridgeId = await resolveAllanimeId(
-          details.title,
-          'manga',
-          manga.id,
-          details.english_name,
-          details.year,
-          details.title_synonyms,
-          details.type,
-          details.totalChapters,
-          details.native_name
-        )
-        if (bridgeId) {
-          setAllanimeShowId(bridgeId)
-          return
-        }
-
-        // Step 2: Fallback — search AllAnime directly by title
-        const searchResults = await searchManga(allanimeExtId, details.title, 1, true)
-        if (searchResults.results.length > 0) {
-          setAllanimeShowId(searchResults.results[0].id)
-          return
-        }
-      } catch {
-        // Both methods failed — chapters won't be available
-      } finally {
-        setChaptersLoading(false)
-      }
-    }
-    resolveId()
-  }, [details, manga, allanimeExtId])
-
-  // Fetch AllAnime chapters after ID resolution (MAL flow only)
-  useEffect(() => {
-    if (!allanimeShowId || !allanimeExtId || !manga || !isMalId(manga.id)) return
-
-    const fetchChapters = async () => {
-      setChaptersLoading(true)
-      try {
-        const allanimeDetails = await getMangaDetails(allanimeExtId, allanimeShowId, true)
-        if (allanimeDetails.chapters) {
-          allanimeDetails.chapters.sort((a, b) => a.number - b.number)
-          setAllanimeChapters(allanimeDetails.chapters)
-        }
-      } catch (err) {
-        console.error('[MangaDetailModal] Failed to fetch AllAnime chapters:', err)
-      } finally {
-        setChaptersLoading(false)
-      }
-    }
-    fetchChapters()
-  }, [allanimeShowId, allanimeExtId, manga])
-
-  // Backward compat: check reading progress under AllAnime ID if not found under MAL ID
-  useEffect(() => {
-    if (!allanimeShowId || !manga || !isMalId(manga.id) || readingProgress) return
-
-    const checkLegacyProgress = async () => {
-      try {
-        const progress = await getLatestReadingProgressForMedia(allanimeShowId)
-        if (progress) {
-          setReadingProgress({
-            chapterId: progress.chapter_id,
-            chapterNumber: progress.chapter_number,
-            page: progress.current_page,
-          })
-        }
-      } catch {
-        // Ignore
-      }
-    }
-    checkLegacyProgress()
-  }, [allanimeShowId, manga, readingProgress])
-
-  // Effective chapters: AllAnime chapters for MAL flow, details.chapters for AllAnime flow
-  const effectiveChapters = malIdMode ? allanimeChapters : details?.chapters || []
-  // Effective extension ID for content operations (reading, downloads)
-  const effectiveExtId = malIdMode ? allanimeExtId || extensionId : extensionId
+  const effectiveChapters = details?.chapters || []
+  const effectiveExtId = extensionId
 
   // Auto-navigate to page containing latest read chapter
   useEffect(() => {
@@ -431,68 +338,8 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
 
   // Reset enrichment state when manga changes
   useEffect(() => {
-    setActiveTab('overview')
-    setCharacters(null)
-    setStatistics(null)
-    setMangaReviews(null)
-    setMangaPictures(null)
-    setMangaNews(null)
-    setRecommendations(null)
-    loadedTabsRef.current = new Set()
+    setActiveTab('chapters')
   }, [manga?.id])
-
-  // Lazy-load enrichment data when tab changes
-  useEffect(() => {
-    if (!manga || !details || !malIdMode) return
-    if (loadedTabsRef.current.has(activeTab)) return
-
-    const malId = parseInt(manga.id)
-
-    if (activeTab === 'characters') {
-      loadedTabsRef.current.add('characters')
-      setCharactersLoading(true)
-      jikanMangaCharacters(malId)
-        .then(setCharacters)
-        .catch(() => setCharacters([]))
-        .finally(() => setCharactersLoading(false))
-    } else if (activeTab === 'stats') {
-      loadedTabsRef.current.add('stats')
-      setStatisticsLoading(true)
-      jikanMangaStatistics(malId)
-        .then(setStatistics)
-        .catch(() => setStatistics({} as JikanStatistics))
-        .finally(() => setStatisticsLoading(false))
-    } else if (activeTab === 'reviews') {
-      loadedTabsRef.current.add('reviews')
-      setReviewsLoading(true)
-      jikanMangaReviews(malId, 1)
-        .then(setMangaReviews)
-        .catch(() => setMangaReviews([]))
-        .finally(() => setReviewsLoading(false))
-    } else if (activeTab === 'gallery') {
-      loadedTabsRef.current.add('gallery')
-      setPicturesLoading(true)
-      jikanMangaPictures(malId)
-        .then(setMangaPictures)
-        .catch(() => setMangaPictures([]))
-        .finally(() => setPicturesLoading(false))
-    } else if (activeTab === 'news') {
-      loadedTabsRef.current.add('news')
-      setNewsLoading(true)
-      jikanMangaNews(malId)
-        .then(setMangaNews)
-        .catch(() => setMangaNews([]))
-        .finally(() => setNewsLoading(false))
-    } else if (activeTab === 'recommendations') {
-      loadedTabsRef.current.add('recommendations')
-      setRecommendationsLoading(true)
-      jikanMangaRecommendations(malId)
-        .then((data) => setRecommendations(data.results))
-        .catch(() => setRecommendations([]))
-        .finally(() => setRecommendationsLoading(false))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, manga?.id, details, malIdMode])
 
   if (!manga) return null
 
@@ -522,30 +369,19 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     if (!details) return
 
     // Save manga so the modal can reopen when user navigates back
-    savePendingReturn('manga', manga)
+    savePendingReturn('manga', {
+      ...manga,
+      _returnExtensionId: extensionId || undefined,
+    })
 
-    if (malIdMode && allanimeShowId) {
-      // MAL flow: AllAnime IDs for content, MAL ID for tracking
-      navigate({
-        to: '/read',
-        search: {
-          extensionId: effectiveExtId,
-          mangaId: allanimeShowId,
-          chapterId: chapterId || effectiveChapters[0]?.id,
-          malId: manga!.id,
-        },
-      })
-    } else {
-      // AllAnime flow: existing behavior
-      navigate({
-        to: '/read',
-        search: {
-          extensionId,
-          mangaId: manga!.id,
-          chapterId: chapterId || details.chapters[0]?.id,
-        },
-      })
-    }
+    navigate({
+      to: '/read',
+      search: {
+        extensionId,
+        mangaId: resolvedMangaId || manga!.id,
+        chapterId: chapterId || details.chapters[0]?.id,
+      },
+    })
     // Don't call onClose() - it triggers state updates that can interfere with navigation.
     // The modal will unmount when the route changes.
   }
@@ -592,9 +428,9 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     if (!details || !manga) return false
 
     try {
-      const mediaEntry: MediaEntry = {
-        id: manga.id,
-        extension_id: malIdMode ? 'jikan' : extensionId,
+        const mediaEntry: MediaEntry = {
+          id: manga.id,
+          extension_id: extensionId,
         title: details.title,
         english_name: details.english_name,
         native_name: details.native_name,
@@ -645,13 +481,24 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       await addToLibrary(manga.id, status)
       setInLibrary(true)
       setLibraryStatus(status)
-      notifySuccess(details.title, `Added to "${statusLabels[status]}" list`)
+      const notificationCover = details.cover_url || manga.cover_url
+      notifySuccess(details.title, `Added to "${statusLabels[status]}" list`, {
+        metadata: {
+          media_id: manga.id,
+          ...(notificationCover
+            ? {
+                thumbnail: notificationCover,
+                image: notificationCover,
+              }
+            : {}),
+        },
+      })
       const chapterCount = effectiveChapters.length || details.chapters.length
       if (chapterCount > 0) {
         try {
           await initializeReleaseTracking(
             manga.id,
-            malIdMode ? 'jikan' : extensionId,
+            extensionId,
             'manga',
             chapterCount
           )
@@ -699,12 +546,12 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         const chapterCount = effectiveChapters.length || details.chapters.length
         if (chapterCount > 0) {
           try {
-            await initializeReleaseTracking(
-              manga.id,
-              malIdMode ? 'jikan' : extensionId,
-              'manga',
-              chapterCount
-            )
+          await initializeReleaseTracking(
+            manga.id,
+            extensionId,
+            'manga',
+            chapterCount
+          )
           } catch (trackingError) {
             console.error('Failed to initialize release tracking:', trackingError)
           }
@@ -925,9 +772,9 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         <>
           {/* Banner */}
           <div className="relative h-[280px] overflow-hidden rounded-t-xl">
-            {(details.cover_url || manga.cover_url) && (
+            {bannerSrc && (
               <img
-                src={details.cover_url || manga.cover_url}
+                src={bannerSrc}
                 alt=""
                 className="absolute inset-0 w-full h-full object-cover"
               />
@@ -1007,9 +854,9 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
             ) : (
               <button
                 onClick={() => handleReadNow()}
-                disabled={malIdMode && effectiveChapters.length === 0}
+                disabled={chaptersLoading || effectiveChapters.length === 0}
                 className={`flex items-center gap-2 px-5 py-2.5 font-semibold rounded-[var(--radius-md)] transition-all duration-150 whitespace-nowrap text-sm ${
-                  malIdMode && effectiveChapters.length === 0
+                  chaptersLoading || effectiveChapters.length === 0
                     ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] cursor-not-allowed'
                     : 'text-white bg-[var(--color-accent-gradient)] shadow-[0_0_20px_rgba(229,9,20,0.3)] hover:shadow-[0_0_30px_rgba(229,9,20,0.45)]'
                 }`}
@@ -1092,27 +939,18 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
 
           {/* Tab Content */}
           <div className="p-4 sm:p-8">
-            {/* Detail Tabs (only for Jikan/MAL-sourced manga) */}
-            {malIdMode && (
-              <DetailTabBar
-                tabs={[
-                  { id: 'overview', label: 'Overview' },
-                  {
-                    id: 'chapters',
-                    label: 'Chapters',
-                    count: effectiveChapters.length || undefined,
-                  },
-                  { id: 'characters', label: 'Characters' },
-                  { id: 'stats', label: 'Stats' },
-                  { id: 'reviews', label: 'Reviews' },
-                  { id: 'gallery', label: 'Gallery' },
-                  { id: 'news', label: 'News' },
-                  { id: 'recommendations', label: 'Recommendations' },
-                ]}
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-              />
-            )}
+            <DetailTabBar
+              tabs={[
+                { id: 'overview', label: 'Overview' },
+                {
+                  id: 'chapters',
+                  label: 'Chapters',
+                  count: effectiveChapters.length || undefined,
+                },
+              ]}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+            />
 
             <div className="mt-4">
               {/* Overview Tab */}
@@ -1315,22 +1153,6 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
                     )}
                   </div>
 
-                  {/* Chapters unavailable message (MAL flow, AllAnime resolution failed) */}
-                  {malIdMode &&
-                    !chaptersLoading &&
-                    effectiveChapters.length === 0 &&
-                    !allanimeShowId && (
-                      <div className="text-center py-6 text-[var(--color-text-secondary)]">
-                        <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">This manga is not available for reading yet.</p>
-                        {details.totalChapters && (
-                          <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                            {details.totalChapters} chapters on MyAnimeList
-                          </p>
-                        )}
-                      </div>
-                    )}
-
                   {effectiveChapters.length > 0 && (
                     <>
                       {/* Pagination controls */}
@@ -1463,85 +1285,6 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
                 </div>
               )}
 
-              {/* Characters Tab */}
-              {activeTab === 'characters' && (
-                <CharacterGrid
-                  characters={characters || []}
-                  loading={charactersLoading || !characters}
-                />
-              )}
-
-              {/* Stats Tab */}
-              {activeTab === 'stats' && (
-                <ScoreDistribution
-                  statistics={statistics || ({} as JikanStatistics)}
-                  loading={statisticsLoading || !statistics}
-                  mediaType="manga"
-                />
-              )}
-
-              {/* Reviews Tab */}
-              {activeTab === 'reviews' && (
-                <ReviewList
-                  reviews={mangaReviews || []}
-                  loading={reviewsLoading || !mangaReviews}
-                />
-              )}
-
-              {/* Gallery Tab */}
-              {activeTab === 'gallery' && (
-                <GalleryGrid
-                  pictures={mangaPictures || []}
-                  loading={picturesLoading || !mangaPictures}
-                />
-              )}
-
-              {/* News Tab */}
-              {activeTab === 'news' && (
-                <NewsList news={mangaNews || []} loading={newsLoading || !mangaNews} />
-              )}
-
-              {/* Recommendations Tab */}
-              {activeTab === 'recommendations' &&
-                (recommendationsLoading || !recommendations ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {[...Array(6)].map((_, i) => (
-                      <div
-                        key={i}
-                        className="aspect-[2/3] bg-[var(--color-bg-secondary)] rounded-lg animate-pulse"
-                      />
-                    ))}
-                  </div>
-                ) : recommendations.length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {recommendations.map((rec) => (
-                      <div
-                        key={rec.id}
-                        className="aspect-[2/3] rounded-lg overflow-hidden bg-[var(--color-bg-secondary)] relative group cursor-pointer"
-                        onClick={() => {
-                          // Could open this manga's detail modal
-                        }}
-                      >
-                        {rec.cover_url && (
-                          <img
-                            src={rec.cover_url}
-                            alt={rec.title}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                        <div className="absolute bottom-0 left-0 right-0 p-2">
-                          <p className="text-xs font-medium text-white line-clamp-2">{rec.title}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center py-8 text-[var(--color-text-secondary)]">
-                    No recommendations available
-                  </p>
-                ))}
             </div>
           </div>
         </>

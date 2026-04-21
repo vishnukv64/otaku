@@ -52,6 +52,87 @@ const SINGLE_CHECK_TIMEOUT_SECS: u64 = 60;
 
 /// Timeout for the entire full release check (seconds)
 const FULL_CHECK_TIMEOUT_SECS: u64 = 30 * 60; // 30 minutes max
+const MANGAKAKALOT_EXTENSION_ID: &str = "com.mangakakalot.source";
+
+fn normalize_manga_extension_id<'a>(extension_id: &'a str, media_type: &'a str) -> &'a str {
+    if media_type == "manga" {
+        MANGAKAKALOT_EXTENSION_ID
+    } else {
+        extension_id
+    }
+}
+
+fn is_numeric_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
+}
+
+fn normalize_title(title: &str) -> String {
+    title
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+const DERIVATIVE_KEYWORDS: [&str; 5] = ["doujinshi", "parody", "fanmade", "fan made", "fan-made"];
+
+fn has_derivative_keyword(title: &str) -> bool {
+    let lower = title.to_lowercase();
+    DERIVATIVE_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
+fn score_title_match(query: &str, candidate: &str) -> i32 {
+    let a = normalize_title(query);
+    let b = normalize_title(candidate);
+    if a.is_empty() || b.is_empty() {
+        return 0;
+    }
+    if has_derivative_keyword(candidate) && !has_derivative_keyword(query) {
+        return 0;
+    }
+    if a == b {
+        return 100;
+    }
+    if b.starts_with(&a) {
+        let excess = (b.len() - a.len()) as i32;
+        return std::cmp::max(60, 90 - excess * 2);
+    }
+    if a.starts_with(&b) {
+        let excess = (a.len() - b.len()) as i32;
+        return std::cmp::max(60, 90 - excess * 2);
+    }
+    if a.contains(&b) || b.contains(&a) {
+        let shorter = std::cmp::min(a.len(), b.len()) as f32;
+        let longer = std::cmp::max(a.len(), b.len()) as f32;
+        let ratio = shorter / longer;
+        if ratio < 0.6 {
+            return 0;
+        }
+        return (40.0 * ratio).round() as i32;
+    }
+    0
+}
+
+fn resolve_manga_slug_via_search(
+    runtime: &ExtensionRuntime,
+    title: &str,
+) -> Result<Option<String>> {
+    let results = runtime
+        .search(title, 1)
+        .context("Search failed while resolving numeric manga id")?;
+
+    let mut best: Option<(i32, String)> = None;
+    for r in results.results {
+        let score = score_title_match(title, &r.title);
+        if score > 0 && best.as_ref().map_or(true, |(s, _)| score > *s) {
+            best = Some((score, r.id.clone()));
+            if score == 100 {
+                break;
+            }
+        }
+    }
+    Ok(best.map(|(_, id)| id))
+}
 
 // ==================== Data Types ====================
 
@@ -322,6 +403,7 @@ pub async fn initialize_tracking_v2(
     let now = chrono::Utc::now().timestamp_millis();
     let normalized = raw_status.map(normalize_status).unwrap_or(NormalizedStatus::Unknown);
     let next_check = now + (normalized.recommended_interval_minutes() as i64 * 60 * 1000);
+    let effective_extension_id = normalize_manga_extension_id(extension_id, media_type);
 
     sqlx::query(
         r#"
@@ -348,7 +430,7 @@ pub async fn initialize_tracking_v2(
         "#
     )
     .bind(media_id)
-    .bind(extension_id)
+    .bind(effective_extension_id)
     .bind(media_type)
     .bind(current_count)
     .bind(latest_number)
@@ -379,7 +461,7 @@ pub async fn initialize_tracking_v2(
         "#
     )
     .bind(media_id)
-    .bind(extension_id)
+    .bind(effective_extension_id)
     .bind(media_type)
     .bind(current_count)
     .bind(now)
@@ -574,7 +656,10 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
         r#"
         SELECT
             m.id as media_id,
-            COALESCE(rt.extension_id, m.extension_id) as extension_id,
+            CASE
+                WHEN m.media_type = 'manga' THEN ?
+                ELSE COALESCE(rt.extension_id, m.extension_id)
+            END as extension_id,
             m.title,
             m.media_type,
             COALESCE(rt.last_known_count, 0) as last_known_count,
@@ -611,6 +696,7 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             rt.last_checked_at ASC NULLS FIRST
         "#
     )
+    .bind(MANGAKAKALOT_EXTENSION_ID)
     .bind(now)
     .fetch_all(pool)
     .await?;
@@ -828,7 +914,28 @@ async fn fetch_episode_info(
             })
         }
         ExtensionType::Manga => {
-            let details = runtime.get_manga_details(&media.media_id)
+            let effective_id = if is_numeric_id(&media.media_id) {
+                log::debug!(
+                    "Manga media_id '{}' is numeric (Jikan ID). Resolving to Mangakakalot slug via title search: '{}'",
+                    media.media_id, media.title
+                );
+                match resolve_manga_slug_via_search(&runtime, &media.title)? {
+                    Some(slug) => {
+                        log::debug!("Resolved Jikan ID '{}' -> Mangakakalot slug '{}'", media.media_id, slug);
+                        slug
+                    }
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "Could not resolve Jikan numeric ID '{}' to a Mangakakalot slug for title '{}'",
+                            media.media_id, media.title
+                        ));
+                    }
+                }
+            } else {
+                media.media_id.clone()
+            };
+
+            let details = runtime.get_manga_details(&effective_id)
                 .context("Failed to get manga details")?;
 
             let latest_ch = details.chapters.iter()

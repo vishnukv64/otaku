@@ -10,6 +10,7 @@
 use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, TagsResult, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
+use crate::request_headers::build_image_request;
 use crate::VideoServerInfo;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -888,10 +889,7 @@ pub async fn proxy_image_request(
 
     use std::io::Read;
 
-    let request = ureq::get(&url)
-        .set("Referer", "https://allmanga.to")
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .set("Origin", "https://allmanga.to");
+    let request = build_image_request(&url)?;
 
     match request.call() {
         Ok(response) => {

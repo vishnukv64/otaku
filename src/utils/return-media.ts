@@ -9,9 +9,13 @@
 
 import type { SearchResult } from '@/types/extension'
 
-let _pending: { type: 'anime' | 'manga'; data: SearchResult } | null = null
+export type PendingReturnMedia = SearchResult & {
+  _returnExtensionId?: string
+}
 
-export function savePendingReturn(type: 'anime' | 'manga', data: SearchResult) {
+let _pending: { type: 'anime' | 'manga'; data: PendingReturnMedia } | null = null
+
+export function savePendingReturn(type: 'anime' | 'manga', data: PendingReturnMedia) {
   _pending = { type, data }
   // Also persist to sessionStorage as a page-reload fallback
   try {
@@ -19,7 +23,7 @@ export function savePendingReturn(type: 'anime' | 'manga', data: SearchResult) {
   } catch { /* quota exceeded or unavailable — module var is enough */ }
 }
 
-export function consumePendingReturn(type: 'anime' | 'manga'): SearchResult | null {
+export function consumePendingReturn(type: 'anime' | 'manga'): PendingReturnMedia | null {
   // Prefer in-memory value (always available within the same page session)
   if (_pending?.type === type) {
     const data = _pending.data

@@ -17,10 +17,10 @@ import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { TagDropdown, TagManager, BulkActionBar } from '@/components/library'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { isMobile } from '@/utils/platform'
+import { loadBundledMangaExtensions, resolveMangaExtensionId, type MangaExtensionIds } from '@/utils/manga-extensions'
 
 export const Route = createFileRoute('/library')({
   component: LibraryScreen,
@@ -52,7 +52,7 @@ function LibraryScreen() {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [extensionId, setExtensionId] = useState<string | null>(null)
-  const [mangaExtensionId, setMangaExtensionId] = useState<string | null>(null)
+  const [mangaExtensionIds, setMangaExtensionIds] = useState<Partial<MangaExtensionIds>>({})
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('anime')
   const [activeTab, setActiveTab] = useState<LibraryStatus | 'all' | 'downloaded'>('watching')
   const [library, setLibrary] = useState<LibraryEntryWithMedia[]>([])
@@ -62,6 +62,7 @@ function LibraryScreen() {
   const [error, setError] = useState<string | null>(null)
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
   const [selectedMediaType, setSelectedMediaType] = useState<'anime' | 'manga'>('anime')
+  const [selectedMangaExtensionId, setSelectedMangaExtensionId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   // Tag state
@@ -88,8 +89,8 @@ function LibraryScreen() {
         setExtensionId(animeMetadata.id)
 
         try {
-          const mangaMetadata = await loadExtension(ALLANIME_MANGA_EXTENSION)
-          setMangaExtensionId(mangaMetadata.id)
+          const mangaMetadata = await loadBundledMangaExtensions()
+          setMangaExtensionIds(mangaMetadata)
         } catch (mangaErr) {
           console.error('Failed to load manga extension:', mangaErr)
         }
@@ -136,7 +137,13 @@ function LibraryScreen() {
           if (mediaFilter === 'manga') {
             // Load downloaded manga with media details
             const downloads = await getDownloadedMangaWithMedia()
-            setDownloadedManga(downloads)
+            const filtered = filterNsfwContent(
+              downloads,
+              () => undefined,
+              nsfwFilter,
+              manga => manga.title || ''
+            )
+            setDownloadedManga(filtered)
           } else {
             // Load downloaded anime with media details
             const downloads = await getDownloadsWithMedia()
@@ -157,7 +164,7 @@ function LibraryScreen() {
             filtered,
             entry => entry.media.genres,
             nsfwFilter,
-            entry => entry.media.title
+            entry => `${entry.media.title || ''} ${entry.media.description || ''}`
           )
 
           setLibrary(filtered)
@@ -176,7 +183,7 @@ function LibraryScreen() {
             filtered,
             entry => entry.media.genres,
             nsfwFilter,
-            entry => entry.media.title
+            entry => `${entry.media.title || ''} ${entry.media.description || ''}`
           )
 
           setLibrary(filtered)
@@ -200,6 +207,11 @@ function LibraryScreen() {
     }
     setSelectedMedia(media)
     setSelectedMediaType(entry.media.media_type === 'manga' ? 'manga' : 'anime')
+    if (entry.media.media_type === 'manga') {
+      setSelectedMangaExtensionId(resolveMangaExtensionId(entry.media.extension_id, mangaExtensionIds))
+    } else {
+      setSelectedMangaExtensionId(null)
+    }
     setIsModalOpen(true)
   }
 
@@ -224,12 +236,14 @@ function LibraryScreen() {
     }
     setSelectedMedia(media)
     setSelectedMediaType('manga')
+    setSelectedMangaExtensionId(resolveMangaExtensionId(manga.extension_id, mangaExtensionIds))
     setIsModalOpen(true)
   }
 
   const handleCloseModal = () => {
     setIsModalOpen(false)
     setSelectedMedia(null)
+    setSelectedMangaExtensionId(null)
     // Reload library and tags to reflect any changes
     const loadLibrary = async () => {
       try {
@@ -239,7 +253,13 @@ function LibraryScreen() {
         if (activeTab === 'downloaded') {
           if (mediaFilter === 'manga') {
             const downloads = await getDownloadedMangaWithMedia()
-            setDownloadedManga(downloads)
+            const filtered = filterNsfwContent(
+              downloads,
+              () => undefined,
+              nsfwFilter,
+              manga => manga.title || ''
+            )
+            setDownloadedManga(filtered)
           } else {
             const downloads = await getDownloadsWithMedia()
             setDownloadedAnime(downloads)
@@ -255,7 +275,7 @@ function LibraryScreen() {
             filtered,
             entry => entry.media.genres,
             nsfwFilter,
-            entry => entry.media.title
+            entry => `${entry.media.title || ''} ${entry.media.description || ''}`
           )
           setLibrary(filtered)
         } else {
@@ -269,7 +289,7 @@ function LibraryScreen() {
             filtered,
             entry => entry.media.genres,
             nsfwFilter,
-            entry => entry.media.title
+            entry => `${entry.media.title || ''} ${entry.media.description || ''}`
           )
           setLibrary(filtered)
         }
@@ -318,7 +338,7 @@ function LibraryScreen() {
             filtered,
             entry => entry.media.genres,
             nsfwFilter,
-            entry => entry.media.title
+            entry => `${entry.media.title || ''} ${entry.media.description || ''}`
           )
           setLibrary(filtered)
         } else {
@@ -332,7 +352,7 @@ function LibraryScreen() {
             filtered,
             entry => entry.media.genres,
             nsfwFilter,
-            entry => entry.media.title
+            entry => `${entry.media.title || ''} ${entry.media.description || ''}`
           )
           setLibrary(filtered)
         }
@@ -728,10 +748,10 @@ function LibraryScreen() {
       )}
 
       {/* Manga Detail Modal */}
-      {selectedMedia && selectedMediaType === 'manga' && mangaExtensionId && (
+      {selectedMedia && selectedMediaType === 'manga' && selectedMangaExtensionId && (
         <MangaDetailModal
           manga={selectedMedia}
-          extensionId={mangaExtensionId}
+          extensionId={selectedMangaExtensionId}
           onClose={handleCloseModal}
         />
       )}

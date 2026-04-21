@@ -33,12 +33,21 @@ export const NSFW_TITLE_KEYWORDS = [
   'r-18',
   'r18',
   '18+',
+  'uncensored',
+  'censored',
+  'explicit',
+  'mature content',
+  'fan made uncensored',
   'concubine',
   'brothel',
   'prostitute',
   'slave girl',
   'sex slave',
   'violated',
+  'noona',
+  'ajumma',
+  'landlady',
+  'stepmom',
 ]
 
 /**

@@ -1,19 +1,16 @@
 /**
  * Manga Route - Manga Browser Page
  *
- * Browse, search, and discover manga with Jikan API-powered carousels.
- * Uses SWR caching via useJikanQuery for instant page loads.
+ * Browse manga with Jikan-powered carousels for discovery,
+ * Mangakakalot for search, details, chapters, and reading.
  */
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Loader2, X, Tag as TagIcon } from 'lucide-react'
 import {
-  loadExtension,
+  discoverManga,
   jikanTopManga,
-  jikanSearchManga,
-  jikanGenresManga,
-  jikanSearchMangaFiltered,
   searchManga,
 } from '@/utils/tauri-commands'
 import type { Tag } from '@/utils/tauri-commands'
@@ -25,7 +22,6 @@ import { GenreFilterBar } from '@/components/media/GenreFilterBar'
 import { BrowseSidebar, type BrowseFilters, type NavItem } from '@/components/browse/BrowseSidebar'
 import { BrowseHeader } from '@/components/browse/BrowseHeader'
 import { ActiveFilterChips, type FilterChip } from '@/components/browse/ActiveFilterChips'
-import { ALLANIME_MANGA_EXTENSION } from '@/extensions/allanime-manga-extension'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
@@ -33,6 +29,7 @@ import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { consumePendingReturn } from '@/utils/return-media'
+import { loadBundledMangaExtensions, resolveJikanToMangakakalot, MANGAKAKALOT_GENRES, type MangaExtensionIds } from '@/utils/manga-extensions'
 
 // Debounce delay for instant search (ms)
 const SEARCH_DEBOUNCE_MS = 300
@@ -41,23 +38,32 @@ export const Route = createFileRoute('/manga')({
   component: MangaScreen,
 })
 
+interface SelectedManga {
+  manga: SearchResult
+  extensionId: string
+}
+
 function MangaScreen() {
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const { getStatus, refresh: refreshStatus } = useMediaStatusContext()
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const genreLoadMoreRef = useRef<HTMLDivElement>(null)
-  const [allanimeExtensionId, setAllanimeExtensionId] = useState<string | null>(null)
+  const [mangaExtensionIds, setMangaExtensionIds] = useState<Partial<MangaExtensionIds>>({})
   const [searchInput, setSearchInput] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
-  const [selectedManga, setSelectedManga] = useState<SearchResult | null>(null)
-  const [searchSource, setSearchSource] = useState<'jikan' | 'allanime'>('jikan')
+  const [selectedManga, setSelectedManga] = useState<SelectedManga | null>(null)
 
   // Restore modal state when returning from read page
   useEffect(() => {
     const manga = consumePendingReturn('manga')
-    if (manga) setSelectedManga(manga)
+    if (manga) {
+      setSelectedManga({
+        manga,
+        extensionId: manga._returnExtensionId || '',
+      })
+    }
   }, [])
 
   // Sidebar state
@@ -97,7 +103,7 @@ function MangaScreen() {
 
   // Genre state
   const [mangaGenres, setMangaGenres] = useState<Tag[]>([])
-  const [genresLoading, setGenresLoading] = useState(false)
+  const [genresLoading] = useState(false)
   const [selectedGenreIds, setSelectedGenreIds] = useState<Set<number>>(new Set())
   const [genreFilters, setGenreFilters] = useState({
     orderBy: '',
@@ -111,6 +117,11 @@ function MangaScreen() {
   const [genreHasNextPage, setGenreHasNextPage] = useState(true)
   const [genreLoadingMore, setGenreLoadingMore] = useState(false)
   const genreSeenIdsRef = useRef<Set<string>>(new Set())
+
+  const genreSlugById = useCallback(
+    (id: number) => mangaGenres.find((genre) => genre.id === id)?.slug,
+    [mangaGenres]
+  )
 
   // Top-rated full grid state
   const topRatedLoadMoreRef = useRef<HTMLDivElement>(null)
@@ -130,14 +141,14 @@ function MangaScreen() {
   const [publishingLoadingMore, setPublishingLoadingMore] = useState(false)
   const publishingSeenRef = useRef<Set<string>>(new Set())
 
-  // Load AllAnime extension lazily (for ContinueReadingSection + MangaDetailModal)
+  // Load bundled manga extensions lazily
   useEffect(() => {
-    loadExtension(ALLANIME_MANGA_EXTENSION)
-      .then((metadata) => setAllanimeExtensionId(metadata.id))
+    loadBundledMangaExtensions()
+      .then(setMangaExtensionIds)
       .catch(() => {})
   }, [])
 
-  // SWR-cached data for each section (nsfwFilter in key for filter isolation)
+  // Jikan-powered browse carousels (good curation, covers, scores)
   const trending = useJikanQuery({
     cacheKey: `manga:trending:sfw=${effectiveSfw}`,
     fetcher: () => jikanTopManga(1, undefined, undefined, effectiveSfw),
@@ -166,7 +177,7 @@ function MangaScreen() {
     mediaType: 'manga',
   })
 
-  // Debounced instant search - Jikan or AllAnime based on selected source
+  // Debounced instant search - Mangakakalot only
   useEffect(() => {
     if (!searchInput.trim()) {
       setSearchResults([])
@@ -176,18 +187,15 @@ function MangaScreen() {
     setSearchLoading(true)
     const timer = setTimeout(async () => {
       try {
-        if (searchSource === 'jikan') {
-          const results = await jikanSearchManga(searchInput, 1, effectiveSfw)
+        if (mangaExtensionIds.mangakakalot) {
+          const results = await searchManga(mangaExtensionIds.mangakakalot, searchInput, 1, !effectiveSfw)
           const filtered = filterNsfwContent(
             results.results,
             (item) => item.genres,
             effectiveSfw,
-            (item) => item.title
+            (item) => `${item.title || ''} ${item.description || ''}`
           )
           setSearchResults(filtered)
-        } else if (searchSource === 'allanime' && allanimeExtensionId) {
-          const results = await searchManga(allanimeExtensionId, searchInput, 1, !effectiveSfw)
-          setSearchResults(results.results)
         }
       } catch (err) {
         console.error('Manga search failed:', err)
@@ -197,7 +205,7 @@ function MangaScreen() {
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [searchInput, effectiveSfw, allanimeExtensionId, searchSource])
+  }, [searchInput, effectiveSfw, mangaExtensionIds])
 
   // Clear search
   const handleClearSearch = useCallback(() => {
@@ -206,8 +214,25 @@ function MangaScreen() {
     searchInputRef.current?.focus()
   }, [])
 
-  const handleMediaClick = (item: SearchResult) => {
-    setSelectedManga(item)
+  const handleMediaClick = async (item: SearchResult, extensionId?: string) => {
+    const extId = extensionId || mangaExtensionIds.mangakakalot || ''
+    if (!extId) return
+
+    const isJikanItem = /^\d+$/.test(item.id)
+    if (!isJikanItem) {
+      setSelectedManga({ manga: item, extensionId: extId })
+      return
+    }
+
+    const resolved = await resolveJikanToMangakakalot(extId, item.title)
+    if (resolved) {
+      setSelectedManga({
+        manga: { ...resolved, cover_url: resolved.cover_url || item.cover_url },
+        extensionId: extId,
+      })
+    } else {
+      setSelectedManga({ manga: item, extensionId: extId })
+    }
   }
 
   // === FILTERED BROWSE: Fetch when sidebar filters are active on browse tab ===
@@ -216,21 +241,21 @@ function MangaScreen() {
       setFilteredBrowseItems([])
       return
     }
+    if (!mangaExtensionIds.mangakakalot) return
     setFilteredBrowseLoading(true)
     setFilteredBrowsePage(1)
     filteredBrowseSeenRef.current.clear()
 
-    const genreStr = Array.from(browseFilters.genres).join(',')
-    jikanSearchMangaFiltered({
-      page: 1,
-      sfw: effectiveSfw,
-      genres: genreStr || undefined,
-      orderBy: browseFilters.orderBy || 'popularity',
-      sort: browseFilters.sort || 'desc',
-      status: browseFilters.statuses[0] || undefined,
-      mangaType: browseFilters.types[0] || undefined,
-      minScore: browseFilters.minScore > 0 ? String(browseFilters.minScore) : undefined,
-    })
+    const genreSlugs = Array.from(browseFilters.genres)
+      .map((id) => genreSlugById(id))
+      .filter((slug): slug is string => Boolean(slug))
+    discoverManga(
+      mangaExtensionIds.mangakakalot,
+      1,
+      browseFilters.orderBy === 'score' ? 'score' : 'update',
+      genreSlugs,
+      !effectiveSfw
+    )
       .then((result) => {
         const filtered = filterNsfwContent(
           result.results,
@@ -244,26 +269,32 @@ function MangaScreen() {
       })
       .catch((err) => console.error('Filtered manga browse failed:', err))
       .finally(() => setFilteredBrowseLoading(false))
-  }, [activeNav, hasActiveFilters, browseFilters, effectiveSfw])
+  }, [activeNav, hasActiveFilters, browseFilters, effectiveSfw, genreSlugById, mangaExtensionIds])
 
   // Filtered browse: load more
   const loadMoreFilteredBrowse = useCallback(async () => {
     if (filteredBrowseLoadingMore || !filteredBrowseHasNext) return
     setFilteredBrowseLoadingMore(true)
     try {
+      if (!mangaExtensionIds.mangakakalot) return
       const nextPage = filteredBrowsePage + 1
-      const genreStr = Array.from(browseFilters.genres).join(',')
-      const result = await jikanSearchMangaFiltered({
-        page: nextPage,
-        sfw: effectiveSfw,
-        genres: genreStr || undefined,
-        orderBy: browseFilters.orderBy || 'popularity',
-        sort: browseFilters.sort || 'desc',
-        status: browseFilters.statuses[0] || undefined,
-        mangaType: browseFilters.types[0] || undefined,
-        minScore: browseFilters.minScore > 0 ? String(browseFilters.minScore) : undefined,
-      })
-      const newItems = result.results.filter((item) => {
+      const genreSlugs = Array.from(browseFilters.genres)
+        .map((id) => genreSlugById(id))
+        .filter((slug): slug is string => Boolean(slug))
+      const result = await discoverManga(
+        mangaExtensionIds.mangakakalot,
+        nextPage,
+        browseFilters.orderBy === 'score' ? 'score' : 'update',
+        genreSlugs,
+        !effectiveSfw
+      )
+      const filtered = filterNsfwContent(
+        result.results,
+        (item) => item.genres,
+        effectiveSfw,
+        (item) => `${item.title || ''} ${item.description || ''}`
+      )
+      const newItems = filtered.filter((item) => {
         if (filteredBrowseSeenRef.current.has(item.id)) return false
         filteredBrowseSeenRef.current.add(item.id)
         return true
@@ -282,6 +313,8 @@ function MangaScreen() {
     filteredBrowseLoadingMore,
     browseFilters,
     effectiveSfw,
+    genreSlugById,
+    mangaExtensionIds,
   ])
 
   // Filtered browse intersection observer
@@ -313,13 +346,9 @@ function MangaScreen() {
 
   // === GENRE: Fetch genres list ===
   useEffect(() => {
-    if (activeNav !== 'genres' || mangaGenres.length > 0) return
-    setGenresLoading(true)
-    jikanGenresManga()
-      .then((result) => setMangaGenres(result.genres))
-      .catch((err) => console.error('Failed to load manga genres:', err))
-      .finally(() => setGenresLoading(false))
-  }, [activeNav, mangaGenres.length])
+    if (mangaGenres.length > 0) return
+    setMangaGenres(MANGAKAKALOT_GENRES.map(g => ({ ...g, count: 0 })))
+  }, [mangaGenres.length])
 
   // Genre: fetch results when genres/filters change
   useEffect(() => {
@@ -340,16 +369,17 @@ function MangaScreen() {
       setGenrePage(1)
       genreSeenIdsRef.current.clear()
       try {
-        const genreStr = Array.from(selectedGenreIds).join(',')
-        const result = await jikanSearchMangaFiltered({
-          page: 1,
-          sfw: effectiveSfw,
-          genres: genreStr || undefined,
-          orderBy: genreFilters.orderBy || undefined,
-          sort: genreFilters.sort || undefined,
-          status: genreFilters.status || undefined,
-          mangaType: genreFilters.type || undefined,
-        })
+        if (!mangaExtensionIds.mangakakalot) return
+        const genreSlugs = Array.from(selectedGenreIds)
+          .map((id) => genreSlugById(id))
+          .filter((slug): slug is string => Boolean(slug))
+        const result = await discoverManga(
+          mangaExtensionIds.mangakakalot,
+          1,
+          genreFilters.orderBy === 'score' ? 'score' : 'update',
+          genreSlugs,
+          !effectiveSfw
+        )
         const filtered = filterNsfwContent(
           result.results,
           (item) => item.genres,
@@ -367,7 +397,7 @@ function MangaScreen() {
     }
 
     fetchGenreResults()
-  }, [activeNav, selectedGenreIds, genreFilters, effectiveSfw])
+  }, [activeNav, selectedGenreIds, genreFilters, effectiveSfw, genreSlugById, mangaExtensionIds])
 
   // Load more genre results
   const loadMoreGenreResults = useCallback(async () => {
@@ -375,19 +405,27 @@ function MangaScreen() {
 
     setGenreLoadingMore(true)
     try {
+      if (!mangaExtensionIds.mangakakalot) return
       const nextPage = genrePage + 1
-      const genreStr = Array.from(selectedGenreIds).join(',')
-      const result = await jikanSearchMangaFiltered({
-        page: nextPage,
-        sfw: effectiveSfw,
-        genres: genreStr || undefined,
-        orderBy: genreFilters.orderBy || undefined,
-        sort: genreFilters.sort || undefined,
-        status: genreFilters.status || undefined,
-        mangaType: genreFilters.type || undefined,
-      })
+      const genreSlugs = Array.from(selectedGenreIds)
+        .map((id) => genreSlugById(id))
+        .filter((slug): slug is string => Boolean(slug))
+      const result = await discoverManga(
+        mangaExtensionIds.mangakakalot,
+        nextPage,
+        genreFilters.orderBy === 'score' ? 'score' : 'update',
+        genreSlugs,
+        !effectiveSfw
+      )
 
-      const newResults = result.results.filter((item) => {
+      const filtered = filterNsfwContent(
+        result.results,
+        (item) => item.genres,
+        effectiveSfw,
+        (item) => `${item.title || ''} ${item.description || ''}`
+      )
+
+      const newResults = filtered.filter((item) => {
         if (genreSeenIdsRef.current.has(item.id)) return false
         genreSeenIdsRef.current.add(item.id)
         return true
@@ -401,7 +439,7 @@ function MangaScreen() {
     } finally {
       setGenreLoadingMore(false)
     }
-  }, [genrePage, genreHasNextPage, genreLoadingMore, selectedGenreIds, genreFilters, effectiveSfw])
+  }, [genrePage, genreHasNextPage, genreLoadingMore, selectedGenreIds, genreFilters, effectiveSfw, genreSlugById, mangaExtensionIds])
 
   // Intersection observer for genre tab infinite scroll
   useEffect(() => {
@@ -431,7 +469,7 @@ function MangaScreen() {
   // === TOP-RATED: Fetch page 1 when nav switches ===
   useEffect(() => {
     if (activeNav !== 'top-rated') return
-    if (topRatedItems.length > 0) return // already loaded
+    if (topRatedItems.length > 0) return
     setTopRatedLoading(true)
     topRatedSeenRef.current.clear()
     jikanTopManga(1, undefined, undefined, effectiveSfw)
@@ -448,16 +486,21 @@ function MangaScreen() {
       })
       .catch((err) => console.error('Failed to load top-rated manga:', err))
       .finally(() => setTopRatedLoading(false))
-  }, [activeNav, effectiveSfw]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeNav, effectiveSfw, topRatedItems.length])
 
-  // Top-rated: load more
   const loadMoreTopRated = useCallback(async () => {
     if (topRatedLoadingMore || !topRatedHasNext) return
     setTopRatedLoadingMore(true)
     try {
       const nextPage = topRatedPage + 1
       const result = await jikanTopManga(nextPage, undefined, undefined, effectiveSfw)
-      const newItems = result.results.filter((item) => {
+      const filtered = filterNsfwContent(
+        result.results,
+        (item) => item.genres,
+        effectiveSfw,
+        (item) => `${item.title || ''} ${item.description || ''}`
+      )
+      const newItems = filtered.filter((item) => {
         if (topRatedSeenRef.current.has(item.id)) return false
         topRatedSeenRef.current.add(item.id)
         return true
@@ -495,7 +538,7 @@ function MangaScreen() {
   // === PUBLISHING: Fetch page 1 when nav switches ===
   useEffect(() => {
     if (activeNav !== 'season') return
-    if (publishingItems.length > 0) return // already loaded
+    if (publishingItems.length > 0) return
     setPublishingLoading(true)
     publishingSeenRef.current.clear()
     jikanTopManga(1, undefined, 'publishing', effectiveSfw)
@@ -512,16 +555,21 @@ function MangaScreen() {
       })
       .catch((err) => console.error('Failed to load publishing manga:', err))
       .finally(() => setPublishingLoading(false))
-  }, [activeNav, effectiveSfw]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeNav, effectiveSfw, publishingItems.length])
 
-  // Publishing: load more
   const loadMorePublishing = useCallback(async () => {
     if (publishingLoadingMore || !publishingHasNext) return
     setPublishingLoadingMore(true)
     try {
       const nextPage = publishingPage + 1
       const result = await jikanTopManga(nextPage, undefined, 'publishing', effectiveSfw)
-      const newItems = result.results.filter((item) => {
+      const filtered = filterNsfwContent(
+        result.results,
+        (item) => item.genres,
+        effectiveSfw,
+        (item) => `${item.title || ''} ${item.description || ''}`
+      )
+      const newItems = filtered.filter((item) => {
         if (publishingSeenRef.current.has(item.id)) return false
         publishingSeenRef.current.add(item.id)
         return true
@@ -611,7 +659,6 @@ function MangaScreen() {
     []
   )
 
-  // Carousel sections config
   const carousels = [
     { title: 'Most Popular', hook: popular },
     { title: 'Recommended', hook: favorite },
@@ -708,29 +755,6 @@ function MangaScreen() {
             )}
           </div>
 
-          {/* Source Tabs */}
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={() => setSearchSource('jikan')}
-              className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
-                searchSource === 'jikan'
-                  ? 'bg-[var(--color-accent-primary)] text-white'
-                  : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] hover:text-white border border-[var(--color-glass-border)]'
-              }`}
-            >
-              MyAnimeList
-            </button>
-            <button
-              onClick={() => setSearchSource('allanime')}
-              className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
-                searchSource === 'allanime'
-                  ? 'bg-[var(--color-accent-primary)] text-white'
-                  : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] hover:text-white border border-[var(--color-glass-border)]'
-              }`}
-            >
-              AllAnime
-            </button>
-          </div>
         </div>
 
         {/* Search Results / Genre Browse / Carousels */}
@@ -743,9 +767,9 @@ function MangaScreen() {
                     <MediaCard
                       key={item.id}
                       media={item}
-                      onClick={() => handleMediaClick(item)}
-                      status={getStatus(item.id)}
-                    />
+                        onClick={() => handleMediaClick(item, mangaExtensionIds.mangakakalot)}
+                        status={getStatus(item.id)}
+                      />
                   ))}
                 </div>
               </div>
@@ -944,7 +968,7 @@ function MangaScreen() {
           // ========== BROWSE (default) ==========
           <>
             {/* Continue Reading Section */}
-            {allanimeExtensionId && <ContinueReadingSection extensionId={allanimeExtensionId} />}
+            <ContinueReadingSection />
 
             {/* Top 10 Manga */}
             {trending.data.length >= 10 && (
@@ -956,7 +980,6 @@ function MangaScreen() {
                 showRank
               />
             )}
-            {/* Show loading state for Top 10 if still loading */}
             {trending.loading && (
               <MediaCarousel
                 title="Top 10 Manga"
@@ -986,8 +1009,8 @@ function MangaScreen() {
       {/* Manga Detail Modal */}
       {selectedManga && (
         <MangaDetailModal
-          manga={selectedManga}
-          extensionId={allanimeExtensionId || ''}
+          manga={selectedManga.manga}
+          extensionId={selectedManga.extensionId || mangaExtensionIds.mangakakalot || ''}
           onClose={() => {
             setSelectedManga(null)
             refreshStatus()
