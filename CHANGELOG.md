@@ -5,6 +5,22 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-30
+
+### Fixed
+- **AllAnime "No Video Sources Available"** — Two upstream changes broke streaming: (1) AllAnime rotated their `tobeparsed` AES-GCM key seed from a 16-char reversed string to `"Xot36i3lK3:v1"` (used as-is, no reversal) and prepended a 1-byte marker, shifting the IV to `raw[1..13]`; (2) the `episode`/`sourceUrls` GraphQL endpoint now requires `Referer: https://youtu-chan.com/` — any other referer (including `allmanga.to`, used by every other endpoint) returns `NEED_CAPTCHA` with an empty payload. Both layers updated; verified end-to-end against live AllAnime traffic and byte-for-byte against anipy-cli's reference plaintext.
+
+### Added
+- **Library auto-download** — Library entries can now opt in to silently download new anime episodes as soon as the release checker detects them. Picks the highest-resolution source available, runs best-effort, and surfaces failures to the existing notification flow without disrupting the release checker. New migration `024_library_auto_download.sql` adds the `library.auto_download` flag plus a partial index for opted-in rows.
+- **Release Radar group cards** — New episode notifications now collapse into per-show group cards (`ReleaseRadarGroupCard`) in both the desktop and mobile notification centers, replacing the previous one-row-per-episode list.
+- **Completion Predictor** — New stats panel that projects finish dates for currently-watching shows based on watch cadence.
+- **Player playback speed** — 0.5x / 0.75x / 1x / 1.25x / 1.5x / 1.75x / 2x speed selector with `[` and `]` keyboard shortcuts to step down/up.
+- **Auto-delete-on-watch** — Optional flow that deletes the local downloaded file after an episode is fully watched, with a success toast.
+
+### Changed
+- **DownloadManager UI polish** — Layout, status indicators, and progress feedback updates aligned with the new auto-download/auto-delete flows.
+- **Recommendations / tags / library queries** — Internal SQL refactors backing the new features above; no user-visible behaviour change for existing flows.
+
 ## [1.3.1] - 2026-04-19
 
 ### Fixed
