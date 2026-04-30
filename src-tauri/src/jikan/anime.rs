@@ -590,12 +590,16 @@ pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResult
     let response: JikanPaginatedResponse<JikanAnime> =
         JIKAN.get_parsed_with_query(&path, &params)?;
 
+    let mut seen = std::collections::HashSet::new();
+    let results = response
+        .data
+        .iter()
+        .filter(|a| seen.insert(a.mal_id))
+        .map(jikan_anime_to_search_result)
+        .collect();
+
     Ok(SearchResults {
-        results: response
-            .data
-            .iter()
-            .map(jikan_anime_to_search_result)
-            .collect(),
+        results,
         has_next_page: response.pagination.has_next_page,
     })
 }
