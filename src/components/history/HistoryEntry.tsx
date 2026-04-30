@@ -99,6 +99,14 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
 
   const handleRemove = async (e: React.MouseEvent) => {
     e.stopPropagation()
+    const meta = {
+      metadata: {
+        media_id: entry.media.id,
+        ...(entry.media.cover_url
+          ? { thumbnail: entry.media.cover_url, image: entry.media.cover_url }
+          : {}),
+      },
+    }
     try {
       if (isAnime && entry.episode_id) {
         await removeWatchHistoryEntry(entry.media.id, entry.episode_id)
@@ -106,10 +114,10 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
         await removeReadingHistoryEntry(entry.media.id, entry.chapter_id)
       }
       onRemoved(entry)
-      notifySuccess('Removed', `Removed "${entry.media.title}" entry from history`)
+      notifySuccess('Removed', `Removed "${entry.media.title}" entry from history`, meta)
     } catch (err) {
       console.error('Failed to remove history entry:', err)
-      notifyError('Error', 'Failed to remove history entry')
+      notifyError('Error', 'Failed to remove history entry', meta)
     }
   }
 

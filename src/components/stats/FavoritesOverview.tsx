@@ -14,7 +14,7 @@ export function FavoritesOverview({ data }: FavoritesOverviewProps) {
   const isEmpty = !data || data.total_favorites === 0
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
+    <div className="self-start rounded-xl bg-[var(--color-surface-subtle)] p-6">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">Favorites</h2>
 
       {isEmpty ? (
@@ -24,7 +24,7 @@ export function FavoritesOverview({ data }: FavoritesOverviewProps) {
       ) : (
         <div className="space-y-5">
           {/* Stats grid */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Total favorites */}
             <div className="flex flex-col items-center gap-2 p-4 rounded-lg bg-[rgba(245,197,24,0.06)]">
               <div className="text-[rgba(245,197,24,0.9)]">

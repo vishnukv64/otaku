@@ -42,7 +42,7 @@ export function ContentTypeBreakdown({ data }: ContentTypeBreakdownProps) {
   }))
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
+    <div className="self-start rounded-xl bg-[var(--color-surface-subtle)] p-6">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">
         Content Types
       </h2>

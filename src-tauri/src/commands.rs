@@ -1609,6 +1609,20 @@ pub async fn toggle_favorite(
         .map_err(|e| format!("Failed to toggle favorite: {}", e))
 }
 
+/// Set auto-download flag for a library entry
+#[tauri::command]
+pub async fn set_auto_download(
+    state: State<'_, AppState>,
+    media_id: String,
+    enabled: bool,
+) -> Result<bool, String> {
+    use crate::database::library::set_auto_download as set;
+
+    set(state.database.pool(), &media_id, enabled)
+        .await
+        .map_err(|e| format!("Failed to update auto-download: {}", e))
+}
+
 /// Check if media is in library
 #[tauri::command]
 pub async fn is_in_library(

@@ -113,13 +113,21 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
 
   const handleRemove = async (e: React.MouseEvent, mediaId: string, title: string) => {
     e.stopPropagation() // Prevent card click
+    const entry = continueWatching.find(cw => cw.media.id === mediaId)
+    const cover = entry?.media.cover_url
+    const meta = {
+      metadata: {
+        media_id: mediaId,
+        ...(cover ? { thumbnail: cover, image: cover } : {}),
+      },
+    }
     try {
       await removeFromContinueWatching(mediaId)
       setContinueWatching(prev => prev.filter(entry => entry.media.id !== mediaId))
-      notifySuccess('Removed', `Removed "${title}" from Continue Watching`)
+      notifySuccess('Removed', `Removed "${title}" from Continue Watching`, meta)
     } catch (error) {
       console.error('Failed to remove from continue watching:', error)
-      notifyError('Remove Failed', 'Failed to remove from Continue Watching')
+      notifyError('Remove Failed', 'Failed to remove from Continue Watching', meta)
     }
   }
 

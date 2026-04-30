@@ -84,6 +84,45 @@ fn media_entry_from_row(row: &sqlx::sqlite::SqliteRow) -> MediaEntry {
     }
 }
 
+async fn build_feedback_genre_adjustments(pool: &SqlitePool) -> Result<HashMap<String, f64>> {
+    use sqlx::Row;
+
+    let rows = sqlx::query(
+        r#"
+        SELECT f.sentiment, m.genres
+        FROM feedback f
+        JOIN media m ON f.media_id = m.id
+        WHERE m.media_type = 'anime'
+          AND m.genres IS NOT NULL
+          AND m.genres != '[]'
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut adjustments = HashMap::new();
+
+    for row in rows {
+        let sentiment: String = row.get("sentiment");
+        let genres_json: Option<String> = row.get("genres");
+        let delta = match sentiment.as_str() {
+            "liked" => 0.2,
+            "disliked" => -0.3,
+            _ => 0.0,
+        };
+
+        if delta == 0.0 {
+            continue;
+        }
+
+        for genre in parse_genres(&genres_json) {
+            *adjustments.entry(genre).or_insert(0.0) += delta;
+        }
+    }
+
+    Ok(adjustments)
+}
+
 /// Build a TF-IDF genre preference vector from the user's watch history.
 ///
 /// TF (term frequency): time-weighted genre engagement with recency decay.
@@ -245,11 +284,18 @@ pub async fn get_content_recommendations(
     }
 
     // Build a quick lookup of genre -> weight
-    let genre_weights: HashMap<String, f64> = profile
+    let mut genre_weights: HashMap<String, f64> = profile
         .top_genres
         .iter()
         .map(|g| (g.genre.clone(), g.weight))
         .collect();
+
+    let feedback_adjustments = build_feedback_genre_adjustments(pool).await?;
+    for (genre, adjustment) in feedback_adjustments {
+        if let Some(weight) = genre_weights.get_mut(&genre) {
+            *weight += adjustment;
+        }
+    }
 
     // Fetch candidate anime: not in library, has genres, rating > 6.0
     let candidates = sqlx::query(
@@ -279,11 +325,15 @@ pub async fn get_content_recommendations(
 
         let mut genre_score = 0.0;
         let mut matched = Vec::new();
+        let mut feedback_tilt = 0.0;
 
         for g in &media_genres {
             if let Some(&w) = genre_weights.get(g) {
                 genre_score += w;
                 matched.push(g.clone());
+                if w > 0.0 {
+                    feedback_tilt += w;
+                }
             }
         }
 
@@ -297,7 +347,11 @@ pub async fn get_content_recommendations(
 
         // Build reason string from top 3 matched genres
         let reason_genres: Vec<&str> = matched.iter().take(3).map(|s| s.as_str()).collect();
-        let reason = format!("Because you like {}", reason_genres.join(", "));
+        let reason = if feedback_tilt > 0.6 {
+            format!("Because you keep liking {}", reason_genres.join(", "))
+        } else {
+            format!("Because you like {}", reason_genres.join(", "))
+        };
 
         scored.push(RecommendationEntry {
             media,

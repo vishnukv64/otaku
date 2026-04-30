@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use super::library::LibraryEntryWithMedia;
 use super::media::MediaEntry;
-use super::library::{LibraryEntry, LibraryStatus};
+use super::library::{has_auto_download_column, LibraryEntry, LibraryStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryTag {
@@ -263,9 +263,24 @@ pub async fn get_library_by_tag(
     tag_id: i64,
 ) -> Result<Vec<LibraryEntryWithMedia>> {
     use sqlx::Row;
+    let has_auto = has_auto_download_column(pool).await?;
 
     let query = sqlx::query(
-        r#"
+        if has_auto { r#"
+        SELECT
+            l.id, l.media_id, l.status, l.favorite, l.score, l.notes, l.added_at, l.updated_at, l.auto_download,
+            m.id, m.extension_id, m.title, m.english_name, m.native_name, m.description,
+            m.cover_url, m.banner_url, m.trailer_url, m.media_type, m.content_type, m.status,
+            m.year, m.rating, m.episode_count, m.episode_duration,
+            m.season_quarter, m.season_year,
+            m.aired_start_year, m.aired_start_month, m.aired_start_date,
+            m.genres, m.created_at, m.updated_at
+        FROM library l
+        INNER JOIN media m ON l.media_id = m.id
+        INNER JOIN library_tag_assignments a ON l.id = a.library_entry_id
+        WHERE a.tag_id = ?
+        ORDER BY l.updated_at DESC
+        "# } else { r#"
         SELECT
             l.id, l.media_id, l.status, l.favorite, l.score, l.notes, l.added_at, l.updated_at,
             m.id, m.extension_id, m.title, m.english_name, m.native_name, m.description,
@@ -279,7 +294,7 @@ pub async fn get_library_by_tag(
         INNER JOIN library_tag_assignments a ON l.id = a.library_entry_id
         WHERE a.tag_id = ?
         ORDER BY l.updated_at DESC
-        "#
+        "# }
     )
     .bind(tag_id)
     .fetch_all(pool)
@@ -291,42 +306,58 @@ pub async fn get_library_by_tag(
         let library_status = LibraryStatus::from_str(&library_status_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid library status: {}", library_status_str))?;
 
-        let library_entry = LibraryEntry {
-            id: row.try_get(0)?,
-            media_id: row.try_get(1)?,
-            status: library_status,
-            favorite: row.try_get(3)?,
-            score: row.try_get(4)?,
-            notes: row.try_get(5)?,
-            added_at: row.try_get(6)?,
-            updated_at: row.try_get(7)?,
+        let library_entry = if has_auto {
+            LibraryEntry {
+                id: row.try_get(0)?,
+                media_id: row.try_get(1)?,
+                status: library_status,
+                favorite: row.try_get(3)?,
+                score: row.try_get(4)?,
+                notes: row.try_get(5)?,
+                added_at: row.try_get(6)?,
+                updated_at: row.try_get(7)?,
+                auto_download: row.try_get(8)?,
+            }
+        } else {
+            LibraryEntry {
+                id: row.try_get(0)?,
+                media_id: row.try_get(1)?,
+                status: library_status,
+                favorite: row.try_get(3)?,
+                score: row.try_get(4)?,
+                notes: row.try_get(5)?,
+                added_at: row.try_get(6)?,
+                updated_at: row.try_get(7)?,
+                auto_download: false,
+            }
         };
 
+        let media_offset = if has_auto { 9 } else { 8 };
         let media = MediaEntry {
-            id: row.try_get(8)?,
-            extension_id: row.try_get(9)?,
-            title: row.try_get(10)?,
-            english_name: row.try_get(11)?,
-            native_name: row.try_get(12)?,
-            description: row.try_get(13)?,
-            cover_url: row.try_get(14)?,
-            banner_url: row.try_get(15)?,
-            trailer_url: row.try_get(16)?,
-            media_type: row.try_get(17)?,
-            content_type: row.try_get(18)?,
-            status: row.try_get(19)?,
-            year: row.try_get(20)?,
-            rating: row.try_get(21)?,
-            episode_count: row.try_get(22)?,
-            episode_duration: row.try_get(23)?,
-            season_quarter: row.try_get(24)?,
-            season_year: row.try_get(25)?,
-            aired_start_year: row.try_get(26)?,
-            aired_start_month: row.try_get(27)?,
-            aired_start_date: row.try_get(28)?,
-            genres: row.try_get(29)?,
-            created_at: row.try_get(30)?,
-            updated_at: row.try_get(31)?,
+            id: row.try_get(media_offset)?,
+            extension_id: row.try_get(media_offset + 1)?,
+            title: row.try_get(media_offset + 2)?,
+            english_name: row.try_get(media_offset + 3)?,
+            native_name: row.try_get(media_offset + 4)?,
+            description: row.try_get(media_offset + 5)?,
+            cover_url: row.try_get(media_offset + 6)?,
+            banner_url: row.try_get(media_offset + 7)?,
+            trailer_url: row.try_get(media_offset + 8)?,
+            media_type: row.try_get(media_offset + 9)?,
+            content_type: row.try_get(media_offset + 10)?,
+            status: row.try_get(media_offset + 11)?,
+            year: row.try_get(media_offset + 12)?,
+            rating: row.try_get(media_offset + 13)?,
+            episode_count: row.try_get(media_offset + 14)?,
+            episode_duration: row.try_get(media_offset + 15)?,
+            season_quarter: row.try_get(media_offset + 16)?,
+            season_year: row.try_get(media_offset + 17)?,
+            aired_start_year: row.try_get(media_offset + 18)?,
+            aired_start_month: row.try_get(media_offset + 19)?,
+            aired_start_date: row.try_get(media_offset + 20)?,
+            genres: row.try_get(media_offset + 21)?,
+            created_at: row.try_get(media_offset + 22)?,
+            updated_at: row.try_get(media_offset + 23)?,
         };
 
         results.push(LibraryEntryWithMedia {

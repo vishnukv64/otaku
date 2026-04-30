@@ -864,6 +864,7 @@ export interface LibraryEntry {
   notes?: string
   added_at: string
   updated_at: string
+  auto_download: boolean
 }
 
 /**
@@ -917,6 +918,13 @@ export async function getLibraryWithMedia(status?: LibraryStatus): Promise<Libra
  */
 export async function toggleFavorite(mediaId: string): Promise<boolean> {
   return await invoke('toggle_favorite', { mediaId })
+}
+
+/**
+ * Enable or disable auto-download for newly released episodes of a library entry
+ */
+export async function setAutoDownload(mediaId: string, enabled: boolean): Promise<boolean> {
+  return await invoke('set_auto_download', { mediaId, enabled })
 }
 
 /**

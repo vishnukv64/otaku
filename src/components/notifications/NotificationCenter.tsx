@@ -15,8 +15,10 @@ import {
   type ReleaseCheckSettings,
   type ReleaseCheckStatus,
   getCachedMediaDetails,
+  acknowledgeNewReleases,
 } from '@/utils/tauri-commands'
 import { NotificationItem } from './NotificationItem'
+import { ReleaseRadarGroupCard, groupReleaseNotifications, type ReleaseGroup } from './ReleaseRadarGroupCard'
 
 /** Format relative time for last check */
 function formatRelativeTime(timestamp: number | null): string {
@@ -91,6 +93,11 @@ export function NotificationCenter() {
     if (activeTab === 'all') return notifications
     return notifications.filter((n) => getNotifCategory(n) === activeTab)
   }, [notifications, activeTab])
+
+  const releaseGroups = useMemo(() => {
+    if (activeTab !== 'episode' && activeTab !== 'chapter') return []
+    return groupReleaseNotifications(filteredNotifications, coverUrls)
+  }, [activeTab, filteredNotifications, coverUrls])
 
   // Load release settings, status, and cover URLs when panel opens
   useEffect(() => {
@@ -272,6 +279,51 @@ export function NotificationCenter() {
     setIsOpen(false)
   }
 
+  const handleReleaseGroupAction = useCallback(
+    (group: ReleaseGroup) => {
+      const target = group.notifications[0]
+      if (!target) return
+
+      group.notifications.forEach((notification) => {
+        if (!notification.read) {
+          markAsRead(notification.id)
+        }
+      })
+
+      if (target.action?.route) {
+        navigate({ to: target.action.route })
+      }
+      setIsOpen(false)
+    },
+    [markAsRead, navigate],
+  )
+
+  const handleReleaseGroupDismiss = useCallback(
+    (group: ReleaseGroup) => {
+      group.notifications.forEach((notification) => dismiss(notification.id))
+    },
+    [dismiss],
+  )
+
+  const handleReleaseGroupAcknowledge = useCallback(
+    async (group: ReleaseGroup) => {
+      if (!group.mediaId) return
+
+      try {
+        await acknowledgeNewReleases(group.mediaId, group.latestNumber ?? undefined)
+      } catch (error) {
+        console.error('Failed to acknowledge grouped releases:', error)
+      }
+
+      group.notifications.forEach((notification) => {
+        if (!notification.read) {
+          markAsRead(notification.id)
+        }
+      })
+    },
+    [markAsRead],
+  )
+
   const tabs: { key: TabType; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'episode', label: 'Episodes' },
@@ -447,6 +499,9 @@ export function NotificationCenter() {
                       {releaseStatus.items_checked > 0 && (
                         <> · {releaseStatus.items_checked} items</>
                       )}
+                      {releaseStatus.new_releases_found > 0 && (
+                        <> · {releaseStatus.new_releases_found} new</>
+                      )}
                     </span>
                   </div>
                 )}
@@ -462,6 +517,18 @@ export function NotificationCenter() {
                     {activeTab === 'all' ? 'No notifications yet' : `No ${activeTab} notifications`}
                   </div>
                   <div className="text-[0.8125rem]">New updates will appear here</div>
+                </div>
+              ) : releaseGroups.length > 0 ? (
+                <div className="space-y-2 px-1 py-1">
+                  {releaseGroups.map((group) => (
+                    <ReleaseRadarGroupCard
+                      key={group.mediaId ?? `${group.mediaType}:${group.mediaTitle}`}
+                      group={group}
+                      onDismiss={handleReleaseGroupDismiss}
+                      onAction={handleReleaseGroupAction}
+                      onAcknowledge={handleReleaseGroupAcknowledge}
+                    />
+                  ))}
                 </div>
               ) : (
                 filteredNotifications.map((notification) => (

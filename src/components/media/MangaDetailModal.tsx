@@ -22,6 +22,8 @@ import {
   Trash2,
   Bell,
   Tags,
+  ThumbsDown,
+  ThumbsUp,
 } from 'lucide-react'
 import {
   getMangaDetails,
@@ -29,6 +31,7 @@ import {
   addToLibrary,
   removeFromLibrary,
   isInLibrary,
+  getLibraryEntry,
   toggleFavorite,
   getLatestReadingProgressForMedia,
   getBatchReadingProgress,
@@ -40,6 +43,9 @@ import {
   initializeReleaseTracking,
   getMediaTags,
   unassignLibraryTag,
+  setMediaFeedback,
+  getMediaFeedback,
+  removeMediaFeedback,
   type MediaEntry,
   type LibraryStatus,
   type LibraryTag,
@@ -124,6 +130,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
   const [activeTab, setActiveTab] = useState('overview')
+  const [feedback, setFeedback] = useState<'liked' | 'disliked' | null>(null)
 
   const [resolvedMangaId, setResolvedMangaId] = useState<string | null>(manga?.id || null)
   const [chaptersLoading, setChaptersLoading] = useState(false)
@@ -266,6 +273,13 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
             } catch {
               // Ignore tag loading errors
             }
+
+            try {
+              const savedFeedback = await getMediaFeedback(manga.id)
+              setFeedback(savedFeedback?.sentiment ?? null)
+            } catch {
+              // Ignore feedback loading errors
+            }
           }
         } catch {
           // Ignore
@@ -339,6 +353,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   // Reset enrichment state when manga changes
   useEffect(() => {
     setActiveTab('chapters')
+    setFeedback(null)
   }, [manga?.id])
 
   if (!manga) return null
@@ -540,9 +555,12 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     try {
       await ensureMediaSaved()
 
-      if (!inLibrary) {
+      const libraryEntry = await getLibraryEntry(manga.id)
+
+      if (!libraryEntry) {
         await addToLibrary(manga.id, 'plan_to_read')
         setInLibrary(true)
+        setLibraryStatus('plan_to_read')
         const chapterCount = effectiveChapters.length || details.chapters.length
         if (chapterCount > 0) {
           try {
@@ -579,6 +597,32 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
     } catch (err) {
       notifyError('Favorites Error', `Failed to update favorites for "${details.title}"`)
       console.error(err)
+    }
+  }
+
+  const handleFeedback = async (sentiment: 'liked' | 'disliked') => {
+    if (!manga) return
+
+    const previousFeedback = feedback
+
+    if (feedback === sentiment) {
+      setFeedback(null)
+      try {
+        await removeMediaFeedback(manga.id)
+      } catch (error) {
+        console.error('Failed to remove feedback:', error)
+        setFeedback(previousFeedback)
+      }
+      return
+    }
+
+    setFeedback(sentiment)
+    try {
+      await setMediaFeedback(manga.id, sentiment)
+      notifySuccess('Feedback', 'Noted! This helps recommendations')
+    } catch (error) {
+      console.error('Failed to set feedback:', error)
+      setFeedback(previousFeedback)
     }
   }
 
@@ -900,6 +944,39 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
             >
               <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
             </button>
+
+            {inLibrary && (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleFeedback('liked')
+                  }}
+                  className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
+                    feedback === 'liked'
+                      ? 'bg-emerald-500 text-white border-emerald-400'
+                      : 'glass text-[var(--color-text-muted)] hover:text-white'
+                  }`}
+                  aria-label={feedback === 'liked' ? 'Remove like' : 'Like this manga'}
+                >
+                  <ThumbsUp className={`w-5 h-5 ${feedback === 'liked' ? 'fill-current' : ''}`} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleFeedback('disliked')
+                  }}
+                  className={`flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] transition-all duration-150 border ${
+                    feedback === 'disliked'
+                      ? 'bg-red-500 text-white border-red-400'
+                      : 'glass text-[var(--color-text-muted)] hover:text-white'
+                  }`}
+                  aria-label={feedback === 'disliked' ? 'Remove dislike' : 'Dislike this manga'}
+                >
+                  <ThumbsDown className={`w-5 h-5 ${feedback === 'disliked' ? 'fill-current' : ''}`} />
+                </button>
+              </>
+            )}
 
             {/* Release tracking indicator */}
             {isTracked && (
@@ -1301,7 +1378,7 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[200] overflow-y-auto animate-in fade-in duration-300">
       <div
         className="fixed inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
         onClick={onClose}

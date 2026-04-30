@@ -64,6 +64,7 @@ import { SeasonalTrends } from './SeasonalTrends'
 import { WatchCompletionRate } from './WatchCompletionRate'
 import { FavoritesOverview } from './FavoritesOverview'
 import { TimeToCompletion } from './TimeToCompletion'
+import { CompletionPredictor } from './CompletionPredictor'
 import { YearDistribution } from './YearDistribution'
 import { Milestones } from './Milestones'
 import { MonthlyRecap } from './MonthlyRecap'
@@ -296,6 +297,13 @@ export function StatsPage() {
             <TimeToCompletion data={timeToComplete} />
           </FadeIn>
           <FadeIn delay={160}>
+            <CompletionPredictor
+              timeToComplete={timeToComplete}
+              completionRate={completionRate}
+              patterns={patterns}
+            />
+          </FadeIn>
+          <FadeIn delay={240}>
             <TopContent topAnime={topAnime} topManga={topManga} />
           </FadeIn>
         </SectionGroup>
@@ -304,21 +312,24 @@ export function StatsPage() {
         <SectionGroup
           id="taste"
           title="Taste"
-          subtitle="Your preferences and patterns"
+          subtitle="What you love and how you rate it"
           sectionRef={setSectionRef('taste')}
         >
           <FadeIn delay={0}>
+            <YourType topGenres={topGenres} scores={scores} />
+          </FadeIn>
+          <FadeIn delay={80}>
             <GenreDistribution />
           </FadeIn>
-          <FadeIn delay={80} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <FadeIn delay={160} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ContentTypeBreakdown data={contentTypes} />
             <FavoritesOverview data={favorites} />
           </FadeIn>
-          <FadeIn delay={160} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <FadeIn delay={240} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ScoreDistribution data={scores} />
             <RatingComparison data={ratingComparison} />
           </FadeIn>
-          <FadeIn delay={240} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <FadeIn delay={320} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <SeasonalTrends data={seasons} />
             <YearDistribution data={yearDist} />
           </FadeIn>
@@ -328,14 +339,11 @@ export function StatsPage() {
         <SectionGroup
           id="achievements"
           title="Achievements"
-          subtitle="Your milestones and personality"
+          subtitle="The milestones you've unlocked so far"
           sectionRef={setSectionRef('achievements')}
         >
           <FadeIn delay={0}>
             <Milestones data={milestones} />
-          </FadeIn>
-          <FadeIn delay={80}>
-            <YourType topGenres={topGenres} scores={scores} />
           </FadeIn>
         </SectionGroup>
 

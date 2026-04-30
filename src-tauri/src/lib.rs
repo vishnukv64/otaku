@@ -398,6 +398,7 @@ pub fn run() {
       commands::get_library_by_status,
       commands::get_library_with_media,
       commands::toggle_favorite,
+      commands::set_auto_download,
       commands::is_in_library,
       // Library Tags
       commands::create_library_tag,

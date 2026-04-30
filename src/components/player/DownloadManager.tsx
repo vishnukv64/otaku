@@ -186,6 +186,17 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     }
   }, [])
 
+  const mediaMeta = (mediaId?: string) => {
+    if (!mediaId) return undefined
+    const cover = coverUrls[mediaId]
+    return {
+      metadata: {
+        media_id: mediaId,
+        ...(cover ? { thumbnail: cover, image: cover } : {}),
+      },
+    }
+  }
+
   const handleCancel = async (downloadId: string) => {
     const download = downloads.find(d => d.id === downloadId)
     const displayName = download ? `Episode ${download.episode_number}` : 'Download'
@@ -194,10 +205,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       // Refresh downloads
       const result = await listDownloads()
       setDownloads(result)
-      notifySuccess('Download Cancelled', `Cancelled ${displayName}`)
+      notifySuccess('Download Cancelled', `Cancelled ${displayName}`, mediaMeta(download?.media_id))
     } catch (error) {
       console.error('Failed to cancel download:', error)
-      notifyError('Cancel Failed', `Failed to cancel ${displayName}`)
+      notifyError('Cancel Failed', `Failed to cancel ${displayName}`, mediaMeta(download?.media_id))
     }
   }
 
@@ -206,10 +217,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const displayName = download ? `Episode ${download.episode_number}` : 'Download'
     try {
       await pauseDownload(downloadId)
-      notifySuccess('Download Paused', `Paused ${displayName}`)
+      notifySuccess('Download Paused', `Paused ${displayName}`, mediaMeta(download?.media_id))
     } catch (error) {
       console.error('Failed to pause download:', error)
-      notifyError('Pause Failed', `Failed to pause ${displayName}`)
+      notifyError('Pause Failed', `Failed to pause ${displayName}`, mediaMeta(download?.media_id))
     }
   }
 
@@ -218,10 +229,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const displayName = download ? `Episode ${download.episode_number}` : 'Download'
     try {
       await resumeDownload(downloadId)
-      notifySuccess('Download Resumed', `Resumed ${displayName}`)
+      notifySuccess('Download Resumed', `Resumed ${displayName}`, mediaMeta(download?.media_id))
     } catch (error) {
       console.error('Failed to resume download:', error)
-      notifyError('Resume Failed', `Failed to resume ${displayName}`)
+      notifyError('Resume Failed', `Failed to resume ${displayName}`, mediaMeta(download?.media_id))
     }
   }
 
@@ -231,7 +242,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const cleanFilename = filename.replace(/_/g, ' ').replace(/\.[^/.]+$/, '')
     const displayName = download ? `Episode ${download.episode_number}` : cleanFilename
 
-    const confirmed = await ask(`Delete "${cleanFilename}"? This will permanently remove the file.`, { kind: 'warning' })
+    const confirmMessage = download && download.status !== 'completed'
+      ? `Remove "${cleanFilename}" and delete any partial file?`
+      : `Delete "${cleanFilename}"? This will permanently remove the file.`
+    const confirmed = await ask(confirmMessage, { kind: 'warning' })
     if (!confirmed) return
 
     try {
@@ -243,10 +257,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       ])
       setDownloads(downloadsList)
       setTotalStorage(storage)
-      notifySuccess('Download Deleted', `Deleted "${cleanFilename}"`)
+      notifySuccess('Download Deleted', `Deleted "${cleanFilename}"`, mediaMeta(download?.media_id))
     } catch (error) {
       console.error('Failed to delete download:', error)
-      notifyError('Delete Failed', `Failed to delete ${displayName}`)
+      notifyError('Delete Failed', `Failed to delete ${displayName}`, mediaMeta(download?.media_id))
     }
   }
 
@@ -304,21 +318,25 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   }
 
   const handleDeleteAnime = async (mediaId: string, mediaTitle: string) => {
-    const animeDownloads = downloads.filter(d => d.media_id === mediaId && d.status === 'completed')
+    const animeDownloads = downloads.filter(d => d.media_id === mediaId)
 
     if (animeDownloads.length === 0) {
-      notifyError('No Downloads', 'No completed downloads to delete')
+      notifyError('No Downloads', 'No downloads to delete')
       return
     }
 
-    const confirmed = await ask(`Delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`, { kind: 'warning' })
+    const completedInGroup = animeDownloads.filter(d => d.status === 'completed').length
+    const inFlightInGroup = animeDownloads.length - completedInGroup
+    const summary = inFlightInGroup > 0
+      ? `Delete all ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed file${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
+      : `Delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`
+
+    const confirmed = await ask(summary, { kind: 'warning' })
     if (!confirmed) return
 
     try {
-      // Delete all downloads for this anime
       await Promise.all(animeDownloads.map(d => deleteDownload(d.id)))
 
-      // Refresh downloads
       const [downloadsList, storage] = await Promise.all([
         listDownloads(),
         getTotalStorageUsed()
@@ -326,10 +344,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       setDownloads(downloadsList)
       setTotalStorage(storage)
 
-      notifySuccess(mediaTitle, `Deleted ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''}`)
+      notifySuccess(mediaTitle, `Deleted ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''}`, mediaMeta(mediaId))
     } catch (error) {
       console.error('Failed to delete anime downloads:', error)
-      notifyError(mediaTitle, 'Failed to delete some episodes')
+      notifyError(mediaTitle, 'Failed to delete some episodes', mediaMeta(mediaId))
     }
   }
 
@@ -341,10 +359,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       // Refresh chapter downloads
       const result = await listAllChapterDownloads()
       setChapterDownloads(result)
-      notifySuccess('Download Cancelled', `Cancelled "${displayName}"`)
+      notifySuccess('Download Cancelled', `Cancelled "${displayName}"`, mediaMeta(mediaId))
     } catch (error) {
       console.error('Failed to cancel chapter download:', error)
-      notifyError('Cancel Failed', `Failed to cancel "${displayName}"`)
+      notifyError('Cancel Failed', `Failed to cancel "${displayName}"`, mediaMeta(mediaId))
     }
   }
 
@@ -366,29 +384,33 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       setChapterDownloads(chaptersList)
       setTotalStorage(storage)
 
-      notifySuccess('Chapter Deleted', `Deleted "${displayName}"`)
+      notifySuccess('Chapter Deleted', `Deleted "${displayName}"`, mediaMeta(mediaId))
     } catch (error) {
       console.error('Failed to delete chapter:', error)
-      notifyError('Delete Failed', `Failed to delete "${displayName}"`)
+      notifyError('Delete Failed', `Failed to delete "${displayName}"`, mediaMeta(mediaId))
     }
   }
 
   const handleDeleteManga = async (mediaId: string, mediaTitle: string) => {
-    const mangaChapters = chapterDownloads.filter(d => d.media_id === mediaId && d.status === 'completed')
+    const mangaChapters = chapterDownloads.filter(d => d.media_id === mediaId)
 
     if (mangaChapters.length === 0) {
-      notifyError('No Downloads', `No completed downloads for "${mediaTitle}"`)
+      notifyError('No Downloads', `No downloads for "${mediaTitle}"`)
       return
     }
 
-    const confirmed = await ask(`Delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`, { kind: 'warning' })
+    const completedInGroup = mangaChapters.filter(d => d.status === 'completed').length
+    const inFlightInGroup = mangaChapters.length - completedInGroup
+    const summary = inFlightInGroup > 0
+      ? `Delete all ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed chapter${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
+      : `Delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`
+
+    const confirmed = await ask(summary, { kind: 'warning' })
     if (!confirmed) return
 
     try {
-      // Delete all chapters for this manga
       await Promise.all(mangaChapters.map(d => deleteChapterDownload(d.media_id, d.chapter_id)))
 
-      // Refresh downloads
       const [chaptersList, storage] = await Promise.all([
         listAllChapterDownloads(),
         getTotalStorageUsed()
@@ -396,10 +418,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       setChapterDownloads(chaptersList)
       setTotalStorage(storage)
 
-      notifySuccess(mediaTitle, `Deleted ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''}`)
+      notifySuccess(mediaTitle, `Deleted ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''}`, mediaMeta(mediaId))
     } catch (error) {
       console.error('Failed to delete manga chapters:', error)
-      notifyError(mediaTitle, 'Failed to delete some chapters')
+      notifyError(mediaTitle, 'Failed to delete some chapters', mediaMeta(mediaId))
     }
   }
 
@@ -424,6 +446,19 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       notifySuccess('Downloads Paused', `Paused ${activeDownloads.length} download(s)`)
     } catch {
       notifyError('Pause Failed', 'Failed to pause some downloads')
+    }
+  }
+
+  const handleResumeAll = async () => {
+    const pausedDownloads = downloads.filter(d => d.status === 'paused')
+    if (pausedDownloads.length === 0) return
+    try {
+      await Promise.all(pausedDownloads.map(d => resumeDownload(d.id)))
+      const downloadsList = await listDownloads()
+      setDownloads(downloadsList)
+      notifySuccess('Downloads Resumed', `Resumed ${pausedDownloads.length} download(s)`)
+    } catch {
+      notifyError('Resume Failed', 'Failed to resume some downloads')
     }
   }
 
@@ -494,7 +529,10 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
 
   // Stats computation
   const completedCount = downloads.filter(d => d.status === 'completed').length + chapterDownloads.filter(d => d.status === 'completed').length
-  const inProgressCount = downloads.filter(d => ['downloading', 'paused', 'queued'].includes(d.status)).length + chapterDownloads.filter(d => ['downloading', 'queued'].includes(d.status)).length
+  const activeCount = downloads.filter(d => d.status === 'downloading').length + chapterDownloads.filter(d => d.status === 'downloading').length
+  const queuedCount = downloads.filter(d => d.status === 'queued').length + chapterDownloads.filter(d => d.status === 'queued').length
+  const pausedCount = downloads.filter(d => d.status === 'paused').length
+  const inProgressCount = activeCount + queuedCount + pausedCount
   const failedCount = downloads.filter(d => d.status === 'failed').length + chapterDownloads.filter(d => d.status === 'failed').length
   const totalCount = downloads.length + chapterDownloads.length
   const seriesCount = groupedDownloads.length + groupedChapterDownloads.length
@@ -593,8 +631,18 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         </div>
         <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)]" />
         <div className="flex items-center gap-1.5">
-          <span className="font-mono text-[0.9rem] font-semibold">{inProgressCount}</span>
-          <span className="text-[0.7rem] text-[var(--color-text-muted)]">In Progress</span>
+          <span className="font-mono text-[0.9rem] font-semibold">{activeCount}</span>
+          <span className="text-[0.7rem] text-[var(--color-text-muted)]">Active</span>
+        </div>
+        <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)]" />
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono text-[0.9rem] font-semibold">{queuedCount}</span>
+          <span className="text-[0.7rem] text-[var(--color-text-muted)]">Queued</span>
+        </div>
+        <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)]" />
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono text-[0.9rem] font-semibold">{pausedCount}</span>
+          <span className="text-[0.7rem] text-[var(--color-text-muted)]">Paused</span>
         </div>
         <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)]" />
         <div className="flex items-center gap-1.5">
@@ -641,9 +689,14 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
               <Trash2 size={14} /> Clear failed
             </button>
           )}
-          {inProgressCount > 0 && (
+          {activeCount > 0 && (
             <button onClick={handlePauseAll} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-white/10 rounded-lg transition-colors text-sm">
               <Pause size={14} /> Pause All
+            </button>
+          )}
+          {pausedCount > 0 && (
+            <button onClick={handleResumeAll} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-white/10 rounded-lg transition-colors text-sm">
+              <Play size={14} /> Resume All
             </button>
           )}
         </div>
@@ -813,7 +866,13 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
 
           {filteredAnimeGroups.length === 0 && filteredMangaGroups.length === 0 && (
             <div className="text-center py-12 text-[var(--color-text-muted)]">
-              No downloads match the selected filter
+              {activeTab === 'completed' && completedCount === 0
+                ? 'Nothing finished yet. Completed downloads will show up here.'
+                : activeTab === 'in_progress' && inProgressCount === 0
+                  ? 'No active, queued, or paused downloads right now.'
+                  : activeTab === 'failed' && failedCount === 0
+                    ? 'No failed downloads. Nice.'
+                    : 'No downloads match the selected filter.'}
             </div>
           )}
         </div>
@@ -1027,19 +1086,24 @@ function DownloadItem({
             <button onClick={() => onResume(download.id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-green-400 hover:bg-green-500/10 flex items-center justify-center transition-all" title="Resume">
               <Play size={13} />
             </button>
-            <button onClick={() => onCancel(download.id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Cancel">
-              <X size={13} />
+            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+              <Trash2 size={13} />
             </button>
           </>
         )}
         {download.status === 'failed' && (
-          <button onClick={() => onResume(download.id)} className="inline-flex items-center gap-1 px-2.5 py-[3px] rounded-[var(--radius-sm)] text-[0.7rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/25 hover:bg-red-400/[0.22] hover:border-red-400/40 transition-all cursor-pointer" title="Retry">
-            Retry
-          </button>
+          <>
+            <button onClick={() => onResume(download.id)} className="inline-flex items-center gap-1 px-2.5 py-[3px] rounded-[var(--radius-sm)] text-[0.7rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/25 hover:bg-red-400/[0.22] hover:border-red-400/40 transition-all cursor-pointer" title="Retry">
+              Retry
+            </button>
+            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+              <Trash2 size={13} />
+            </button>
+          </>
         )}
         {download.status === 'queued' && (
-          <button onClick={() => onCancel(download.id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Cancel">
-            <X size={13} />
+          <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+            <Trash2 size={13} />
           </button>
         )}
         {download.status === 'completed' && (

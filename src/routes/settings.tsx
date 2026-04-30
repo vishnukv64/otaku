@@ -137,6 +137,7 @@ function SettingsScreen() {
 
   const handleResetSettings = () => {
     settings.resetToDefaults()
+    updatePlayerSettings({ playbackSpeed: 1.0 })
     notifySuccess('Settings Reset', 'Settings have been reset to defaults')
   }
 
@@ -247,6 +248,22 @@ function SettingsScreen() {
                     settings.updateSettings({ defaultVolume: value / 100 })
                   }
                   formatValue={(v) => `${Math.round(v)}%`}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Default Playback Speed"
+                description="Preferred playback speed for new and ongoing videos"
+              >
+                <SettingSlider
+                  value={settings.defaultPlaybackSpeed}
+                  min={0.5}
+                  max={2}
+                  step={0.25}
+                  onChange={(value) => {
+                    settings.updateSettings({ defaultPlaybackSpeed: value })
+                    updatePlayerSettings({ playbackSpeed: value })
+                  }}
+                  formatValue={(v) => `${v.toFixed(v % 1 === 0 ? 1 : 2)}x`}
                 />
               </SettingRow>
               <SettingRow

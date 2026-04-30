@@ -188,6 +188,8 @@ pub struct ReleaseCheckResult {
     pub extension_id: String,
     pub detection_signal: String,  // "number", "id", "count"
     pub cover_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_episode_id: Option<String>,
 }
 
 /// Progress update during release checking
@@ -265,6 +267,7 @@ struct EligibleMedia {
     consecutive_failures: i32,
     user_notified_up_to: Option<f32>,
     cover_url: Option<String>,
+    auto_download: bool,
 }
 
 /// Extracted episode info for comparison
@@ -668,7 +671,8 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             COALESCE(rt.normalized_status, 'unknown') as normalized_status,
             COALESCE(rt.consecutive_failures, 0) as consecutive_failures,
             rt.user_notified_up_to,
-            m.cover_url
+            m.cover_url,
+            COALESCE(l.auto_download, 0) as auto_download
         FROM media m
         INNER JOIN library l ON m.id = l.media_id
         LEFT JOIN release_tracking_v2 rt ON m.id = rt.media_id
@@ -716,6 +720,7 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             consecutive_failures: row.try_get("consecutive_failures")?,
             user_notified_up_to: row.try_get("user_notified_up_to")?,
             cover_url: row.try_get("cover_url")?,
+            auto_download: row.try_get::<i64, _>("auto_download")? != 0,
         });
     }
 
@@ -1063,6 +1068,7 @@ async fn check_single_media(
                 extension_id: media.extension_id.clone(),
                 detection_signal: signal,
                 cover_url: media.cover_url.clone(),
+                latest_episode_id: current.latest_id.clone(),
             }));
         }
     } else {
@@ -1078,6 +1084,147 @@ async fn check_single_media(
     }
 
     Ok(None)
+}
+
+/// Pick the highest-priority anime source for silent auto-download.
+/// Prefers HLS sources with numeric resolution, falling back to the first entry.
+fn pick_auto_download_source(
+    sources: &crate::extensions::VideoSources,
+) -> Option<&crate::extensions::VideoSource> {
+    let by_resolution = sources
+        .sources
+        .iter()
+        .filter(|s| s.resolution.is_some())
+        .max_by_key(|s| s.resolution.unwrap_or(0));
+    by_resolution.or_else(|| sources.sources.first())
+}
+
+fn sanitize_filename(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string()
+}
+
+/// Trigger an auto-download for a newly released anime episode.
+/// Best-effort: all failures are logged but never propagated so the release
+/// checker remains unaffected. Callers must already have confirmed the media
+/// is opted-in and that `latest_episode_id` is available.
+async fn trigger_auto_download(
+    app_handle: &AppHandle,
+    app_state: &AppState,
+    media: &EligibleMedia,
+    result: &ReleaseCheckResult,
+) {
+    if media.media_type != "anime" {
+        return;
+    }
+
+    let Some(episode_id) = result.latest_episode_id.clone() else {
+        log::debug!("Auto-download skipped for {}: no latest episode id", media.media_id);
+        return;
+    };
+
+    let extension = {
+        let extensions = match app_state.extensions.read() {
+            Ok(guard) => guard,
+            Err(e) => {
+                log::warn!("Auto-download: failed to lock extensions: {}", e);
+                return;
+            }
+        };
+        extensions
+            .iter()
+            .find(|ext| ext.metadata.id == media.extension_id)
+            .cloned()
+    };
+
+    let Some(extension) = extension else {
+        log::warn!(
+            "Auto-download: extension {} not found for {}",
+            media.extension_id,
+            media.media_id
+        );
+        return;
+    };
+
+    let episode_number = result
+        .current_number
+        .map(|n| n.round() as i32)
+        .unwrap_or(result.current_count);
+
+    let picked = {
+        let runtime = match ExtensionRuntime::new(extension) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("Auto-download: failed to init runtime: {}", e);
+                return;
+            }
+        };
+        let sources = match runtime.get_sources(&episode_id) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!(
+                    "Auto-download: failed to fetch sources for {} ep {}: {}",
+                    media.media_id, episode_id, e
+                );
+                return;
+            }
+        };
+        pick_auto_download_source(&sources).map(|s| {
+            (
+                s.url.clone(),
+                s.source_type.clone(),
+                s.resolution,
+                s.quality.clone(),
+            )
+        })
+    };
+
+    let Some((url, source_type, resolution, quality)) = picked else {
+        log::warn!(
+            "Auto-download: no usable sources for {} ep {}",
+            media.media_id, episode_id
+        );
+        return;
+    };
+
+    let safe_title = sanitize_filename(&media.title);
+    let quality_label = resolution
+        .map(|r| format!("{}p", r))
+        .unwrap_or_else(|| quality.clone());
+    let extension_part = if source_type == "hls" { "m3u8" } else { "mp4" };
+    let filename = format!(
+        "{}_EP{}_{}.{}",
+        safe_title, episode_number, sanitize_filename(&quality_label), extension_part
+    );
+    let download_id = format!("auto_{}_{}", media.media_id, episode_number);
+
+    let download_manager = app_handle.state::<crate::downloads::DownloadManager>();
+    if let Err(e) = download_manager
+        .queue_download(
+            download_id.clone(),
+            media.media_id.clone(),
+            episode_id.clone(),
+            episode_number,
+            url,
+            filename,
+            None,
+        )
+        .await
+    {
+        log::warn!(
+            "Auto-download: queue_download failed for {}: {}",
+            download_id, e
+        );
+    } else {
+        log::info!(
+            "Auto-download queued for {} ep {} ({})",
+            media.title, episode_number, download_id
+        );
+    }
 }
 
 /// Run a full release check on all eligible media.
@@ -1164,6 +1311,10 @@ pub async fn run_full_release_check(
 
                 if let Err(e) = emit_release_notification(app_handle, pool, &result).await {
                     log::error!("Failed to emit notification for {}: {}", result.media_id, e);
+                }
+
+                if media.auto_download {
+                    trigger_auto_download(app_handle, &app_state, media, &result).await;
                 }
 
                 results.push(result);

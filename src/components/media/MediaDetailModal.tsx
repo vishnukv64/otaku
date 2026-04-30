@@ -31,6 +31,7 @@ import {
   Clock,
   ThumbsUp,
   ThumbsDown,
+  DownloadCloud,
 } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo, toastSuccess } from '@/utils/notify'
 import type { SearchResult, MediaDetails } from '@/types/extension'
@@ -53,6 +54,8 @@ import {
   saveWatchProgress,
   toggleFavorite,
   initializeReleaseTracking,
+  getLibraryEntry,
+  setAutoDownload,
   getMediaTags,
   unassignLibraryTag,
   setMediaFeedback,
@@ -163,6 +166,7 @@ interface MediaDetailModalProps {
   isOpen: boolean
   onClose: () => void
   onMediaChange?: (media: SearchResult) => void
+  onFeedbackChange?: () => void
 }
 
 export function MediaDetailModal({
@@ -171,6 +175,7 @@ export function MediaDetailModal({
   isOpen,
   onClose,
   onMediaChange,
+  onFeedbackChange,
 }: MediaDetailModalProps) {
   const navigate = useNavigate()
   const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
@@ -182,6 +187,7 @@ export function MediaDetailModal({
   const [libraryStatus, setLibraryStatus] = useState<LibraryStatus | null>(null)
   const [isFavorite, setIsFavorite] = useState(false)
   const [isTracked, setIsTracked] = useState(false)
+  const [autoDownload, setAutoDownloadState] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(false)
 
   const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
@@ -668,11 +674,22 @@ export function MediaDetailModal({
       reading: 'Reading',
       plan_to_read: 'Plan to Read',
     }
+    const notificationCover = details?.cover_url || media.cover_url
     try {
       await addToLibrary(media.id, status)
       setInLibrary(true)
       setLibraryStatus(status)
-      notifySuccess(media.title, `Added to "${statusLabels[status]}" list`)
+      notifySuccess(media.title, `Added to "${statusLabels[status]}" list`, {
+        metadata: {
+          media_id: media.id,
+          ...(notificationCover
+            ? {
+                thumbnail: notificationCover,
+                image: notificationCover,
+              }
+            : {}),
+        },
+      })
       // Fetch post-completion recommendations
       if (status === 'completed') {
         getContentRecommendations(6)
@@ -696,7 +713,17 @@ export function MediaDetailModal({
       refreshMediaStatus()
     } catch (error) {
       console.error('Failed to add to library:', error)
-      notifyError('Library Error', `Failed to add "${media.title}" to library`)
+      notifyError('Library Error', `Failed to add "${media.title}" to library`, {
+        metadata: {
+          media_id: media.id,
+          ...(notificationCover
+            ? {
+                thumbnail: notificationCover,
+                image: notificationCover,
+              }
+            : {}),
+        },
+      })
     } finally {
       setLibraryLoading(false)
     }
@@ -704,17 +731,38 @@ export function MediaDetailModal({
 
   const handleRemoveFromLibrary = async () => {
     setLibraryLoading(true)
+    const notificationCover = details?.cover_url || media.cover_url
     try {
       await removeFromLibrary(media.id)
       setInLibrary(false)
       setLibraryStatus(null)
       setIsFavorite(false)
-      notifySuccess(media.title, 'Removed from your library')
+      notifySuccess(media.title, 'Removed from your library', {
+        metadata: {
+          media_id: media.id,
+          ...(notificationCover
+            ? {
+                thumbnail: notificationCover,
+                image: notificationCover,
+              }
+            : {}),
+        },
+      })
       // Refresh media status context so badges update across the app
       refreshMediaStatus()
     } catch (error) {
       console.error('Failed to remove from library:', error)
-      notifyError('Library Error', `Failed to remove "${media.title}" from library`)
+      notifyError('Library Error', `Failed to remove "${media.title}" from library`, {
+        metadata: {
+          media_id: media.id,
+          ...(notificationCover
+            ? {
+                thumbnail: notificationCover,
+                image: notificationCover,
+              }
+            : {}),
+        },
+      })
     } finally {
       setLibraryLoading(false)
     }
@@ -768,6 +816,23 @@ export function MediaDetailModal({
     }
   }
 
+  const handleToggleAutoDownload = async () => {
+    if (!inLibrary) return
+    const next = !autoDownload
+    setAutoDownloadState(next)
+    try {
+      await setAutoDownload(media.id, next)
+      toastSuccess(
+        'Auto-download',
+        next ? 'New episodes will download automatically.' : 'Auto-download disabled.',
+      )
+    } catch (error) {
+      console.error('Failed to update auto-download:', error)
+      setAutoDownloadState(!next)
+      notifyError('Auto-download', 'Could not update auto-download setting.')
+    }
+  }
+
   const handleFeedback = async (sentiment: 'liked' | 'disliked') => {
     const prev = feedback
     if (feedback === sentiment) {
@@ -775,6 +840,7 @@ export function MediaDetailModal({
       setFeedback(null)
       try {
         await removeMediaFeedback(media.id)
+        onFeedbackChange?.()
       } catch (error) {
         console.error('Failed to remove feedback:', error)
         setFeedback(prev) // revert on error
@@ -785,6 +851,7 @@ export function MediaDetailModal({
       try {
         await setMediaFeedback(media.id, sentiment)
         toastSuccess('Feedback', 'Noted! This helps recommendations')
+        onFeedbackChange?.()
       } catch (error) {
         console.error('Failed to set feedback:', error)
         setFeedback(prev) // revert on error
@@ -1008,6 +1075,10 @@ export function MediaDetailModal({
         if (status) {
           const fb = await getMediaFeedback(media.id)
           setFeedback(fb?.sentiment ?? null)
+          const libEntry = await getLibraryEntry(media.id).catch(() => null)
+          setAutoDownloadState(libEntry?.auto_download ?? false)
+        } else {
+          setAutoDownloadState(false)
         }
         // Load completion recs if already completed
         if (mediaStatus.libraryStatus === 'completed') {
@@ -1564,6 +1635,21 @@ export function MediaDetailModal({
               >
                 <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
+            )}
+            {/* Auto-download toggle (anime, in-library only) */}
+            {inLibrary && media.type !== 'manga' && (
+              <button
+                onClick={handleToggleAutoDownload}
+                className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-150 border ${
+                  autoDownload
+                    ? 'bg-sky-500/20 text-sky-300 border-sky-400/60'
+                    : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] border-[var(--color-glass-border)] hover:bg-[var(--color-glass-bg-hover)] hover:text-white'
+                }`}
+                aria-label={autoDownload ? 'Disable auto-download' : 'Enable auto-download for new episodes'}
+                title={autoDownload ? 'Auto-download is on for new episodes' : 'Auto-download new episodes'}
+              >
+                <DownloadCloud className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
             )}
             {/* Next episode timer */}
             {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
@@ -2288,7 +2374,7 @@ export function MediaDetailModal({
                 {/* Episode info overlay */}
                 {episodeInfoTarget && (
                   <div
-                    className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-xl"
+                    className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-xl"
                     onClick={() => setEpisodeInfoTarget(null)}
                   >
                     <div
@@ -2479,7 +2565,7 @@ export function MediaDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[200] overflow-y-auto animate-in fade-in duration-300">
       <div
         className="fixed inset-0 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300"
         onClick={onClose}

@@ -199,6 +199,7 @@ export function VideoPlayer({
   const [showShortcutsHint, setShowShortcutsHint] = useState(true)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [serverMenuOpen, setServerMenuOpen] = useState(false)
+  const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
 
   // Progress bar drag state
   const [isDragging, setIsDragging] = useState(false)
@@ -256,6 +257,13 @@ export function VideoPlayer({
     if (qualityPref === 'best' || qualityPref === 'worst') return qualityPref
     return `${qualityPref}p`
   }, [qualityPref])
+
+  const playbackSpeedOptions = useMemo(() => [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], [])
+
+  const selectedPlaybackSpeedLabel = useMemo(
+    () => `${playerSettings.playbackSpeed.toFixed(playerSettings.playbackSpeed % 1 === 0 ? 1 : 2)}x`,
+    [playerSettings.playbackSpeed],
+  )
 
   // Load video server info on mount
   useEffect(() => {
@@ -901,7 +909,9 @@ export function VideoPlayer({
         setTimeout(async () => {
           try {
             await deleteEpisodeDownload(mId, epNum)
-            notifySuccess(title, `Episode ${epNum} auto-deleted after watching`)
+            notifySuccess(title, `Episode ${epNum} auto-deleted after watching`, {
+              metadata: { media_id: mId },
+            })
           } catch {
             // Silently fail if episode wasn't downloaded
           }
@@ -1310,13 +1320,32 @@ export function VideoPlayer({
           e.preventDefault()
           handleEnterPip()
           break
+        case '[':
+          e.preventDefault()
+          changePlaybackSpeed(
+            playbackSpeedOptions[
+              Math.max(0, playbackSpeedOptions.indexOf(playerSettings.playbackSpeed) - 1)
+            ] ?? playbackSpeedOptions[0]
+          )
+          break
+        case ']':
+          e.preventDefault()
+          changePlaybackSpeed(
+            playbackSpeedOptions[
+              Math.min(
+                playbackSpeedOptions.length - 1,
+                playbackSpeedOptions.indexOf(playerSettings.playbackSpeed) + 1,
+              )
+            ] ?? playbackSpeedOptions[playbackSpeedOptions.length - 1]
+          )
+          break
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration, onNextEpisode, onPreviousEpisode])
+  }, [duration, onNextEpisode, onPreviousEpisode, playerSettings.playbackSpeed, playbackSpeedOptions])
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current
@@ -1386,6 +1415,11 @@ export function VideoPlayer({
     }
 
     setQualityMenuOpen(false)
+  }
+
+  const changePlaybackSpeed = (speed: number) => {
+    updatePlayerSettings({ playbackSpeed: speed })
+    setSpeedMenuOpen(false)
   }
 
   const changeServer = (serverIndex: number) => {
@@ -2026,6 +2060,7 @@ export function VideoPlayer({
                   onClick={() => {
                     setQualityMenuOpen(!qualityMenuOpen)
                     setServerMenuOpen(false)
+                    setSpeedMenuOpen(false)
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
@@ -2098,6 +2133,102 @@ export function VideoPlayer({
                 )}
               </div>
 
+              {/* Speed pill */}
+              <div className="ctrl-pill relative">
+                <button
+                  className="flex items-center gap-1 py-1 px-3 rounded transition-all duration-[120ms] whitespace-nowrap"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: 'rgba(255, 255, 255, 0.85)',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                  }}
+                  onClick={() => {
+                    setSpeedMenuOpen(!speedMenuOpen)
+                    setQualityMenuOpen(false)
+                    setServerMenuOpen(false)
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
+                    e.currentTarget.style.color = 'white'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                    e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
+                  }}
+                  title="Playback Speed ([ / ])"
+                >
+                  {selectedPlaybackSpeedLabel}
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {speedMenuOpen && (
+                  <div
+                    className="absolute bottom-[calc(100%+8px)] right-0 min-w-[120px] rounded-lg overflow-hidden z-50"
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.92)',
+                      backdropFilter: 'blur(16px)',
+                      WebkitBackdropFilter: 'blur(16px)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                    }}
+                  >
+                    {playbackSpeedOptions.map((speed) => {
+                      const speedLabel = `${speed.toFixed(speed % 1 === 0 ? 1 : 2)}x`
+
+                      return (
+                        <button
+                          key={speed}
+                          className="w-full text-left flex items-center justify-between transition-all duration-[120ms] hover:bg-white/[0.08]"
+                          style={{
+                            padding: '9px 14px',
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: '0.8125rem',
+                            color:
+                              playerSettings.playbackSpeed === speed
+                                ? '#e50914'
+                                : 'rgba(255, 255, 255, 0.65)',
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => changePlaybackSpeed(speed)}
+                          onMouseEnter={(e) => {
+                            if (playerSettings.playbackSpeed !== speed) e.currentTarget.style.color = 'white'
+                          }}
+                          onMouseLeave={(e) => {
+                            if (playerSettings.playbackSpeed !== speed) {
+                              e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)'
+                            }
+                          }}
+                        >
+                          {speedLabel}
+                          {playerSettings.playbackSpeed === speed && (
+                            <span
+                              className="w-[6px] h-[6px] rounded-full"
+                              style={{
+                                background: '#e50914',
+                                boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)',
+                              }}
+                            />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Server pill */}
               {servers.length > 1 && (
                 <div className="ctrl-pill relative">
@@ -2114,6 +2245,7 @@ export function VideoPlayer({
                     onClick={() => {
                       setServerMenuOpen(!serverMenuOpen)
                       setQualityMenuOpen(false)
+                      setSpeedMenuOpen(false)
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
@@ -2349,14 +2481,15 @@ export function VideoPlayer({
               border: '1px solid rgba(255, 255, 255, 0.06)',
             }}
           >
-            {[
-              { key: 'K', label: 'Play' },
-              { key: 'F', label: 'Fullscreen' },
-              { key: 'M', label: 'Mute' },
-              { keys: ['\u2190', '\u2192'], label: 'Seek' },
-              { key: 'N', label: 'Next' },
-              { key: 'I', label: 'Mini' },
-            ].map((item, i) => (
+              {[
+                { key: 'K', label: 'Play' },
+                { key: 'F', label: 'Fullscreen' },
+                { key: 'M', label: 'Mute' },
+                { keys: ['\u2190', '\u2192'], label: 'Seek' },
+                { keys: ['[', ']'], label: 'Speed' },
+                { key: 'N', label: 'Next' },
+                { key: 'I', label: 'Mini' },
+              ].map((item, i) => (
               <div
                 key={i}
                 className="flex items-center gap-[5px] text-[0.65rem] text-white/35 whitespace-nowrap"

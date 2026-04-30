@@ -185,6 +185,7 @@ pub async fn export_all_data(
             notes: row.try_get("notes").ok(),
             added_at: row.try_get("added_at").unwrap_or_default(),
             updated_at: row.try_get("updated_at").unwrap_or_default(),
+            auto_download: row.try_get("auto_download").unwrap_or_default(),
         }
     })
     .collect::<Vec<_>>();

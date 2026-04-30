@@ -21,8 +21,11 @@ import {
   getReleaseCheckStatus,
   type ReleaseCheckSettings,
   type ReleaseCheckStatus,
+  acknowledgeNewReleases,
+  getCachedMediaDetails,
 } from '@/utils/tauri-commands'
 import { NotificationItem } from './NotificationItem'
+import { ReleaseRadarGroupCard, groupReleaseNotifications, type ReleaseGroup } from './ReleaseRadarGroupCard'
 
 /** Interval options for release checking */
 const INTERVAL_OPTIONS = [
@@ -75,6 +78,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
 
   const store = useNotificationStore()
   const { notifications } = store
+  const [coverUrls, setCoverUrls] = useState<Record<string, string>>({})
 
   // Filter notifications by tab
   const filteredNotifications = useMemo(() => {
@@ -83,6 +87,36 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
     }
     return notifications
   }, [notifications, activeTab])
+
+  const releaseGroups = useMemo(() => {
+    if (activeTab !== 'releases') return []
+    return groupReleaseNotifications(filteredNotifications, coverUrls)
+  }, [activeTab, filteredNotifications, coverUrls])
+
+  useEffect(() => {
+    const mediaIds = new Set<string>()
+    for (const n of notifications) {
+      const mid = n.metadata?.media_id as string | undefined
+      const thumb = n.metadata?.thumbnail as string | undefined
+      if (mid && !thumb && !coverUrls[mid]) mediaIds.add(mid)
+    }
+    if (mediaIds.size === 0) return
+    Promise.all(
+      Array.from(mediaIds).map(async (id) => {
+        try {
+          const details = await getCachedMediaDetails(id)
+          if (details?.media?.cover_url) return [id, details.media.cover_url] as const
+        } catch {
+          /* ignore */
+        }
+        return null
+      })
+    ).then((results) => {
+      const next: Record<string, string> = {}
+      for (const r of results) if (r) next[r[0]] = r[1]
+      if (Object.keys(next).length > 0) setCoverUrls((prev) => ({ ...prev, ...next }))
+    })
+  }, [notifications, coverUrls])
 
   // Count release notifications for badge
   const releaseCount = useMemo(() => {
@@ -170,6 +204,51 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
       onNavigateAway?.()
     },
     [navigate, markAsRead, onNavigateAway]
+  )
+
+  const handleReleaseGroupAction = useCallback(
+    (group: ReleaseGroup) => {
+      const target = group.notifications[0]
+      if (!target) return
+
+      group.notifications.forEach((notification) => {
+        if (!notification.read) {
+          markAsRead(notification.id)
+        }
+      })
+
+      if (target.action?.route) {
+        navigate({ to: target.action.route })
+      }
+      onNavigateAway?.()
+    },
+    [markAsRead, navigate, onNavigateAway],
+  )
+
+  const handleReleaseGroupDismiss = useCallback(
+    (group: ReleaseGroup) => {
+      group.notifications.forEach((notification) => dismiss(notification.id))
+    },
+    [dismiss],
+  )
+
+  const handleReleaseGroupAcknowledge = useCallback(
+    async (group: ReleaseGroup) => {
+      if (!group.mediaId) return
+
+      try {
+        await acknowledgeNewReleases(group.mediaId, group.latestNumber ?? undefined)
+      } catch (error) {
+        console.error('Failed to acknowledge grouped releases:', error)
+      }
+
+      group.notifications.forEach((notification) => {
+        if (!notification.read) {
+          markAsRead(notification.id)
+        }
+      })
+    },
+    [markAsRead],
   )
 
   // Release check handlers
@@ -371,6 +450,9 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
               <span>
                 Last checked: {formatRelativeTime(releaseStatus.last_check)}
                 {releaseStatus.items_checked > 0 && <> · {releaseStatus.items_checked} items</>}
+                {releaseStatus.new_releases_found > 0 && (
+                  <> · {releaseStatus.new_releases_found} new</>
+                )}
               </span>
             </div>
           )}
@@ -391,11 +473,27 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
                 : 'Download updates and alerts will appear here'}
             </p>
           </div>
+        ) : releaseGroups.length > 0 ? (
+          <div className="space-y-2 px-3 py-3">
+            {releaseGroups.map((group) => (
+              <ReleaseRadarGroupCard
+                key={group.mediaId ?? `${group.mediaType}:${group.mediaTitle}`}
+                group={group}
+                onDismiss={handleReleaseGroupDismiss}
+                onAction={handleReleaseGroupAction}
+                onAcknowledge={handleReleaseGroupAcknowledge}
+              />
+            ))}
+          </div>
         ) : (
           filteredNotifications.map((notification) => (
             <NotificationItem
               key={notification.id}
               notification={notification}
+              coverUrl={
+                coverUrls[(notification.metadata?.media_id as string) || ''] ||
+                (notification.metadata?.thumbnail as string)
+              }
               onDismiss={dismiss}
               onAction={handleAction}
               onMarkRead={markAsRead}

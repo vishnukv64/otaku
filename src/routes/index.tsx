@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadExtension, jikanTopAnime, jikanSeasonNow, jikanSeasonUpcoming, jikanWatchEpisodesPopular, getContentRecommendations, getSimilarToWatched, getUserTopGenres, jikanGenresAnime, jikanSearchAnimeFiltered } from '@/utils/tauri-commands'
 import type { RecommendationEntry, SimilarToGroup } from '@/utils/tauri-commands'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
@@ -35,6 +35,20 @@ function HomeScreen() {
   const [similarGroups, setSimilarGroups] = useState<SimilarToGroup[]>([])
   const [recsLoading, setRecsLoading] = useState(true)
 
+  const loadRecommendations = useCallback(async () => {
+    setRecsLoading(true)
+    try {
+      const [recs, similar] = await Promise.all([
+        getContentRecommendations(20).catch(() => []),
+        getSimilarToWatched(8).catch(() => []),
+      ])
+      setRecommendations(recs)
+      setSimilarGroups(similar)
+    } finally {
+      setRecsLoading(false)
+    }
+  }, [])
+
   // Genre-weighted discover state
   const [genreDiscoverItems, setGenreDiscoverItems] = useState<SearchResult[]>([])
   const [genreDiscoverTitle, setGenreDiscoverTitle] = useState('')
@@ -49,14 +63,8 @@ function HomeScreen() {
 
   // Fetch personalized recommendations (fire-and-forget, errors silenced)
   useEffect(() => {
-    Promise.all([
-      getContentRecommendations(20).catch(() => []),
-      getSimilarToWatched(8).catch(() => []),
-    ]).then(([recs, similar]) => {
-      setRecommendations(recs)
-      setSimilarGroups(similar)
-    }).finally(() => setRecsLoading(false))
-  }, [])
+    void loadRecommendations()
+  }, [loadRecommendations])
 
   // Genre-weighted discover: fetch user's top genres, map to MAL IDs, search Jikan
   useEffect(() => {
@@ -292,6 +300,7 @@ function HomeScreen() {
           isOpen={isModalOpen}
           onClose={handleCloseModal}
           onMediaChange={setSelectedMedia}
+          onFeedbackChange={loadRecommendations}
         />
       )}
     </div>
