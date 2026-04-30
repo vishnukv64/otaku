@@ -15,10 +15,10 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-// AllAnime encryption key seed. Reversed, then SHA-256'd to produce the
-// AES-256-GCM key. Extracted from AllAnime's own browser JS bundle.
+// AllAnime encryption key seed. SHA-256'd directly (no reversal) to produce
+// the AES-256-GCM key. Extracted from AllAnime's own browser JS bundle.
 //
-// *** WHEN DECRYPT STARTS FAILING, UPDATE THIS STRING. ***
+// *** WHEN DECRYPT STARTS FAILING, UPDATE THIS STRING (and re-check layout). ***
 //
 // AllAnime rotates this key a few times per year to deter scrapers. Symptom of
 // rotation: `decrypt_tobeparsed: AES-GCM decrypt failed: aead::Error` in logs
@@ -26,23 +26,25 @@ use std::sync::Arc;
 //
 // Where to find the new key:
 //   1. anipy-cli:  https://github.com/sdaqo/anipy-cli — search `allanime_provider.py`
-//                  for a 16-char ASCII string passed through `[::-1]` / `reversed`
+//                  for the string passed to `hashlib.sha256(...).digest()` inside
+//                  `_decode_tobeparsed`. Note also the iv/ciphertext slice offsets,
+//                  AllAnime occasionally shifts them by a byte.
 //   2. ani-cli:    https://github.com/pystardust/ani-cli — search for `decrypt`
 //   3. jerry:      https://github.com/justchokingaround/jerry
 //   4. If none updated yet: open https://allanime.to in a browser with DevTools,
 //      search the bundled JS for the AES-GCM key derivation (look for
-//      SubtleCrypto.importKey + SHA-256 calls), extract the 16-char seed.
+//      SubtleCrypto.importKey + SHA-256 calls), extract the seed string.
 //
-// DO NOT change the algorithm (SHA-256 of reversed seed, AES-256-GCM, 12-byte
-// nonce, 16-byte tag) without first verifying upstream changed it too.
-const ALLANIME_KEY_SEED: &str = "P7K2RGbFgauVtmiS";
+// DO NOT change the algorithm (SHA-256 of seed, AES-256-GCM, 12-byte nonce,
+// 16-byte tag) without first verifying upstream changed it too.
+const ALLANIME_KEY_SEED: &str = "Xot36i3lK3:v1";
 
 // Decrypt AllAnime's `tobeparsed` blob.
 //
-// Algorithm:
+// Algorithm (matches anipy-cli `_decode_tobeparsed` as of 2026-04):
 //   1. Base64-decode input
-//   2. Derive key = SHA-256(reverse(ALLANIME_KEY_SEED))
-//   3. Parse layout: [12-byte nonce][ciphertext][16-byte GCM tag]
+//   2. Derive key = SHA-256(ALLANIME_KEY_SEED)  -- seed used as-is, NOT reversed
+//   3. Parse layout: [1-byte marker][12-byte IV][ciphertext][16-byte GCM tag]
 //   4. AES-256-GCM decrypt -> UTF-8 JSON
 //
 // Never throws. Returns empty string on any failure (logged as a warning).
@@ -54,16 +56,16 @@ fn decrypt_tobeparsed(tbp: &str) -> String {
             return String::new();
         }
     };
-    if raw.len() < 28 {
+    // 1 marker + 12 IV + 16 tag = 29 byte minimum (with empty ciphertext).
+    if raw.len() < 29 {
         log::warn!("decrypt_tobeparsed: ciphertext too short ({})", raw.len());
         return String::new();
     }
-    let key_src: Vec<u8> = ALLANIME_KEY_SEED.bytes().rev().collect();
-    let key_hash = Sha256::digest(&key_src);
+    let key_hash = Sha256::digest(ALLANIME_KEY_SEED.as_bytes());
     let key = Key::<Aes256Gcm>::from_slice(&key_hash);
     let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&raw[..12]);
-    let ciphertext_with_tag = &raw[12..];
+    let nonce = Nonce::from_slice(&raw[1..13]);
+    let ciphertext_with_tag = &raw[13..];
     match cipher.decrypt(nonce, ciphertext_with_tag) {
         Ok(plain) => match String::from_utf8(plain) {
             Ok(s) => s,

@@ -729,10 +729,15 @@ const extensionObject = {
       const variables = { showId: showId, translationType: "sub", episodeString: episodeString };
       const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(sourcesQuery)}\`;
 
+      // The episode/sourceUrls endpoint demands Referer=youtu-chan.com.
+      // With allmanga.to or allanime.to the API responds with NEED_CAPTCHA
+      // and an empty episode field (verified live 2026-04). All OTHER
+      // endpoints (search, info, episodesDetail) keep using allmanga.to.
+      // Matches anipy-cli's allanime_provider.py:get_video.
       const responseStr = __fetch(url, {
         method: 'GET',
         headers: {
-          'Referer': 'https://allmanga.to',
+          'Referer': 'https://youtu-chan.com/',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
         }
       });
