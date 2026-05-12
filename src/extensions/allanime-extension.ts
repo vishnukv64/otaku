@@ -724,16 +724,23 @@ const extensionObject = {
         return { sources: [], subtitles: [] };
       }
 
-      const sourcesQuery = \`query($showId: String! $translationType: VaildTranslationTypeEnumType! $episodeString: String!) { episode(showId: $showId translationType: $translationType episodeString: $episodeString) { episodeString sourceUrls } }\`;
-
+      // AllAnime closed the ad-hoc GraphQL gate on the episode/sourceUrls
+      // resolver (~2026-05-12) — inline queries now return an INTERNAL_SERVER_ERROR
+      // ("Cannot read property 'slugTime' of undefined") with a 16-byte encrypted
+      // {"episode":null} payload. Only the persisted-query hash extracted from
+      // allanime.to's own bundled JS is accepted. Hash sourced from
+      // ani-cli commit 6803b8a (2026-05-01). When this hash stops working,
+      // check ani-cli/anipy-cli for the new value first.
       const variables = { showId: showId, translationType: "sub", episodeString: episodeString };
-      const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&query=\${encodeURIComponent(sourcesQuery)}\`;
+      const extensions = {
+        persistedQuery: {
+          version: 1,
+          sha256Hash: "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
+        }
+      };
+      const url = \`https://api.allanime.day/api?variables=\${encodeURIComponent(JSON.stringify(variables))}&extensions=\${encodeURIComponent(JSON.stringify(extensions))}\`;
 
-      // The episode/sourceUrls endpoint demands Referer=youtu-chan.com.
-      // With allmanga.to or allanime.to the API responds with NEED_CAPTCHA
-      // and an empty episode field (verified live 2026-04). All OTHER
-      // endpoints (search, info, episodesDetail) keep using allmanga.to.
-      // Matches anipy-cli's allanime_provider.py:get_video.
+      // Referer=youtu-chan.com remains required for the streaming endpoint.
       const responseStr = __fetch(url, {
         method: 'GET',
         headers: {
