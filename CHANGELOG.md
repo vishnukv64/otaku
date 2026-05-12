@@ -5,6 +5,12 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-05-12
+
+### Fixed
+- **AllAnime episodes won't play (recurrence)** — AllAnime closed the ad-hoc-GraphQL gate on the `episode(...)` resolver. Inline queries now return `INTERNAL_SERVER_ERROR: Cannot read property 'slugTime' of undefined` with an encrypted 16-byte `{"episode":null}` payload that decrypts cleanly but yields zero providers (matches the anipy-cli #320 `NoneType` signature). The 1.4.0 `tobeparsed` key seed and AES-GCM layout are untouched — the rotation moved up to the query-shape layer. `getSources` now sends the persisted-query hash `d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec` (sourced from ani-cli commit `6803b8a`, 2026-05-01), matching the pattern already used by `search` / `queryPopular` / `getDetails`. Verified live against api.allanime.day.
+- **Schedule duplicates** — Jikan `/schedules` responses can return the same anime twice in a single day's payload (different broadcast slots / region rebroadcasts); the schedule bridge now dedupes by `mal_id` so the release radar no longer fans out duplicate notifications.
+
 ## [1.4.0] - 2026-04-30
 
 ### Fixed
