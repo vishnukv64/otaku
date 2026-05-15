@@ -408,6 +408,11 @@ pub async fn initialize_tracking_v2(
     let next_check = now + (normalized.recommended_interval_minutes() as i64 * 60 * 1000);
     let effective_extension_id = normalize_manga_extension_id(extension_id, media_type);
 
+    // ON CONFLICT must NOT touch tracking baseline columns
+    // (last_known_count/latest_number/latest_id, raw_status, normalized_status,
+    // last_checked_at, next_scheduled_check). Those are owned by the release
+    // checker. Re-init from a library status change must not silently consume
+    // pending releases by advancing the baseline to the current API count.
     sqlx::query(
         r#"
         INSERT INTO release_tracking_v2 (
@@ -420,15 +425,6 @@ pub async fn initialize_tracking_v2(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(media_id) DO UPDATE SET
             extension_id = excluded.extension_id,
-            last_known_count = excluded.last_known_count,
-            last_known_latest_number = excluded.last_known_latest_number,
-            last_known_latest_id = excluded.last_known_latest_id,
-            raw_status = excluded.raw_status,
-            normalized_status = excluded.normalized_status,
-            last_checked_at = excluded.last_checked_at,
-            next_scheduled_check = excluded.next_scheduled_check,
-            consecutive_failures = 0,
-            last_error = NULL,
             updated_at = CURRENT_TIMESTAMP
         "#
     )
@@ -451,15 +447,15 @@ pub async fn initialize_tracking_v2(
         media_id, current_count, latest_number, normalized
     );
 
-    // Also update legacy table for backwards compatibility
+    // Also update legacy table for backwards compatibility.
+    // Same rule as V2: ON CONFLICT must not advance last_known_count, since
+    // the legacy table is also a tracking baseline that the V1 checker reads.
     sqlx::query(
         r#"
         INSERT INTO release_tracking (media_id, extension_id, media_type, last_known_count, last_checked_at)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(media_id) DO UPDATE SET
             extension_id = excluded.extension_id,
-            last_known_count = excluded.last_known_count,
-            last_checked_at = excluded.last_checked_at,
             updated_at = CURRENT_TIMESTAMP
         "#
     )
@@ -495,21 +491,33 @@ async fn update_tracking_v2(
     let next_check = now + (interval_minutes as i64 * 60 * 1000);
 
     if let Some(err) = error {
-        // Update with error, increment failure counter
+        // Exponential backoff: cap the shift at 6 so a permanently-failing item
+        // doesn't get rechecked every 5 minutes (default retry_delay_minutes).
+        // Backoff schedule with default 5min: 5, 10, 20, 40, 80, 160, 320 min.
+        // Uses the OLD consecutive_failures (pre-increment) — so the first
+        // failure waits the base delay, and each subsequent doubles.
         sqlx::query(
             r#"
             UPDATE release_tracking_v2 SET
                 last_checked_at = ?,
                 consecutive_failures = consecutive_failures + 1,
                 last_error = ?,
-                next_scheduled_check = ?,
+                next_scheduled_check = ? + (
+                    ? * 60 * 1000 *
+                    (1 << CASE
+                        WHEN consecutive_failures > 6 THEN 6
+                        WHEN consecutive_failures < 0 THEN 0
+                        ELSE consecutive_failures
+                    END)
+                ),
                 updated_at = CURRENT_TIMESTAMP
             WHERE media_id = ?
             "#
         )
         .bind(now)
         .bind(err)
-        .bind(now + (settings.retry_delay_minutes as i64 * 60 * 1000))
+        .bind(now)
+        .bind(settings.retry_delay_minutes as i64)
         .bind(media_id)
         .execute(pool)
         .await?;
@@ -518,20 +526,39 @@ async fn update_tracking_v2(
         if let Some(notified_num) = notified_number {
             sqlx::query(
                 r#"
-                UPDATE release_tracking_v2 SET
-                    last_known_count = ?,
-                    last_known_latest_number = ?,
-                    last_known_latest_id = ?,
-                    raw_status = ?,
-                    normalized_status = ?,
-                    user_notified_up_to = ?,
+                INSERT INTO release_tracking_v2 (
+                    media_id, extension_id, media_type,
+                    last_known_count, last_known_latest_number, last_known_latest_id,
+                    raw_status, normalized_status,
+                    user_notified_up_to, user_acknowledged_at,
+                    last_checked_at, next_scheduled_check,
+                    consecutive_failures, last_error
+                )
+                SELECT
+                    m.id,
+                    COALESCE(rt.extension_id, m.extension_id),
+                    m.media_type,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, NULL,
+                    ?, ?,
+                    0, NULL
+                FROM media m
+                LEFT JOIN release_tracking_v2 rt ON rt.media_id = m.id
+                WHERE m.id = ?
+                ON CONFLICT(media_id) DO UPDATE SET
+                    last_known_count = excluded.last_known_count,
+                    last_known_latest_number = excluded.last_known_latest_number,
+                    last_known_latest_id = excluded.last_known_latest_id,
+                    raw_status = excluded.raw_status,
+                    normalized_status = excluded.normalized_status,
+                    user_notified_up_to = excluded.user_notified_up_to,
                     user_acknowledged_at = NULL,
-                    last_checked_at = ?,
-                    next_scheduled_check = ?,
+                    last_checked_at = excluded.last_checked_at,
+                    next_scheduled_check = excluded.next_scheduled_check,
                     consecutive_failures = 0,
                     last_error = NULL,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE media_id = ?
                 "#
             )
             .bind(info.count)
@@ -549,18 +576,35 @@ async fn update_tracking_v2(
             // No notification, just update check time
             sqlx::query(
                 r#"
-                UPDATE release_tracking_v2 SET
-                    last_known_count = ?,
-                    last_known_latest_number = ?,
-                    last_known_latest_id = ?,
-                    raw_status = ?,
-                    normalized_status = ?,
-                    last_checked_at = ?,
-                    next_scheduled_check = ?,
+                INSERT INTO release_tracking_v2 (
+                    media_id, extension_id, media_type,
+                    last_known_count, last_known_latest_number, last_known_latest_id,
+                    raw_status, normalized_status,
+                    last_checked_at, next_scheduled_check,
+                    consecutive_failures, last_error
+                )
+                SELECT
+                    m.id,
+                    COALESCE(rt.extension_id, m.extension_id),
+                    m.media_type,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, ?,
+                    0, NULL
+                FROM media m
+                LEFT JOIN release_tracking_v2 rt ON rt.media_id = m.id
+                WHERE m.id = ?
+                ON CONFLICT(media_id) DO UPDATE SET
+                    last_known_count = excluded.last_known_count,
+                    last_known_latest_number = excluded.last_known_latest_number,
+                    last_known_latest_id = excluded.last_known_latest_id,
+                    raw_status = excluded.raw_status,
+                    normalized_status = excluded.normalized_status,
+                    last_checked_at = excluded.last_checked_at,
+                    next_scheduled_check = excluded.next_scheduled_check,
                     consecutive_failures = 0,
                     last_error = NULL,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE media_id = ?
                 "#
             )
             .bind(info.count)
@@ -685,6 +729,9 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
                         OR LOWER(COALESCE(m.status, '')) LIKE '%releasing%'
                         OR LOWER(COALESCE(m.status, '')) LIKE '%ongoing%'
                         OR LOWER(COALESCE(m.status, '')) LIKE '%publishing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%not yet%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%upcoming%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%currently%'
                         OR COALESCE(m.status, '') = ''
                     )
                 )
@@ -790,6 +837,15 @@ fn should_notify(media: &EligibleMedia, current_number: Option<f32>) -> bool {
 
 // ==================== Release Checking Logic ====================
 
+/// Some errors won't go away by retrying with the same input — e.g., a numeric
+/// Jikan id that doesn't resolve to a Mangakakalot slug, or an extension that
+/// isn't loaded. Retrying just wastes 5+10+20s of backoff and floods the logs.
+fn is_permanent_error(e: &anyhow::Error) -> bool {
+    let msg = e.to_string();
+    msg.contains("Could not resolve Jikan numeric ID")
+        || msg.contains("not found")
+}
+
 async fn fetch_episode_info_with_retry(
     app_state: &AppState,
     pool: &SqlitePool,
@@ -814,6 +870,13 @@ async fn fetch_episode_info_with_retry(
         {
             Ok(Ok(info)) => return Ok(info),
             Ok(Err(e)) => {
+                if is_permanent_error(&e) {
+                    log::info!(
+                        "Permanent error for {}, skipping retries: {}",
+                        media.media_id, e
+                    );
+                    return Err(e);
+                }
                 log::warn!(
                     "Attempt {} failed for {}: {}",
                     attempt + 1, media.media_id, e
@@ -1563,6 +1626,156 @@ pub async fn acknowledge_new_releases(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::Row;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("create in-memory sqlite pool");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE media (
+                id TEXT PRIMARY KEY NOT NULL,
+                extension_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                media_type TEXT CHECK(media_type IN ('anime', 'manga')) NOT NULL,
+                status TEXT
+            );
+            "#
+        )
+        .execute(&pool)
+        .await
+        .expect("create media table");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE release_tracking_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id TEXT NOT NULL UNIQUE,
+                extension_id TEXT NOT NULL,
+                media_type TEXT NOT NULL CHECK(media_type IN ('anime', 'manga')),
+                last_known_count INTEGER,
+                last_known_latest_number REAL,
+                last_known_latest_id TEXT,
+                last_episode_date INTEGER,
+                raw_status TEXT,
+                normalized_status TEXT DEFAULT 'unknown',
+                user_notified_up_to REAL,
+                user_acknowledged_at INTEGER,
+                notification_enabled INTEGER DEFAULT 1,
+                last_checked_at INTEGER NOT NULL,
+                next_scheduled_check INTEGER,
+                consecutive_failures INTEGER DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+            );
+            "#
+        )
+        .execute(&pool)
+        .await
+        .expect("create release_tracking_v2 table");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE release_tracking (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id TEXT NOT NULL UNIQUE,
+                extension_id TEXT NOT NULL,
+                media_type TEXT NOT NULL CHECK(media_type IN ('anime', 'manga')),
+                last_known_count INTEGER NOT NULL DEFAULT 0,
+                last_checked_at INTEGER NOT NULL,
+                last_notified_count INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+            );
+            "#
+        )
+        .execute(&pool)
+        .await
+        .expect("create release_tracking table");
+
+        pool
+    }
+
+    #[tokio::test]
+    async fn update_tracking_inserts_missing_first_check_baseline() {
+        let pool = test_pool().await;
+
+        sqlx::query(
+            r#"
+            INSERT INTO media (id, extension_id, title, media_type, status)
+            VALUES ('61501', 'jikan', 'Kanan-sama wa Akumade Choroi', 'anime', 'Releasing')
+            "#
+        )
+        .execute(&pool)
+        .await
+        .expect("insert media");
+
+        let info = EpisodeInfo {
+            count: 6,
+            latest_number: Some(6.0),
+            latest_id: Some("episode-6".to_string()),
+            raw_status: Some("Releasing".to_string()),
+        };
+
+        update_tracking_v2(
+            &pool,
+            "61501",
+            &info,
+            info.latest_number,
+            None,
+            &ReleaseCheckSettings::default(),
+        )
+        .await
+        .expect("write first-check tracking");
+
+        let row = sqlx::query(
+            r#"
+            SELECT
+                extension_id,
+                media_type,
+                last_known_count,
+                last_known_latest_number,
+                last_known_latest_id,
+                normalized_status,
+                user_notified_up_to
+            FROM release_tracking_v2
+            WHERE media_id = '61501'
+            "#
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("fetch tracking row");
+
+        assert_eq!(row.get::<String, _>("extension_id"), "jikan");
+        assert_eq!(row.get::<String, _>("media_type"), "anime");
+        assert_eq!(row.get::<i32, _>("last_known_count"), 6);
+        assert_eq!(row.get::<f32, _>("last_known_latest_number"), 6.0);
+        assert_eq!(row.get::<String, _>("last_known_latest_id"), "episode-6");
+        assert_eq!(row.get::<String, _>("normalized_status"), "ongoing");
+        assert_eq!(row.get::<f32, _>("user_notified_up_to"), 6.0);
+
+        let legacy_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM release_tracking WHERE media_id = '61501'"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("fetch legacy row count");
+
+        assert_eq!(legacy_count, 1);
+    }
 }
 
 /// Get check history for debugging

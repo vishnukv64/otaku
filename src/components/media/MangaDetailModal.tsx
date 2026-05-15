@@ -40,7 +40,7 @@ import {
   startChapterDownload,
   isChapterDownloaded,
   deleteChapterDownload,
-  initializeReleaseTracking,
+  initializeReleaseTrackingV2,
   getMediaTags,
   unassignLibraryTag,
   setMediaFeedback,
@@ -508,14 +508,22 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
             : {}),
         },
       })
-      const chapterCount = effectiveChapters.length || details.chapters.length
+      const sourceChapters: Chapter[] =
+        effectiveChapters.length > 0 ? effectiveChapters : details.chapters
+      const chapterCount = sourceChapters.length
       if (chapterCount > 0) {
         try {
-          await initializeReleaseTracking(
+          const latestCh = sourceChapters.reduce((max, ch) =>
+            ch.number > max.number ? ch : max
+          )
+          await initializeReleaseTrackingV2(
             manga.id,
             extensionId,
             'manga',
-            chapterCount
+            chapterCount,
+            latestCh.number,
+            latestCh.id,
+            details.status
           )
         } catch (trackingError) {
           console.error('Failed to initialize release tracking:', trackingError)
@@ -561,15 +569,23 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
         await addToLibrary(manga.id, 'plan_to_read')
         setInLibrary(true)
         setLibraryStatus('plan_to_read')
-        const chapterCount = effectiveChapters.length || details.chapters.length
+        const sourceChapters: Chapter[] =
+          effectiveChapters.length > 0 ? effectiveChapters : details.chapters
+        const chapterCount = sourceChapters.length
         if (chapterCount > 0) {
           try {
-          await initializeReleaseTracking(
-            manga.id,
-            extensionId,
-            'manga',
-            chapterCount
-          )
+            const latestCh = sourceChapters.reduce((max, ch) =>
+              ch.number > max.number ? ch : max
+            )
+            await initializeReleaseTrackingV2(
+              manga.id,
+              extensionId,
+              'manga',
+              chapterCount,
+              latestCh.number,
+              latestCh.id,
+              details.status
+            )
           } catch (trackingError) {
             console.error('Failed to initialize release tracking:', trackingError)
           }

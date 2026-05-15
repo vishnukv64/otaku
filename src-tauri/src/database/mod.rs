@@ -109,7 +109,9 @@ impl Database {
             ("019_clear_mappings_v2.sql", include_str!("../../migrations/019_clear_mappings_v2.sql")),
             ("020_clear_mappings_v3.sql", include_str!("../../migrations/020_clear_mappings_v3.sql")),
             ("021_clear_mappings_v4.sql", include_str!("../../migrations/021_clear_mappings_v4.sql")),
+            ("022_clear_mappings_v5.sql", include_str!("../../migrations/022_clear_mappings_v5.sql")),
             ("023_feedback_table.sql", include_str!("../../migrations/023_feedback_table.sql")),
+            ("024_library_auto_download.sql", include_str!("../../migrations/024_library_auto_download.sql")),
         ];
 
         for (name, migration_sql) in migrations {

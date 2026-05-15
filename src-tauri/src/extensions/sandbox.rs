@@ -141,13 +141,12 @@ mod tests {
         assert!(!fetcher.is_url_allowed("https://evil.com"));
     }
 
-    #[tokio::test]
-    async fn test_fetch_disallowed_domain() {
+    #[test]
+    fn test_fetch_disallowed_domain() {
         let fetcher = SafeFetch::new(vec!["example.com".to_string()]);
-        let result = fetcher.fetch("https://evil.com/phishing", None).await;
+        let result = fetcher.fetch("https://evil.com/phishing", None);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not in allowed domains"));
     }
 }
-

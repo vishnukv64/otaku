@@ -53,7 +53,7 @@ import {
   getBatchWatchProgress,
   saveWatchProgress,
   toggleFavorite,
-  initializeReleaseTracking,
+  initializeReleaseTrackingV2,
   getLibraryEntry,
   setAutoDownload,
   getMediaTags,
@@ -696,14 +696,23 @@ export function MediaDetailModal({
           .then((recs) => setCompletionRecs(recs.filter((r) => r.media.id !== media.id)))
           .catch(() => {})
       }
-      // Initialize release tracking for ongoing anime
+      // Initialize release tracking for ongoing anime.
+      // Use V2 init so raw_status drives normalized_status at insert time —
+      // without it, the row stays at 'unknown' and the checker has to fall
+      // back to m.status (which can be stale, e.g. "Not Yet Released").
       if (details && details.episodes.length > 0) {
         try {
-          await initializeReleaseTracking(
+          const latestEp = details.episodes.reduce((max, ep) =>
+            ep.number > max.number ? ep : max
+          )
+          await initializeReleaseTrackingV2(
             media.id,
             allanimeExtId || 'jikan',
             'anime',
-            details.episodes.length
+            details.episodes.length,
+            latestEp.number,
+            latestEp.id,
+            details.status
           )
         } catch (trackingError) {
           console.error('Failed to initialize release tracking:', trackingError)
@@ -779,11 +788,17 @@ export function MediaDetailModal({
         // Initialize release tracking for ongoing anime
         if (details && details.episodes.length > 0) {
           try {
-            await initializeReleaseTracking(
+            const latestEp = details.episodes.reduce((max, ep) =>
+              ep.number > max.number ? ep : max
+            )
+            await initializeReleaseTrackingV2(
               media.id,
               allanimeExtId || 'jikan',
               'anime',
-              details.episodes.length
+              details.episodes.length,
+              latestEp.number,
+              latestEp.id,
+              details.status
             )
           } catch (trackingError) {
             console.error('Failed to initialize release tracking:', trackingError)

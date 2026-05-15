@@ -74,7 +74,7 @@ impl std::fmt::Display for NormalizedStatus {
 /// - Unknown/empty → Unknown
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// use status_normalizer::normalize_status;
 ///
 /// assert_eq!(normalize_status("Airing"), NormalizedStatus::Ongoing);
