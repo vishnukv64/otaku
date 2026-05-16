@@ -28,6 +28,7 @@ import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { consumePendingReturn } from '@/utils/return-media'
+import { getDefaultMediaSortDirection, sortMediaResults } from '@/utils/mediaSort'
 
 // Debounce delay for instant search (ms)
 const SEARCH_DEBOUNCE_MS = 300
@@ -66,7 +67,7 @@ const defaultFilters: BrowseFilters = {
   minScore: 0,
   genres: new Set(),
   orderBy: 'popularity',
-  sort: 'desc',
+  sort: getDefaultMediaSortDirection('popularity'),
 }
 
 function AnimeScreen() {
@@ -137,9 +138,31 @@ function AnimeScreen() {
   // Sidebar nav → tab mapping
   const handleSidebarNav = useCallback((nav: NavItem) => {
     setSidebarNav(nav)
+    if (nav === 'browse') {
+      setSidebarFilters((prev) => ({
+        ...prev,
+        orderBy: defaultFilters.orderBy,
+        sort: defaultFilters.sort,
+      }))
+    } else if (nav === 'top-rated') {
+      setSidebarFilters((prev) => ({
+        ...prev,
+        orderBy: 'score',
+        sort: getDefaultMediaSortDirection('score'),
+      }))
+    }
+
     if (nav === 'browse' || nav === 'top-rated') setActiveTab('browse')
     else if (nav === 'season') setActiveTab('season')
     else if (nav === 'genres') setActiveTab('genres')
+  }, [])
+
+  const handleHeaderSortChange = useCallback((orderBy: string) => {
+    setSidebarFilters((prev) => ({
+      ...prev,
+      orderBy,
+      sort: getDefaultMediaSortDirection(orderBy),
+    }))
   }, [])
 
   // Year options for sidebar
@@ -191,10 +214,12 @@ function AnimeScreen() {
   }, [])
 
   // Detect when sidebar filters are active (beyond defaults)
+  const isBrowseSortActive = sidebarFilters.orderBy !== defaultFilters.orderBy
   const hasActiveFilters = sidebarFilters.types.length > 0
     || sidebarFilters.statuses.length > 0
     || sidebarFilters.genres.size > 0
     || sidebarFilters.minScore > 0
+    || isBrowseSortActive
 
   // Filtered browse state (used when hasActiveFilters on browse/season tabs)
   const [filteredBrowseItems, setFilteredBrowseItems] = useState<SearchResult[]>([])
@@ -217,8 +242,12 @@ function AnimeScreen() {
     clearSearch,
   } = useMediaStore()
 
-  // Filter NSFW content from search results
-  const searchResults = filterNsfwContent(rawSearchResults, (item) => item.genres, nsfwFilter, (item) => item.title)
+  // Filter and sort visible search results so the header control never becomes a no-op.
+  const searchResults = sortMediaResults(
+    filterNsfwContent(rawSearchResults, (item) => item.genres, nsfwFilter, (item) => item.title),
+    sidebarFilters.orderBy,
+    sidebarFilters.sort === 'asc' ? 'asc' : 'desc'
+  )
 
   // Load AllAnime extension lazily in background (for modal downloads)
   useEffect(() => {
@@ -686,7 +715,7 @@ function AnimeScreen() {
           title={headerTitle}
           resultCount={currentResultCount}
           sortBy={sidebarFilters.orderBy || 'popularity'}
-          onSortChange={(sort) => setSidebarFilters((prev) => ({ ...prev, orderBy: sort }))}
+          onSortChange={handleHeaderSortChange}
         />
 
         {/* Search Bar */}
