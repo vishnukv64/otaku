@@ -1652,6 +1652,20 @@ export async function deleteChapterDownload(
 }
 
 /**
+ * Clear completed chapter downloads from the manager list.
+ */
+export async function clearCompletedChapterDownloads(): Promise<void> {
+  return await invoke('clear_completed_chapter_downloads')
+}
+
+/**
+ * Clear failed chapter downloads from the manager list.
+ */
+export async function clearFailedChapterDownloads(): Promise<void> {
+  return await invoke('clear_failed_chapter_downloads')
+}
+
+/**
  * List all chapter downloads for a manga
  * @param mediaId - Media ID
  */

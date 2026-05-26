@@ -356,6 +356,8 @@ pub fn run() {
       commands::get_downloaded_chapter_images,
       commands::cancel_chapter_download,
       commands::delete_chapter_download,
+      commands::clear_completed_chapter_downloads,
+      commands::clear_failed_chapter_downloads,
       commands::list_chapter_downloads,
       commands::get_downloaded_manga,
       commands::list_all_chapter_downloads,

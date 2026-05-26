@@ -2603,6 +2603,28 @@ pub async fn delete_chapter_download(
         .map_err(|e| format!("Failed to delete chapter download: {}", e))
 }
 
+/// Clear completed chapter downloads from the Download Manager list
+#[tauri::command]
+pub async fn clear_completed_chapter_downloads(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    chapter_downloads::clear_completed_chapter_downloads(state.database.pool())
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("Failed to clear completed chapter downloads: {}", e))
+}
+
+/// Clear failed chapter downloads from the Download Manager list
+#[tauri::command]
+pub async fn clear_failed_chapter_downloads(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    chapter_downloads::clear_failed_chapter_downloads(state.database.pool())
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("Failed to clear failed chapter downloads: {}", e))
+}
+
 /// List all chapter downloads for a manga
 #[tauri::command]
 pub async fn list_chapter_downloads(

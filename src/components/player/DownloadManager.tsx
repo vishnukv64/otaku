@@ -13,7 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { X, Download, Trash2, CheckCircle, Loader2, Folder, BookOpen, Tv, Pause, Play, ChevronDown } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { ask } from '@tauri-apps/plugin-dialog'
-import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, getCachedMediaDetails, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
+import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, clearCompletedChapterDownloads, clearFailedChapterDownloads, getCachedMediaDetails, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { useSettingsStore } from '@/store/settingsStore'
 import { isMobile } from '@/utils/platform'
@@ -265,7 +265,9 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   }
 
   const handleClearCompleted = async () => {
-    const completedCount = downloads.filter(d => d.status === 'completed').length
+    const completedEpisodeCount = downloads.filter(d => d.status === 'completed').length
+    const completedChapterCount = chapterDownloads.filter(d => d.status === 'completed').length
+    const completedCount = completedEpisodeCount + completedChapterCount
     if (completedCount === 0) {
       notifyError('No Downloads', 'No completed downloads to clear')
       return
@@ -275,9 +277,16 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     if (!confirmed) return
 
     try {
-      await clearCompletedDownloads()
-      const result = await listDownloads()
-      setDownloads(result)
+      await Promise.all([
+        completedEpisodeCount > 0 ? clearCompletedDownloads() : Promise.resolve(),
+        completedChapterCount > 0 ? clearCompletedChapterDownloads() : Promise.resolve(),
+      ])
+      const [downloadsList, chaptersList] = await Promise.all([
+        listDownloads(),
+        listAllChapterDownloads(),
+      ])
+      setDownloads(downloadsList)
+      setChapterDownloads(chaptersList)
       notifySuccess('Downloads Cleared', `Cleared ${completedCount} completed download(s)`)
     } catch (error) {
       console.error('Failed to clear completed downloads:', error)
@@ -286,7 +295,9 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   }
 
   const handleClearFailed = async () => {
-    const failedCount = downloads.filter(d => d.status === 'failed').length
+    const failedEpisodeCount = downloads.filter(d => d.status === 'failed').length
+    const failedChapterCount = chapterDownloads.filter(d => d.status === 'failed').length
+    const failedCount = failedEpisodeCount + failedChapterCount
     if (failedCount === 0) {
       notifyError('No Downloads', 'No failed downloads to clear')
       return
@@ -296,9 +307,16 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     if (!confirmed) return
 
     try {
-      await clearFailedDownloads()
-      const result = await listDownloads()
-      setDownloads(result)
+      await Promise.all([
+        failedEpisodeCount > 0 ? clearFailedDownloads() : Promise.resolve(),
+        failedChapterCount > 0 ? clearFailedChapterDownloads() : Promise.resolve(),
+      ])
+      const [downloadsList, chaptersList] = await Promise.all([
+        listDownloads(),
+        listAllChapterDownloads(),
+      ])
+      setDownloads(downloadsList)
+      setChapterDownloads(chaptersList)
       notifySuccess('Downloads Cleared', `Cleared ${failedCount} failed download(s)`)
     } catch (error) {
       console.error('Failed to clear failed downloads:', error)
@@ -328,8 +346,8 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const completedInGroup = animeDownloads.filter(d => d.status === 'completed').length
     const inFlightInGroup = animeDownloads.length - completedInGroup
     const summary = inFlightInGroup > 0
-      ? `Delete all ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed file${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
-      : `Delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`
+      ? `Are you sure you want to delete all ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed file${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
+      : `Are you sure you want to delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`
 
     const confirmed = await ask(summary, { kind: 'warning' })
     if (!confirmed) return
@@ -402,8 +420,8 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const completedInGroup = mangaChapters.filter(d => d.status === 'completed').length
     const inFlightInGroup = mangaChapters.length - completedInGroup
     const summary = inFlightInGroup > 0
-      ? `Delete all ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed chapter${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
-      : `Delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`
+      ? `Are you sure you want to delete all ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed chapter${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
+      : `Are you sure you want to delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`
 
     const confirmed = await ask(summary, { kind: 'warning' })
     if (!confirmed) return
@@ -726,50 +744,62 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
             return (
               <div key={group.mediaId} className={`group/grp border rounded-[var(--radius-lg)] overflow-hidden transition-colors ${hasFailed ? 'border-red-400/20' : 'border-[var(--color-glass-border)] hover:border-[var(--color-glass-border-hover)]'}`}>
                 {/* Group Header */}
-                <button
-                  onClick={() => toggleGroup(group.mediaId)}
+                <div
                   className="w-full flex items-center gap-3.5 px-[18px] py-3.5 bg-white/[0.04] hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
                 >
-                  <div className="w-12 h-16 rounded-md bg-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                    {coverUrls[group.mediaId] ? (
-                      <img src={coverUrls[group.mediaId]} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <Tv size={20} className="text-[var(--color-text-muted)]" />
-                    )}
-                  </div>
-                  <div className="flex-1 text-left min-w-0">
-                    <div className="text-[0.95rem] font-semibold truncate">{group.mediaTitle}</div>
-                    <div className="flex items-center gap-2 text-[0.8rem] text-[var(--color-text-muted)] mt-0.5 flex-wrap">
-                      <span>{formatBytes(groupTotalSize)}</span>
-                      <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)] flex-shrink-0" />
-                      <span>{group.downloads.length} episode{group.downloads.length !== 1 ? 's' : ''}</span>
-                      {downloadingCount > 0 && (
-                        <>
-                          <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)] flex-shrink-0" />
-                          <span className="inline-flex items-center gap-1 text-[var(--color-accent-light)] text-[0.75rem] font-semibold">
-                            <Loader2 size={10} className="animate-spin" />
-                            {downloadingCount} downloading
-                          </span>
-                        </>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.mediaId)}
+                    aria-expanded={!isCollapsed}
+                    className="min-w-0 flex-1 flex items-center gap-3.5 text-left bg-transparent border-0 p-0 text-inherit"
+                  >
+                    <div className="w-12 h-16 rounded-md bg-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                      {coverUrls[group.mediaId] ? (
+                        <img src={coverUrls[group.mediaId]} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <Tv size={20} className="text-[var(--color-text-muted)]" />
                       )}
                     </div>
-                  </div>
-                  {hasFailed && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/20 flex-shrink-0">
-                      {grpFailedCount} failed
-                    </span>
-                  )}
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="text-[0.95rem] font-semibold truncate">{group.mediaTitle}</div>
+                      <div className="flex items-center gap-2 text-[0.8rem] text-[var(--color-text-muted)] mt-0.5 flex-wrap">
+                        <span>{formatBytes(groupTotalSize)}</span>
+                        <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)] flex-shrink-0" />
+                        <span>{group.downloads.length} episode{group.downloads.length !== 1 ? 's' : ''}</span>
+                        {downloadingCount > 0 && (
+                          <>
+                            <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)] flex-shrink-0" />
+                            <span className="inline-flex items-center gap-1 text-[var(--color-accent-light)] text-[0.75rem] font-semibold">
+                              <Loader2 size={10} className="animate-spin" />
+                              {downloadingCount} downloading
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {hasFailed && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/20 flex-shrink-0">
+                        {grpFailedCount} failed
+                      </span>
+                    )}
+                  </button>
                   <button
+                    type="button"
                     onClick={(e) => { e.stopPropagation(); handleDeleteAnime(group.mediaId, group.mediaTitle) }}
                     className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover/grp:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all flex-shrink-0"
                     title="Delete all episodes"
                   >
                     <Trash2 size={14} />
                   </button>
-                  <div className={`w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.mediaId)}
+                    className={`w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}
+                    aria-label={isCollapsed ? `Expand ${group.mediaTitle}` : `Collapse ${group.mediaTitle}`}
+                  >
                     <ChevronDown size={18} />
-                  </div>
-                </button>
+                  </button>
+                </div>
 
                 {/* Episodes */}
                 <div
@@ -806,42 +836,54 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
             return (
               <div key={group.mediaId} className={`group/grp border rounded-[var(--radius-lg)] overflow-hidden transition-colors ${hasFailed ? 'border-red-400/20' : 'border-[var(--color-glass-border)] hover:border-[var(--color-glass-border-hover)]'}`}>
                 {/* Group Header */}
-                <button
-                  onClick={() => toggleGroup(group.mediaId)}
+                <div
                   className="w-full flex items-center gap-3.5 px-[18px] py-3.5 bg-white/[0.04] hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
                 >
-                  <div className="w-12 h-16 rounded-md bg-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                    {coverUrls[group.mediaId] ? (
-                      <img src={coverUrls[group.mediaId]} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <BookOpen size={20} className="text-[var(--color-text-muted)]" />
-                    )}
-                  </div>
-                  <div className="flex-1 text-left min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[0.95rem] font-semibold truncate">{group.mediaTitle}</span>
-                      <span className="inline-flex px-2 py-0.5 rounded text-[0.6rem] font-bold uppercase tracking-wider bg-cyan-400/10 text-cyan-400 border border-cyan-400/20 font-mono flex-shrink-0">MANGA</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[0.8rem] text-[var(--color-text-muted)] mt-0.5">
-                      <span>{group.downloads.length} chapter{group.downloads.length !== 1 ? 's' : ''}</span>
-                    </div>
-                  </div>
-                  {hasFailed && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/20 flex-shrink-0">
-                      {grpFailedCount} failed
-                    </span>
-                  )}
                   <button
+                    type="button"
+                    onClick={() => toggleGroup(group.mediaId)}
+                    aria-expanded={!isCollapsed}
+                    className="min-w-0 flex-1 flex items-center gap-3.5 text-left bg-transparent border-0 p-0 text-inherit"
+                  >
+                    <div className="w-12 h-16 rounded-md bg-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                      {coverUrls[group.mediaId] ? (
+                        <img src={coverUrls[group.mediaId]} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <BookOpen size={20} className="text-[var(--color-text-muted)]" />
+                      )}
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[0.95rem] font-semibold truncate">{group.mediaTitle}</span>
+                        <span className="inline-flex px-2 py-0.5 rounded text-[0.6rem] font-bold uppercase tracking-wider bg-cyan-400/10 text-cyan-400 border border-cyan-400/20 font-mono flex-shrink-0">MANGA</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[0.8rem] text-[var(--color-text-muted)] mt-0.5">
+                        <span>{group.downloads.length} chapter{group.downloads.length !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                    {hasFailed && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/20 flex-shrink-0">
+                        {grpFailedCount} failed
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
                     onClick={(e) => { e.stopPropagation(); handleDeleteManga(group.mediaId, group.mediaTitle) }}
                     className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover/grp:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all flex-shrink-0"
                     title="Delete all chapters"
                   >
                     <Trash2 size={14} />
                   </button>
-                  <div className={`w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.mediaId)}
+                    className={`w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}
+                    aria-label={isCollapsed ? `Expand ${group.mediaTitle}` : `Collapse ${group.mediaTitle}`}
+                  >
                     <ChevronDown size={18} />
-                  </div>
-                </button>
+                  </button>
+                </div>
 
                 {/* Chapters */}
                 <div
@@ -1214,7 +1256,7 @@ function ChapterDownloadItem({
             <X size={13} />
           </button>
         )}
-        {download.status === 'completed' && (
+        {(download.status === 'completed' || download.status === 'failed') && (
           <button onClick={() => onDelete(download.media_id, download.chapter_id)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
             <Trash2 size={13} />
           </button>

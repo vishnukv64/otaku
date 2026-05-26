@@ -517,6 +517,25 @@ pub async fn delete_chapter_download(
     Ok(())
 }
 
+async fn clear_chapter_downloads_by_status(pool: &SqlitePool, status: &str) -> Result<u64> {
+    let result = sqlx::query("DELETE FROM chapter_downloads WHERE status = ?")
+        .bind(status)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected())
+}
+
+/// Clear completed chapter downloads from the manager list without deleting files.
+pub async fn clear_completed_chapter_downloads(pool: &SqlitePool) -> Result<u64> {
+    clear_chapter_downloads_by_status(pool, "completed").await
+}
+
+/// Clear failed chapter downloads from the manager list without deleting files.
+pub async fn clear_failed_chapter_downloads(pool: &SqlitePool) -> Result<u64> {
+    clear_chapter_downloads_by_status(pool, "failed").await
+}
+
 /// List all chapter downloads for a manga
 pub async fn list_chapter_downloads(
     pool: &SqlitePool,
@@ -739,5 +758,94 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for ChapterDownload {
             error_message: row.try_get("error_message")?,
             created_at: row.try_get("created_at")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn setup_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE chapter_downloads (
+                id TEXT PRIMARY KEY,
+                media_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                chapter_number REAL NOT NULL,
+                folder_path TEXT NOT NULL,
+                total_images INTEGER NOT NULL DEFAULT 0,
+                downloaded_images INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'queued',
+                error_message TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(media_id, chapter_id)
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("create chapter_downloads");
+
+        pool
+    }
+
+    async fn insert_download(pool: &SqlitePool, id: &str, status: &str) {
+        sqlx::query(
+            r#"
+            INSERT INTO chapter_downloads (
+                id, media_id, chapter_id, chapter_number, folder_path,
+                total_images, downloaded_images, status
+            )
+            VALUES (?, ?, ?, 1.0, '/tmp/nonexistent', 10, 5, ?)
+            "#,
+        )
+        .bind(id)
+        .bind(format!("media-{id}"))
+        .bind(format!("chapter-{id}"))
+        .bind(status)
+        .execute(pool)
+        .await
+        .expect("insert chapter download");
+    }
+
+    async fn remaining_statuses(pool: &SqlitePool) -> Vec<String> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT status FROM chapter_downloads ORDER BY id ASC",
+        )
+        .fetch_all(pool)
+        .await
+        .expect("fetch statuses")
+    }
+
+    #[tokio::test]
+    async fn clear_completed_chapter_downloads_removes_only_completed_records() {
+        let pool = setup_pool().await;
+        insert_download(&pool, "a", "completed").await;
+        insert_download(&pool, "b", "failed").await;
+        insert_download(&pool, "c", "queued").await;
+
+        clear_completed_chapter_downloads(&pool).await.expect("clear completed");
+
+        assert_eq!(remaining_statuses(&pool).await, vec!["failed", "queued"]);
+    }
+
+    #[tokio::test]
+    async fn clear_failed_chapter_downloads_removes_only_failed_records() {
+        let pool = setup_pool().await;
+        insert_download(&pool, "a", "completed").await;
+        insert_download(&pool, "b", "failed").await;
+        insert_download(&pool, "c", "queued").await;
+
+        clear_failed_chapter_downloads(&pool).await.expect("clear failed");
+
+        assert_eq!(remaining_statuses(&pool).await, vec!["completed", "queued"]);
     }
 }

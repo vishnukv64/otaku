@@ -116,9 +116,11 @@ impl DownloadManager {
                 let file_metadata = tokio::fs::metadata(&file_path).await;
                 let file_exists = file_metadata.is_ok();
 
-                let mut status_str: String = row.try_get("status")?;
+                let original_status_str: String = row.try_get("status")?;
+                let completed_file_missing = original_status_str == "completed" && !file_exists;
+                let mut status_str = original_status_str.clone();
                 // If completed but file missing, mark as failed
-                if status_str == "completed" && !file_exists {
+                if completed_file_missing {
                     status_str = "failed".to_string();
                 }
 
@@ -178,12 +180,16 @@ impl DownloadManager {
                     percentage: row.try_get::<f32, _>("percentage")?,
                     speed: row.try_get::<i64, _>("speed")? as u64,
                     status,
-                    error_message: if !file_exists && status_str == "completed" {
+                    error_message: if completed_file_missing {
                         Some("File not found. Please re-download.".to_string())
                     } else {
                         row.try_get("error_message")?
                     },
                 };
+
+                if completed_file_missing || original_status_str == "downloading" {
+                    Self::save_progress_to_db(pool, &progress).await.ok();
+                }
 
                 downloads.insert(progress.id.clone(), progress);
             }
@@ -949,12 +955,17 @@ impl DownloadManager {
         };
 
         if let Some(path) = file_path {
-            // Delete the file
-            tokio::fs::remove_file(&path)
-                .await
-                .context("Failed to delete file")?;
-
-            log::debug!("Deleted file: {}", path);
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => {
+                    log::debug!("Deleted file: {}", path);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    log::debug!("Download file already missing: {}", path);
+                }
+                Err(e) => {
+                    return Err(e).with_context(|| format!("Failed to delete file: {}", path));
+                }
+            }
         }
 
         // Remove from list and database
@@ -1023,5 +1034,120 @@ impl DownloadManager {
     /// Get the downloads directory path
     pub fn get_downloads_directory(&self) -> String {
         self.download_dir.to_string_lossy().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+    fn download_with_path(id: &str, file_path: PathBuf, status: DownloadStatus) -> DownloadProgress {
+        DownloadProgress {
+            id: id.to_string(),
+            media_id: "media-1".to_string(),
+            episode_id: "episode-1".to_string(),
+            episode_number: 1,
+            filename: "Episode_1.otaku".to_string(),
+            url: "https://example.test/video.mp4".to_string(),
+            file_path: file_path.to_string_lossy().to_string(),
+            total_bytes: 100,
+            downloaded_bytes: 50,
+            percentage: 50.0,
+            speed: 0,
+            status,
+            error_message: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_download_removes_record_when_file_is_already_missing() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let missing_file = temp_dir.path().join("missing.otaku");
+        let manager = DownloadManager::new(temp_dir.path().to_path_buf());
+
+        manager.downloads.write().await.insert(
+            "download-1".to_string(),
+            download_with_path("download-1", missing_file, DownloadStatus::Failed),
+        );
+
+        let result = manager.delete_download("download-1").await;
+
+        assert!(result.is_ok(), "delete should ignore absent files: {result:?}");
+        assert!(manager.get_progress("download-1").await.is_none());
+    }
+
+    async fn setup_downloads_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE downloads (
+                id TEXT PRIMARY KEY,
+                media_id TEXT NOT NULL,
+                episode_id TEXT NOT NULL,
+                episode_number INTEGER NOT NULL DEFAULT 0,
+                filename TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                file_path TEXT NOT NULL,
+                total_bytes INTEGER NOT NULL DEFAULT 0,
+                downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+                percentage REAL NOT NULL DEFAULT 0,
+                speed INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'queued',
+                error_message TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(media_id, episode_id)
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("create downloads");
+
+        pool
+    }
+
+    #[tokio::test]
+    async fn load_from_database_persists_missing_completed_file_as_failed() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let missing_file = temp_dir.path().join("missing-completed.otaku");
+        let pool = setup_downloads_pool().await;
+
+        sqlx::query(
+            r#"
+            INSERT INTO downloads (
+                id, media_id, episode_id, episode_number, filename, url, file_path,
+                total_bytes, downloaded_bytes, percentage, speed, status
+            )
+            VALUES ('download-1', 'media-1', 'episode-1', 1, 'Episode_1.otaku',
+                'https://example.test/video.mp4', ?, 100, 100, 100.0, 0, 'completed')
+            "#,
+        )
+        .bind(missing_file.to_string_lossy().to_string())
+        .execute(&pool)
+        .await
+        .expect("insert completed download");
+
+        let manager = DownloadManager::new(temp_dir.path().to_path_buf())
+            .with_database(Arc::new(pool.clone()));
+
+        manager.load_from_database().await.expect("load downloads");
+
+        let progress = manager.get_progress("download-1").await.expect("download loaded");
+        let persisted_status: String = sqlx::query_scalar(
+            "SELECT status FROM downloads WHERE id = 'download-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("persisted status");
+
+        assert_eq!(progress.status, DownloadStatus::Failed);
+        assert_eq!(persisted_status, "failed");
     }
 }
