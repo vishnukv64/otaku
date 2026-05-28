@@ -1467,6 +1467,15 @@ pub fn stop_manual_release_check() {
 
 // ==================== Notification Emission ====================
 
+/// Render whole numbers as integers ("12") and fractions as full decimals ("12.5").
+fn trim_number(n: f64) -> String {
+    if (n.fract()).abs() < f64::EPSILON {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", n)
+    }
+}
+
 async fn emit_release_notification(
     app_handle: &AppHandle,
     pool: &SqlitePool,
@@ -1479,7 +1488,7 @@ async fn emit_release_notification(
                 format!(
                     "{} - Episode {} is now available!",
                     result.media_title,
-                    result.current_number.map(|n| format!("{:.0}", n)).unwrap_or_else(|| result.current_count.to_string())
+                    result.current_number.map(|n| trim_number(n as f64)).unwrap_or_else(|| result.current_count.to_string())
                 )
             } else {
                 format!(
@@ -1495,7 +1504,7 @@ async fn emit_release_notification(
                 format!(
                     "{} - Chapter {} is now available!",
                     result.media_title,
-                    result.current_number.map(|n| format!("{:.0}", n)).unwrap_or_else(|| result.current_count.to_string())
+                    result.current_number.map(|n| trim_number(n as f64)).unwrap_or_else(|| result.current_count.to_string())
                 )
             } else {
                 format!(
@@ -1805,6 +1814,16 @@ mod tests {
         .expect("fetch legacy row count");
 
         assert_eq!(legacy_count, 1);
+    }
+
+    #[test]
+    fn trim_number_integer_drops_fraction() {
+        assert_eq!(trim_number(12.0), "12");
+    }
+
+    #[test]
+    fn trim_number_fractional_keeps_decimal() {
+        assert_eq!(trim_number(12.5), "12.5");
     }
 }
 
