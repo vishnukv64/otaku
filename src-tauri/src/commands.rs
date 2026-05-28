@@ -2859,6 +2859,21 @@ pub async fn set_update_check_info(
     Ok(())
 }
 
+/// Notify that an app update is available. Called by the frontend when the
+/// updater plugin detects a new version. Routes through `emit_notification` so
+/// a native banner fires when the window is hidden.
+#[tauri::command]
+pub async fn notify_update_available(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    version: String,
+) -> Result<(), String> {
+    let pool = state.database.pool().clone();
+    crate::notifications::notify_app_update_available(&app, Some(&pool), &version)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ============================================================================
 // Release Checker Commands
 // ============================================================================

@@ -572,6 +572,30 @@ pub async fn notify_removed_from_library(
     emit_notification(app_handle, pool, notification).await
 }
 
+/// Emit an app-update-available notification. Routes through `emit_notification`
+/// so it inherits the in-app toast, native banner escalation (when window is
+/// hidden), and DB persistence.
+pub async fn notify_app_update_available(
+    app_handle: &AppHandle,
+    pool: Option<&SqlitePool>,
+    version: &str,
+) -> Result<()> {
+    let notification = NotificationPayload::new(
+        NotificationType::Info,
+        "Update available",
+        format!("Otaku {} is ready to install.", version),
+    )
+    .with_source("updater")
+    .with_action(
+        "Update",
+        Some("/settings".to_string()),
+        None,
+    )
+    .with_metadata(serde_json::json!({ "version": version }));
+
+    emit_notification(app_handle, pool, notification).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::should_escalate_native;
