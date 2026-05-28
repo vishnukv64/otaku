@@ -11,6 +11,8 @@ mod request_headers;
 mod release_checker;
 mod status_normalizer;
 mod trackers;
+#[cfg_attr(desktop, path = "tray.rs")]
+#[cfg_attr(not(desktop), path = "tray_stub.rs")]
 mod tray;
 mod video_server;
 
@@ -86,9 +88,10 @@ pub fn run() {
   }
 
   builder
-    .on_window_event(|window, event| {
-      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-        let app = window.app_handle();
+    .on_window_event(|_window, _event| {
+      #[cfg(desktop)]
+      if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+        let app = _window.app_handle();
         let should_hide = app
           .try_state::<tray::TrayLifecycleState>()
           .map(|s| !s.quit_requested.load(std::sync::atomic::Ordering::SeqCst))
@@ -96,7 +99,7 @@ pub fn run() {
 
         if should_hide {
           api.prevent_close();
-          if let Err(e) = window.hide() {
+          if let Err(e) = _window.hide() {
             log::error!("Failed to hide window on close: {}", e);
           }
         }
@@ -223,7 +226,9 @@ pub fn run() {
       // Initialize database and download manager
       let app_handle = app.handle();
 
-      // Tray + window-close + deeplink lifecycle state.
+      // Tray + window-close + deeplink lifecycle state (desktop only — mobile
+      // targets have no system tray, menubar, or close-to-hide semantics).
+      #[cfg(desktop)]
       app_handle.manage(tray::TrayLifecycleState::default());
 
       // If launched with --hidden (e.g. by the autostart LaunchAgent), start
@@ -361,11 +366,14 @@ pub fn run() {
         log::info!("Backend initialized successfully");
       });
 
-      if let Err(e) = tray::install_app_menu(app.handle()) {
-        log::error!("Failed to install app menu: {}", e);
-      }
-      if let Err(e) = tray::build_tray(app.handle()) {
-        log::error!("Failed to build tray icon: {}", e);
+      #[cfg(desktop)]
+      {
+        if let Err(e) = tray::install_app_menu(app.handle()) {
+          log::error!("Failed to install app menu: {}", e);
+        }
+        if let Err(e) = tray::build_tray(app.handle()) {
+          log::error!("Failed to build tray icon: {}", e);
+        }
       }
 
       Ok(())
