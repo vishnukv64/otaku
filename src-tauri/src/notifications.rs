@@ -310,6 +310,20 @@ pub async fn get_unread_count(pool: &SqlitePool) -> Result<i32> {
     Ok(count as i32)
 }
 
+/// Should `emit_notification` escalate this payload to a native OS banner?
+///
+/// Suppresses when the main window is genuinely in front of the user (focused
+/// AND visible) — that case is already covered by the in-app toast.
+pub(crate) fn should_escalate_native(
+    window_focused: bool,
+    window_visible: bool,
+    desktop_notifs_enabled: bool,
+    escalate_flag: bool,
+) -> bool {
+    let foreground = window_focused && window_visible;
+    desktop_notifs_enabled && escalate_flag && !foreground
+}
+
 // ==================== Helper Functions for Common Notifications ====================
 // These are utility functions that can be called from anywhere in the backend
 // Some may not be used yet but are available for future use
@@ -469,4 +483,43 @@ pub async fn notify_removed_from_library(
     .with_source("library");
 
     emit_notification(app_handle, pool, notification).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_escalate_native;
+
+    #[test]
+    fn focused_and_visible_window_suppresses_native() {
+        assert!(!should_escalate_native(true, true, true, true));
+    }
+
+    #[test]
+    fn hidden_window_escalates() {
+        assert!(should_escalate_native(false, false, true, true));
+    }
+
+    #[test]
+    fn visible_but_unfocused_escalates() {
+        // Background-but-on-screen counts as background — the user is in
+        // another app, the in-app toast is not the surface they're looking at.
+        assert!(should_escalate_native(false, true, true, true));
+    }
+
+    #[test]
+    fn focused_but_hidden_escalates() {
+        // Defensive: shouldn't happen in practice but the gate should not
+        // misfire if one of the two queries races.
+        assert!(should_escalate_native(true, false, true, true));
+    }
+
+    #[test]
+    fn desktop_notifications_disabled_suppresses() {
+        assert!(!should_escalate_native(false, false, false, true));
+    }
+
+    #[test]
+    fn escalate_flag_false_suppresses() {
+        assert!(!should_escalate_native(false, false, true, false));
+    }
 }
