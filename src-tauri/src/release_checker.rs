@@ -703,60 +703,16 @@ async fn get_eligible_media(pool: &SqlitePool, force: bool) -> Result<Vec<Eligib
     // 2. Is in library with watching/reading/plan_to status OR is favorited
     // 3. Has notification_enabled = 1
     // 4. Is due for a check (next_scheduled_check <= now OR NULL)  [skipped when force=true]
-    let rows = if force {
-        sqlx::query(
-            r#"
-        SELECT
-            m.id as media_id,
-            CASE
-                WHEN m.media_type = 'manga' THEN ?
-                ELSE COALESCE(rt.extension_id, m.extension_id)
-            END as extension_id,
-            m.title,
-            m.media_type,
-            COALESCE(rt.last_known_count, 0) as last_known_count,
-            rt.last_known_latest_number,
-            rt.last_known_latest_id,
-            COALESCE(rt.normalized_status, 'unknown') as normalized_status,
-            COALESCE(rt.consecutive_failures, 0) as consecutive_failures,
-            rt.user_notified_up_to,
-            m.cover_url,
-            COALESCE(l.auto_download, 0) as auto_download
-        FROM media m
-        INNER JOIN library l ON m.id = l.media_id
-        LEFT JOIN release_tracking_v2 rt ON m.id = rt.media_id
-        WHERE (
-                COALESCE(rt.normalized_status, 'unknown') = 'ongoing'
-                OR (
-                    COALESCE(rt.normalized_status, 'unknown') = 'unknown'
-                    AND (
-                        LOWER(COALESCE(m.status, '')) LIKE '%airing%'
-                        OR LOWER(COALESCE(m.status, '')) LIKE '%releasing%'
-                        OR LOWER(COALESCE(m.status, '')) LIKE '%ongoing%'
-                        OR LOWER(COALESCE(m.status, '')) LIKE '%publishing%'
-                        OR LOWER(COALESCE(m.status, '')) LIKE '%not yet%'
-                        OR LOWER(COALESCE(m.status, '')) LIKE '%upcoming%'
-                        OR LOWER(COALESCE(m.status, '')) LIKE '%currently%'
-                        OR COALESCE(m.status, '') = ''
-                    )
-                )
-            )
-            AND (
-                l.status IN ('watching', 'reading', 'plan_to_watch', 'plan_to_read')
-                OR l.favorite = 1
-            )
-            AND COALESCE(rt.notification_enabled, 1) = 1
-        ORDER BY
-            CASE WHEN m.media_type = 'anime' THEN 0 ELSE 1 END,
-            rt.last_checked_at ASC NULLS FIRST
-        "#
-        )
-        .bind(MANGAKAKALOT_EXTENSION_ID)
-        .fetch_all(pool)
-        .await?
+
+    // The cadence gate is the only clause that varies between scheduled and forced runs.
+    let cadence_gate = if force {
+        ""
     } else {
-        sqlx::query(
-            r#"
+        "AND (rt.next_scheduled_check IS NULL OR rt.next_scheduled_check <= ?)"
+    };
+
+    let sql = format!(
+        r#"
         SELECT
             m.id as media_id,
             CASE
@@ -797,17 +753,18 @@ async fn get_eligible_media(pool: &SqlitePool, force: bool) -> Result<Vec<Eligib
                 OR l.favorite = 1
             )
             AND COALESCE(rt.notification_enabled, 1) = 1
-            AND (rt.next_scheduled_check IS NULL OR rt.next_scheduled_check <= ?)
+            {cadence_gate}
         ORDER BY
             CASE WHEN m.media_type = 'anime' THEN 0 ELSE 1 END,
             rt.last_checked_at ASC NULLS FIRST
         "#
-        )
-        .bind(MANGAKAKALOT_EXTENSION_ID)
-        .bind(now)
-        .fetch_all(pool)
-        .await?
-    };
+    );
+
+    let mut query = sqlx::query(&sql).bind(MANGAKAKALOT_EXTENSION_ID);
+    if !force {
+        query = query.bind(now);
+    }
+    let rows = query.fetch_all(pool).await?;
 
     let mut eligible = Vec::new();
     for row in rows {
@@ -1360,7 +1317,7 @@ pub async fn run_full_release_check(
 /// `next_scheduled_check` cadence gate.  Called by the tray "Check for new
 /// episodes now" item so a manual trigger always runs even when the next
 /// scheduled window hasn't arrived yet.
-pub async fn run_release_check_force(app_handle: &AppHandle) -> Result<Vec<ReleaseCheckResult>> {
+pub(crate) async fn run_release_check_force(app_handle: &AppHandle) -> Result<Vec<ReleaseCheckResult>> {
     run_full_release_check_inner(app_handle, true, true).await
 }
 
