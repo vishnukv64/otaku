@@ -10,6 +10,8 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
 use anyhow::Result;
 
+fn default_true() -> bool { true }
+
 /// Event name for notification events (matches frontend listener)
 pub const NOTIFICATION_EVENT: &str = "notification";
 
@@ -56,6 +58,11 @@ pub struct NotificationPayload {
     pub read: bool,
     pub dismissed: bool,
     pub timestamp: i64, // Unix timestamp in milliseconds
+    /// Should this notification escalate to a native OS banner when the window
+    /// is hidden? Defaults true. Set false via `with_native(false)` for purely
+    /// in-app notifications (e.g. "removed from library"). Not persisted to DB.
+    #[serde(default = "default_true")]
+    pub escalate_to_native: bool,
 }
 
 impl NotificationPayload {
@@ -76,6 +83,7 @@ impl NotificationPayload {
             read: false,
             dismissed: false,
             timestamp: chrono::Utc::now().timestamp_millis(),
+            escalate_to_native: true,
         }
     }
 
@@ -98,6 +106,13 @@ impl NotificationPayload {
     /// Add metadata to the notification
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// Opt this notification out of native OS escalation.
+    #[allow(dead_code)]
+    pub fn with_native(mut self, escalate: bool) -> Self {
+        self.escalate_to_native = escalate;
         self
     }
 }
@@ -255,6 +270,7 @@ pub async fn list_notifications(
             read: row.try_get::<i32, _>("read")? != 0,
             dismissed: row.try_get::<i32, _>("dismissed")? != 0,
             timestamp: row.try_get("created_at")?,
+            escalate_to_native: true,
         });
     }
 
