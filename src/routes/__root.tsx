@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { MediaStatusProvider } from '@/contexts/MediaStatusContext'
 import { useNotificationEvents } from '@/hooks/useNotificationEvents'
 import { useAutoUpdateCheck } from '@/hooks/useAutoUpdateCheck'
+import { useDeeplinkListener } from '@/hooks/useDeeplinkListener'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useReaderStore } from '@/store/readerStore'
 import { usePlayerStore } from '@/store/playerStore'
@@ -107,6 +108,9 @@ function RootComponent() {
 
   // Check for app updates on launch and periodically
   useAutoUpdateCheck()
+
+  // Listen for backend deeplink events (e.g. from tray icon clicks)
+  useDeeplinkListener()
 
   // Show migration screen while migration is needed (blocks all routes)
   if (migrationNeeded) {
