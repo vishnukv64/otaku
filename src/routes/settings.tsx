@@ -64,6 +64,8 @@ function SettingsScreen() {
   const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
   const [appVersion, setAppVersion] = useState<string>('')
   const [tauriVersion, setTauriVersion] = useState<string>('')
+  const [autostartEnabled, setAutostartEnabled] = useState(false)
+  const [desktopNotifsEnabled, setDesktopNotifsEnabled] = useState(true)
 
   const loadVersionInfo = async () => {
     try {
@@ -93,6 +95,12 @@ function SettingsScreen() {
     const timeoutId = setTimeout(() => {
       loadStorageUsage()
       loadVersionInfo()
+      invoke<boolean>('get_autostart_status')
+        .then(setAutostartEnabled)
+        .catch((e) => console.error('[settings] get_autostart_status failed', e))
+      invoke<boolean>('get_desktop_notifications_enabled')
+        .then(setDesktopNotifsEnabled)
+        .catch((e) => console.error('[settings] get_desktop_notifications_enabled failed', e))
     }, 0)
     return () => clearTimeout(timeoutId)
   }, [])
@@ -139,6 +147,30 @@ function SettingsScreen() {
     settings.resetToDefaults()
     updatePlayerSettings({ playbackSpeed: 1.0 })
     notifySuccess('Settings Reset', 'Settings have been reset to defaults')
+  }
+
+  const handleAutostartToggle = async (next: boolean) => {
+    const previous = autostartEnabled
+    setAutostartEnabled(next)
+    try {
+      await invoke('set_autostart', { enabled: next })
+    } catch (e) {
+      console.error('[settings] set_autostart failed', e)
+      setAutostartEnabled(previous)
+      notifyError('Autostart Error', `Failed to update launch at login: ${e}`)
+    }
+  }
+
+  const handleDesktopNotifsToggle = async (next: boolean) => {
+    const previous = desktopNotifsEnabled
+    setDesktopNotifsEnabled(next)
+    try {
+      await invoke('set_desktop_notifications_enabled', { enabled: next })
+    } catch (e) {
+      console.error('[settings] set_desktop_notifications_enabled failed', e)
+      setDesktopNotifsEnabled(previous)
+      notifyError('Notifications Error', `Failed to update desktop notifications: ${e}`)
+    }
   }
 
   return (
@@ -412,7 +444,22 @@ function SettingsScreen() {
             <h2 className="font-display font-bold text-xl mb-1.5">Notifications</h2>
             <p className="text-sm text-[var(--color-text-muted)] mb-6">Manage notification preferences</p>
 
+            <SettingSection title="App" description="App launch and background behavior">
+              <SettingRow
+                label="Launch Otaku at login"
+                description="Otaku starts in the background when you log in, with the menu-bar icon ready."
+              >
+                <SettingToggle value={autostartEnabled} onChange={handleAutostartToggle} />
+              </SettingRow>
+            </SettingSection>
+
             <SettingSection title="Push Notifications" description="When to receive notifications">
+              <SettingRow
+                label="Desktop notifications"
+                description="Show OS notification banners when the window is hidden or in the background."
+              >
+                <SettingToggle value={desktopNotifsEnabled} onChange={handleDesktopNotifsToggle} />
+              </SettingRow>
               <SettingRow
                 label="New Episodes"
                 description="Get notified when new episodes of tracked anime air"
