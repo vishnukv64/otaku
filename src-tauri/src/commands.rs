@@ -2921,10 +2921,17 @@ pub async fn update_release_check_settings(
 #[tauri::command]
 pub async fn check_for_new_releases(
     app: AppHandle,
+    force: Option<bool>,
 ) -> Result<Vec<ReleaseCheckResult>, String> {
-    release_checker::run_full_release_check(&app, true)
-        .await
-        .map_err(|e| format!("Release check failed: {}", e))
+    if force.unwrap_or(false) {
+        release_checker::run_release_check_force(&app)
+            .await
+            .map_err(|e| format!("Release check failed: {}", e))
+    } else {
+        release_checker::run_full_release_check(&app, true)
+            .await
+            .map_err(|e| format!("Release check failed: {}", e))
+    }
 }
 
 #[tauri::command]

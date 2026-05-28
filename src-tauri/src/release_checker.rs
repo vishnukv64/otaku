@@ -691,16 +691,72 @@ async fn log_check_result(
 }
 
 /// Get media items eligible for release checking (V2)
-async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
+///
+/// When `force` is `true` the cadence gate (`next_scheduled_check`) is bypassed
+/// so every notification-enabled library item is included regardless of when it
+/// was last checked.  The scheduled background loop always passes `false`.
+async fn get_eligible_media(pool: &SqlitePool, force: bool) -> Result<Vec<EligibleMedia>> {
     let now = chrono::Utc::now().timestamp_millis();
 
     // Query media that:
     // 1. Has normalized_status in ('ongoing', 'unknown') - status normalization!
     // 2. Is in library with watching/reading/plan_to status OR is favorited
     // 3. Has notification_enabled = 1
-    // 4. Is due for a check (next_scheduled_check <= now OR NULL)
-    let rows = sqlx::query(
-        r#"
+    // 4. Is due for a check (next_scheduled_check <= now OR NULL)  [skipped when force=true]
+    let rows = if force {
+        sqlx::query(
+            r#"
+        SELECT
+            m.id as media_id,
+            CASE
+                WHEN m.media_type = 'manga' THEN ?
+                ELSE COALESCE(rt.extension_id, m.extension_id)
+            END as extension_id,
+            m.title,
+            m.media_type,
+            COALESCE(rt.last_known_count, 0) as last_known_count,
+            rt.last_known_latest_number,
+            rt.last_known_latest_id,
+            COALESCE(rt.normalized_status, 'unknown') as normalized_status,
+            COALESCE(rt.consecutive_failures, 0) as consecutive_failures,
+            rt.user_notified_up_to,
+            m.cover_url,
+            COALESCE(l.auto_download, 0) as auto_download
+        FROM media m
+        INNER JOIN library l ON m.id = l.media_id
+        LEFT JOIN release_tracking_v2 rt ON m.id = rt.media_id
+        WHERE (
+                COALESCE(rt.normalized_status, 'unknown') = 'ongoing'
+                OR (
+                    COALESCE(rt.normalized_status, 'unknown') = 'unknown'
+                    AND (
+                        LOWER(COALESCE(m.status, '')) LIKE '%airing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%releasing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%ongoing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%publishing%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%not yet%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%upcoming%'
+                        OR LOWER(COALESCE(m.status, '')) LIKE '%currently%'
+                        OR COALESCE(m.status, '') = ''
+                    )
+                )
+            )
+            AND (
+                l.status IN ('watching', 'reading', 'plan_to_watch', 'plan_to_read')
+                OR l.favorite = 1
+            )
+            AND COALESCE(rt.notification_enabled, 1) = 1
+        ORDER BY
+            CASE WHEN m.media_type = 'anime' THEN 0 ELSE 1 END,
+            rt.last_checked_at ASC NULLS FIRST
+        "#
+        )
+        .bind(MANGAKAKALOT_EXTENSION_ID)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            r#"
         SELECT
             m.id as media_id,
             CASE
@@ -746,11 +802,12 @@ async fn get_eligible_media(pool: &SqlitePool) -> Result<Vec<EligibleMedia>> {
             CASE WHEN m.media_type = 'anime' THEN 0 ELSE 1 END,
             rt.last_checked_at ASC NULLS FIRST
         "#
-    )
-    .bind(MANGAKAKALOT_EXTENSION_ID)
-    .bind(now)
-    .fetch_all(pool)
-    .await?;
+        )
+        .bind(MANGAKAKALOT_EXTENSION_ID)
+        .bind(now)
+        .fetch_all(pool)
+        .await?
+    };
 
     let mut eligible = Vec::new();
     for row in rows {
@@ -1296,6 +1353,22 @@ pub async fn run_full_release_check(
     app_handle: &AppHandle,
     is_manual: bool,
 ) -> Result<Vec<ReleaseCheckResult>> {
+    run_full_release_check_inner(app_handle, is_manual, false).await
+}
+
+/// Force-variant of [`run_full_release_check`] that bypasses the
+/// `next_scheduled_check` cadence gate.  Called by the tray "Check for new
+/// episodes now" item so a manual trigger always runs even when the next
+/// scheduled window hasn't arrived yet.
+pub async fn run_release_check_force(app_handle: &AppHandle) -> Result<Vec<ReleaseCheckResult>> {
+    run_full_release_check_inner(app_handle, true, true).await
+}
+
+async fn run_full_release_check_inner(
+    app_handle: &AppHandle,
+    is_manual: bool,
+    force: bool,
+) -> Result<Vec<ReleaseCheckResult>> {
     // Acquire lock to prevent concurrent checks (manual + background)
     let lock = CHECK_LOCK.clone();
     let _guard = match tokio::time::timeout(Duration::from_secs(5), lock.lock()).await {
@@ -1315,7 +1388,7 @@ pub async fn run_full_release_check(
 
     let settings = get_release_settings(pool).await?;
 
-    let eligible = get_eligible_media(pool).await?;
+    let eligible = get_eligible_media(pool, force).await?;
     let total_count = eligible.len() as u32;
     log::info!("Checking {} media items for new releases (manual={})", total_count, is_manual);
 

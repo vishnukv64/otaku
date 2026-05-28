@@ -65,12 +65,21 @@ pub fn request_quit(app: &AppHandle) {
 /// Idempotent: safe to call once during setup.
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show_hide = MenuItem::with_id(app, "show_hide", "Show Otaku", true, None::<&str>)?;
+    let check_releases = MenuItem::with_id(
+        app,
+        "check_releases",
+        "Check for new episodes now",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quit Otaku", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
         &[
             &show_hide,
+            &PredefinedMenuItem::separator(app)?,
+            &check_releases,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -87,6 +96,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show_hide" => toggle_main_window(app),
+            "check_releases" => trigger_release_check(app),
             "quit" => request_quit(app),
             _ => {}
         })
@@ -103,6 +113,19 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+/// Spawn a background task that runs a forced release check (bypassing the
+/// normal `next_scheduled_check` cadence gate).  Used by the tray menu item
+/// so the user always gets a real network check regardless of when the next
+/// scheduled window would fire.
+fn trigger_release_check(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::release_checker::run_release_check_force(&app).await {
+            log::error!("Manual release check failed: {}", e);
+        }
+    });
 }
 
 /// Show the window if hidden, hide it if visible. Used by the tray menu item.
