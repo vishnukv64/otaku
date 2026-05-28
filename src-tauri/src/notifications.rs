@@ -117,27 +117,78 @@ impl NotificationPayload {
     }
 }
 
-/// Emit a notification event to the frontend and optionally save to database.
-/// On Android, also sends a system notification to the OS notification tray.
+/// Emit a notification to the frontend, persist it, and optionally escalate
+/// to a native OS banner.
+///
+/// Escalation rules (desktop only):
+///   - window not focused or not visible
+///   - desktop_notifications setting enabled (default true)
+///   - payload.escalate_to_native true (default true)
+///
+/// When a native banner fires, the payload's action.route (if any) is stored
+/// as the pending deep-link; the next time the app is activated,
+/// `tray::restore_and_navigate` emits a `"deeplink"` event with that route.
 pub async fn emit_notification(
     app_handle: &AppHandle,
     pool: Option<&SqlitePool>,
     notification: NotificationPayload,
 ) -> Result<()> {
-    // Emit event to frontend (for in-app UI on desktop)
+    // 1. In-app event (drives the existing toast UI and any other listeners).
     if let Err(e) = app_handle.emit(NOTIFICATION_EVENT, &notification) {
         log::error!("Failed to emit notification event: {}", e);
     } else {
-        log::debug!("Emitted notification: {} - {}", notification.title, notification.message);
+        log::debug!(
+            "Emitted notification: {} - {}",
+            notification.title,
+            notification.message
+        );
     }
 
-    // On Android, send a system notification to the OS tray
+    // 2. Desktop: escalate to native banner if the window isn't in front.
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+
+        let window = app_handle.get_webview_window("main");
+        let window_focused = window
+            .as_ref()
+            .and_then(|w| w.is_focused().ok())
+            .unwrap_or(false);
+        let window_visible = window
+            .as_ref()
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+
+        let desktop_notifs_enabled = match pool {
+            Some(pool) => read_desktop_notifications_setting(pool).await,
+            None => true,
+        };
+
+        if should_escalate_native(
+            window_focused,
+            window_visible,
+            desktop_notifs_enabled,
+            notification.escalate_to_native,
+        ) {
+            send_system_notification(app_handle, &notification);
+
+            if let Some(route) = notification.action.as_ref().and_then(|a| a.route.clone()) {
+                if let Some(state) = app_handle.try_state::<crate::tray::TrayLifecycleState>() {
+                    if let Ok(mut pending) = state.pending_deeplink.lock() {
+                        *pending = Some(route);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Android: always send a system notification (unchanged from before).
     #[cfg(target_os = "android")]
     {
         send_system_notification(app_handle, &notification);
     }
 
-    // Save to database if pool is provided
+    // 4. Persist.
     if let Some(pool) = pool {
         save_notification(pool, &notification).await?;
     }
@@ -145,8 +196,8 @@ pub async fn emit_notification(
     Ok(())
 }
 
-/// Send a native system notification via the OS notification tray (Android/mobile)
-#[cfg(target_os = "android")]
+/// Send a native system notification via the OS notification center.
+/// Used on Android (always) and on desktop (gated by `should_escalate_native`).
 fn send_system_notification(app_handle: &AppHandle, notification: &NotificationPayload) {
     use tauri_plugin_notification::NotificationExt;
 
@@ -158,6 +209,26 @@ fn send_system_notification(app_handle: &AppHandle, notification: &NotificationP
         .show()
     {
         log::error!("Failed to send system notification: {}", e);
+    }
+}
+
+/// Read the user's desktop-notification preference from `app_settings`.
+/// Defaults to true if the row is missing or unreadable.
+#[cfg(desktop)]
+async fn read_desktop_notifications_setting(pool: &SqlitePool) -> bool {
+    let row: Result<Option<String>, _> = sqlx::query_scalar(
+        "SELECT value FROM app_settings WHERE key = 'desktop_notifications_enabled'",
+    )
+    .fetch_optional(pool)
+    .await;
+
+    match row {
+        Ok(Some(v)) => v != "false" && v != "0",
+        Ok(None) => true,
+        Err(e) => {
+            log::warn!("Failed to read desktop_notifications_enabled: {}", e);
+            true
+        }
     }
 }
 
