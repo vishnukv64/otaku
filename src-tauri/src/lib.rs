@@ -361,10 +361,10 @@ pub fn run() {
         log::info!("Backend initialized successfully");
       });
 
-      if let Err(e) = tray::install_app_menu(&app.handle()) {
+      if let Err(e) = tray::install_app_menu(app.handle()) {
         log::error!("Failed to install app menu: {}", e);
       }
-      if let Err(e) = tray::build_tray(&app.handle()) {
+      if let Err(e) = tray::build_tray(app.handle()) {
         log::error!("Failed to build tray icon: {}", e);
       }
 
