@@ -11,6 +11,7 @@ mod request_headers;
 mod release_checker;
 mod status_normalizer;
 mod trackers;
+mod tray;
 mod video_server;
 
 use commands::AppState;
@@ -195,6 +196,9 @@ pub fn run() {
 
       // Initialize database and download manager
       let app_handle = app.handle();
+
+      // Tray + window-close + deeplink lifecycle state.
+      app_handle.manage(tray::TrayLifecycleState::default());
 
       // Get app data directory - use match instead of expect
       let app_dir = match app_handle.path().app_data_dir() {
