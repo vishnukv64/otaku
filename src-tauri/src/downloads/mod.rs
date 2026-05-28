@@ -376,11 +376,8 @@ impl DownloadManager {
 
             // Update tray downloads count after transitioning to Downloading
             if should_proceed {
-                if let Some(ref handle) = app_handle {
-                    let active = {
-                        let map = downloads.read().await;
-                        map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
-                    };
+                if let (Some(ref handle), Some(ref pool)) = (&app_handle, &db_pool) {
+                    let active = total_active_downloads(&downloads, pool.as_ref()).await;
                     crate::tray::update_downloads_count(handle, active);
                 }
             }
@@ -492,11 +489,8 @@ impl DownloadManager {
             }
 
             // Update tray downloads count after final status transition
-            if let Some(ref handle) = app_handle {
-                let active = {
-                    let map = downloads.read().await;
-                    map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
-                };
+            if let (Some(ref handle), Some(ref pool)) = (&app_handle, &db_pool) {
+                let active = total_active_downloads(&downloads, pool.as_ref()).await;
                 crate::tray::update_downloads_count(handle, active);
             }
         });
@@ -780,11 +774,8 @@ impl DownloadManager {
         }
 
         // Update tray count after cancellation
-        if let Some(ref handle) = self.app_handle {
-            let active = {
-                let map = self.downloads.read().await;
-                map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
-            };
+        if let (Some(ref handle), Some(ref pool)) = (&self.app_handle, &self.db_pool) {
+            let active = total_active_downloads(&self.downloads, pool.as_ref()).await;
             crate::tray::update_downloads_count(handle, active);
         }
 
@@ -812,11 +803,8 @@ impl DownloadManager {
         }
 
         // Update tray count after pause (Downloading → Paused decreases active count)
-        if let Some(ref handle) = self.app_handle {
-            let active = {
-                let map = self.downloads.read().await;
-                map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
-            };
+        if let (Some(ref handle), Some(ref pool)) = (&self.app_handle, &self.db_pool) {
+            let active = total_active_downloads(&self.downloads, pool.as_ref()).await;
             crate::tray::update_downloads_count(handle, active);
         }
 
@@ -1079,6 +1067,44 @@ impl DownloadManager {
     pub fn get_downloads_directory(&self) -> String {
         self.download_dir.to_string_lossy().to_string()
     }
+
+    /// Compute the combined active download count (episodes + chapters) and call
+    /// `tray::update_downloads_count`.  Used by the chapter-download module so
+    /// that a chapter status transition updates the tray correctly even when
+    /// there are concurrent episode downloads (and vice-versa).
+    pub(crate) async fn refresh_tray_downloads_count(&self, chapter_pool: &SqlitePool) {
+        if let Some(ref handle) = self.app_handle {
+            let active = total_active_downloads(&self.downloads, chapter_pool).await;
+            crate::tray::update_downloads_count(handle, active);
+        }
+    }
+}
+
+/// Compute the combined active download count across both the episode manager
+/// (in-memory map) and the chapter-downloads SQLite table.
+///
+/// This is the single source of truth used to update the tray badge so that
+/// the count is always correct regardless of which side has a status transition.
+///
+/// `episode_map` is the episode manager's in-memory `downloads` field.
+/// `chapter_pool` is the shared SQLite pool; the query is cheap (index on `status`).
+pub(crate) async fn total_active_downloads(
+    episode_map: &Arc<RwLock<HashMap<String, DownloadProgress>>>,
+    chapter_pool: &SqlitePool,
+) -> usize {
+    let episode_active = {
+        let map = episode_map.read().await;
+        map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
+    };
+
+    let chapter_active: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chapter_downloads WHERE status = 'downloading'"
+    )
+    .fetch_one(chapter_pool)
+    .await
+    .unwrap_or(0);
+
+    episode_active + (chapter_active.max(0) as usize)
 }
 
 #[cfg(test)]

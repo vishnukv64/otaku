@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use std::path::PathBuf;
 use tokio::fs;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use crate::downloads::DownloadManager;
 use crate::notifications;
 use crate::request_headers::build_image_request;
 
@@ -129,6 +130,11 @@ pub async fn start_chapter_download(
         error_message: None,
     };
     emit_chapter_progress(&app_handle, &initial_progress);
+
+    // Update tray: chapter download transitioned to 'downloading'
+    if let Some(mgr) = app_handle.try_state::<DownloadManager>() {
+        mgr.refresh_tray_downloads_count(pool).await;
+    }
 
     // Download images in background
     let pool_clone = pool.clone();
@@ -255,6 +261,11 @@ pub async fn start_chapter_download(
             error_message: error_message_str.clone(),
         };
         emit_chapter_progress(&app_handle, &final_progress);
+
+        // Update tray: chapter download transitioned to terminal state (completed/failed)
+        if let Some(mgr) = app_handle.try_state::<DownloadManager>() {
+            mgr.refresh_tray_downloads_count(&pool_clone).await;
+        }
 
         // Emit notification for chapter download completion/failure
         if status == "completed" {
@@ -440,6 +451,11 @@ pub async fn cancel_chapter_download(
                 .bind(&download.id)
                 .execute(pool)
                 .await?;
+
+            // Update tray: chapter download transitioned to 'cancelled'
+            if let Some(mgr) = app_handle.try_state::<DownloadManager>() {
+                mgr.refresh_tray_downloads_count(pool).await;
+            }
 
             // Emit cancelled event
             let progress = ChapterDownloadProgress {
