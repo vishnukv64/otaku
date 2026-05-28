@@ -757,17 +757,6 @@ impl DownloadManager {
         downloads.get(download_id).cloned()
     }
 
-    /// Count downloads that are currently in the `Downloading` state.
-    /// Used by the tray to display the live active-downloads count.
-    #[allow(dead_code)]
-    pub(crate) async fn active_count(&self) -> usize {
-        let downloads = self.downloads.read().await;
-        downloads
-            .values()
-            .filter(|d| d.status == DownloadStatus::Downloading)
-            .count()
-    }
-
     /// Get all downloads
     pub async fn list_downloads(&self) -> Vec<DownloadProgress> {
         let downloads = self.downloads.read().await;
@@ -804,21 +793,33 @@ impl DownloadManager {
 
     /// Pause a download
     pub async fn pause_download(&self, download_id: &str) -> Result<()> {
-        let mut downloads = self.downloads.write().await;
-        if let Some(progress) = downloads.get_mut(download_id) {
-            // Only pause if currently downloading or queued
-            if progress.status == DownloadStatus::Downloading || progress.status == DownloadStatus::Queued {
-                progress.status = DownloadStatus::Paused;
-                progress.speed = 0; // Reset speed since we're paused
-                log::debug!("Paused download: {} at {} bytes", download_id, progress.downloaded_bytes);
+        {
+            let mut downloads = self.downloads.write().await;
+            if let Some(progress) = downloads.get_mut(download_id) {
+                // Only pause if currently downloading or queued
+                if progress.status == DownloadStatus::Downloading || progress.status == DownloadStatus::Queued {
+                    progress.status = DownloadStatus::Paused;
+                    progress.speed = 0; // Reset speed since we're paused
+                    log::debug!("Paused download: {} at {} bytes", download_id, progress.downloaded_bytes);
 
-                // Emit event
-                self.emit_progress(progress);
+                    // Emit event
+                    self.emit_progress(progress);
 
-                // Save to database
-                self.save_to_database(progress).await.ok();
+                    // Save to database
+                    self.save_to_database(progress).await.ok();
+                }
             }
         }
+
+        // Update tray count after pause (Downloading → Paused decreases active count)
+        if let Some(ref handle) = self.app_handle {
+            let active = {
+                let map = self.downloads.read().await;
+                map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
+            };
+            crate::tray::update_downloads_count(handle, active);
+        }
+
         Ok(())
     }
 

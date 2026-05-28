@@ -164,6 +164,13 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "show_hide" => toggle_main_window(app),
             "check_releases" => trigger_release_check(app),
             "downloads_status" => {
+                let active = app
+                    .try_state::<TrayLifecycleState>()
+                    .and_then(|s| s.last_downloads_count.lock().ok().map(|g| *g))
+                    .unwrap_or(0);
+                if active == 0 {
+                    return;
+                }
                 if let Some(state) = app.try_state::<TrayLifecycleState>() {
                     if let Ok(mut pending) = state.pending_deeplink.lock() {
                         *pending = Some("/downloads".to_string());
