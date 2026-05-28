@@ -76,6 +76,22 @@ pub fn run() {
   }
 
   builder
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        let app = window.app_handle();
+        let should_hide = app
+          .try_state::<tray::TrayLifecycleState>()
+          .map(|s| !s.quit_requested.load(std::sync::atomic::Ordering::SeqCst))
+          .unwrap_or(false);
+
+        if should_hide {
+          api.prevent_close();
+          if let Err(e) = window.hide() {
+            log::error!("Failed to hide window on close: {}", e);
+          }
+        }
+      }
+    })
     .register_asynchronous_uri_scheme_protocol("stream", |_app, request, responder| {
       // Custom protocol to stream videos through Rust backend with Range support
       use std::io::Read;
