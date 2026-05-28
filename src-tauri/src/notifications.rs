@@ -121,13 +121,13 @@ impl NotificationPayload {
 /// to a native OS banner.
 ///
 /// Escalation rules (desktop only):
-///   - window not focused or not visible
 ///   - desktop_notifications setting enabled (default true)
 ///   - payload.escalate_to_native true (default true)
 ///
-/// When a native banner fires, the payload's action.route (if any) is stored
-/// as the pending deep-link; the next time the app is activated,
-/// `tray::restore_and_navigate` emits a `"deeplink"` event with that route.
+/// Native banners fire regardless of whether the window is focused or hidden,
+/// matching the Slack/Discord convention. The pending deep-link is set so
+/// the next app activation (banner click, dock click, tray) navigates to the
+/// notification's `action.route`.
 pub async fn emit_notification(
     app_handle: &AppHandle,
     pool: Option<&SqlitePool>,
@@ -144,32 +144,17 @@ pub async fn emit_notification(
         );
     }
 
-    // 2. Desktop: escalate to native banner if the window isn't in front.
+    // 2. Desktop: escalate to native banner whenever enabled + flagged.
     #[cfg(desktop)]
     {
         use tauri::Manager;
-
-        let window = app_handle.get_webview_window("main");
-        let window_focused = window
-            .as_ref()
-            .and_then(|w| w.is_focused().ok())
-            .unwrap_or(false);
-        let window_visible = window
-            .as_ref()
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false);
 
         let desktop_notifs_enabled = match pool {
             Some(pool) => read_desktop_notifications_setting(pool).await,
             None => true,
         };
 
-        if should_escalate_native(
-            window_focused,
-            window_visible,
-            desktop_notifs_enabled,
-            notification.escalate_to_native,
-        ) {
+        if should_escalate_native(desktop_notifs_enabled, notification.escalate_to_native) {
             send_system_notification(app_handle, &notification);
 
             if let Some(route) = notification.action.as_ref().and_then(|a| a.route.clone()) {
@@ -399,16 +384,15 @@ pub async fn get_unread_count(pool: &SqlitePool) -> Result<i32> {
 
 /// Should `emit_notification` escalate this payload to a native OS banner?
 ///
-/// Suppresses when the main window is genuinely in front of the user (focused
-/// AND visible) — that case is already covered by the in-app toast.
+/// Fires whenever the user has desktop notifications enabled and the payload
+/// is escalation-eligible. Window focus/visibility is intentionally ignored —
+/// users want native banners (with macOS notification-center history) even
+/// when the app is in view, matching the Slack/Discord convention.
 pub(crate) fn should_escalate_native(
-    window_focused: bool,
-    window_visible: bool,
     desktop_notifs_enabled: bool,
     escalate_flag: bool,
 ) -> bool {
-    let foreground = window_focused && window_visible;
-    desktop_notifs_enabled && escalate_flag && !foreground
+    desktop_notifs_enabled && escalate_flag
 }
 
 // ==================== Helper Functions for Common Notifications ====================
@@ -601,36 +585,27 @@ mod tests {
     use super::should_escalate_native;
 
     #[test]
-    fn focused_and_visible_window_suppresses_native() {
-        assert!(!should_escalate_native(true, true, true, true));
-    }
-
-    #[test]
-    fn hidden_window_escalates() {
-        assert!(should_escalate_native(false, false, true, true));
-    }
-
-    #[test]
-    fn visible_but_unfocused_escalates() {
-        // Background-but-on-screen counts as background — the user is in
-        // another app, the in-app toast is not the surface they're looking at.
-        assert!(should_escalate_native(false, true, true, true));
-    }
-
-    #[test]
-    fn focused_but_hidden_escalates() {
-        // Defensive: shouldn't happen in practice but the gate should not
-        // misfire if one of the two queries races.
-        assert!(should_escalate_native(true, false, true, true));
+    fn enabled_and_flagged_escalates() {
+        // Default case: user has desktop notifications on and the payload
+        // hasn't opted out. Native banner should fire regardless of window
+        // focus/visibility (those are no longer inputs).
+        assert!(should_escalate_native(true, true));
     }
 
     #[test]
     fn desktop_notifications_disabled_suppresses() {
-        assert!(!should_escalate_native(false, false, false, true));
+        assert!(!should_escalate_native(false, true));
     }
 
     #[test]
     fn escalate_flag_false_suppresses() {
-        assert!(!should_escalate_native(false, false, true, false));
+        // Cosmetic in-app-only notifications (e.g. "removed from library")
+        // call `.with_native(false)` and must not fire a native banner.
+        assert!(!should_escalate_native(true, false));
+    }
+
+    #[test]
+    fn both_off_suppresses() {
+        assert!(!should_escalate_native(false, false));
     }
 }
