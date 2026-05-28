@@ -8,7 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -25,6 +25,57 @@ pub struct TrayLifecycleState {
     /// Route of the most-recent actionable native banner. Flushed by
     /// `restore_and_navigate` on next app activation.
     pub pending_deeplink: Mutex<Option<String>>,
+
+    /// Handle to the dynamic downloads-status menu item so we can update its
+    /// label from any thread when the active download count changes.
+    pub downloads_item: Mutex<Option<MenuItem<Wry>>>,
+
+    /// Last active-downloads count pushed to the tray label; used to short-
+    /// circuit no-op updates so we don't thrash the menu on every progress tick.
+    pub last_downloads_count: Mutex<usize>,
+}
+
+/// Render the dynamic tray menu label for the active downloads count.
+pub(crate) fn format_downloads_label(active: usize) -> String {
+    if active == 0 {
+        "No active downloads".to_string()
+    } else {
+        format!("Downloads: {} in progress", active)
+    }
+}
+
+/// Update the tray's downloads item if (and only if) the active count changed.
+/// Safe to call from any thread / on every progress tick — the per-tick
+/// no-op short-circuit prevents UI churn.
+pub fn update_downloads_count(app: &AppHandle, active: usize) {
+    let Some(state) = app.try_state::<TrayLifecycleState>() else {
+        return;
+    };
+
+    {
+        let mut last = match state.last_downloads_count.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if *last == active {
+            return;
+        }
+        *last = active;
+    }
+
+    let Ok(item_slot) = state.downloads_item.lock() else {
+        return;
+    };
+    let Some(item) = item_slot.as_ref() else {
+        return;
+    };
+
+    if let Err(e) = item.set_text(format_downloads_label(active)) {
+        log::error!("Failed to update downloads tray label: {}", e);
+    }
+    if let Err(e) = item.set_enabled(active > 0) {
+        log::error!("Failed to update downloads tray enabled state: {}", e);
+    }
 }
 
 /// Show + focus the main window and flush any pending deep-link.
@@ -74,11 +125,26 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let quit = MenuItem::with_id(app, "quit", "Quit Otaku", true, None::<&str>)?;
 
+    let downloads_item = MenuItem::with_id(
+        app,
+        "downloads_status",
+        format_downloads_label(0),
+        false, // disabled when count = 0
+        None::<&str>,
+    )?;
+
+    if let Some(state) = app.try_state::<TrayLifecycleState>() {
+        if let Ok(mut slot) = state.downloads_item.lock() {
+            *slot = Some(downloads_item.clone());
+        }
+    }
+
     let menu = Menu::with_items(
         app,
         &[
             &show_hide,
             &PredefinedMenuItem::separator(app)?,
+            &downloads_item,
             &check_releases,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -97,6 +163,14 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show_hide" => toggle_main_window(app),
             "check_releases" => trigger_release_check(app),
+            "downloads_status" => {
+                if let Some(state) = app.try_state::<TrayLifecycleState>() {
+                    if let Ok(mut pending) = state.pending_deeplink.lock() {
+                        *pending = Some("/downloads".to_string());
+                    }
+                }
+                restore_and_navigate(app);
+            }
             "quit" => request_quit(app),
             _ => {}
         })
@@ -188,4 +262,24 @@ pub fn install_app_menu(app: &AppHandle) -> tauri::Result<()> {
 pub fn install_app_menu(_app: &AppHandle) -> tauri::Result<()> {
     // Non-macOS desktop has no first-class app menu; Cmd+Q is N/A there.
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_downloads_label;
+
+    #[test]
+    fn zero_renders_idle_label() {
+        assert_eq!(format_downloads_label(0), "No active downloads");
+    }
+
+    #[test]
+    fn one_renders_singular_label() {
+        assert_eq!(format_downloads_label(1), "Downloads: 1 in progress");
+    }
+
+    #[test]
+    fn many_renders_plural_label() {
+        assert_eq!(format_downloads_label(5), "Downloads: 5 in progress");
+    }
 }

@@ -374,6 +374,17 @@ impl DownloadManager {
                 }
             };
 
+            // Update tray downloads count after transitioning to Downloading
+            if should_proceed {
+                if let Some(ref handle) = app_handle {
+                    let active = {
+                        let map = downloads.read().await;
+                        map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
+                    };
+                    crate::tray::update_downloads_count(handle, active);
+                }
+            }
+
             // If cancelled or not found, release slot and return
             if !should_proceed {
                 let mut active = active_downloads.lock().await;
@@ -478,6 +489,15 @@ impl DownloadManager {
                         Self::save_progress_to_db(pool, progress).await.ok();
                     }
                 }
+            }
+
+            // Update tray downloads count after final status transition
+            if let Some(ref handle) = app_handle {
+                let active = {
+                    let map = downloads.read().await;
+                    map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
+                };
+                crate::tray::update_downloads_count(handle, active);
             }
         });
 
@@ -737,6 +757,17 @@ impl DownloadManager {
         downloads.get(download_id).cloned()
     }
 
+    /// Count downloads that are currently in the `Downloading` state.
+    /// Used by the tray to display the live active-downloads count.
+    #[allow(dead_code)]
+    pub(crate) async fn active_count(&self) -> usize {
+        let downloads = self.downloads.read().await;
+        downloads
+            .values()
+            .filter(|d| d.status == DownloadStatus::Downloading)
+            .count()
+    }
+
     /// Get all downloads
     pub async fn list_downloads(&self) -> Vec<DownloadProgress> {
         let downloads = self.downloads.read().await;
@@ -745,17 +776,29 @@ impl DownloadManager {
 
     /// Cancel a download
     pub async fn cancel_download(&self, download_id: &str) -> Result<()> {
-        let mut downloads = self.downloads.write().await;
-        if let Some(progress) = downloads.get_mut(download_id) {
-            progress.status = DownloadStatus::Cancelled;
-            log::debug!("Cancelled download: {}", download_id);
+        {
+            let mut downloads = self.downloads.write().await;
+            if let Some(progress) = downloads.get_mut(download_id) {
+                progress.status = DownloadStatus::Cancelled;
+                log::debug!("Cancelled download: {}", download_id);
 
-            // Emit event
-            self.emit_progress(progress);
+                // Emit event
+                self.emit_progress(progress);
 
-            // Save to database
-            self.save_to_database(progress).await.ok();
+                // Save to database
+                self.save_to_database(progress).await.ok();
+            }
         }
+
+        // Update tray count after cancellation
+        if let Some(ref handle) = self.app_handle {
+            let active = {
+                let map = self.downloads.read().await;
+                map.values().filter(|d| d.status == DownloadStatus::Downloading).count()
+            };
+            crate::tray::update_downloads_count(handle, active);
+        }
+
         Ok(())
     }
 
