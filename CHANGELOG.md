@@ -5,6 +5,36 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-28
+
+### Added
+- **System tray icon & background mode** — Closing the main window now hides Otaku to the system tray instead of quitting; the tray icon stays resident with a Show/Hide/Quit menu. The Cmd+Q app-menu shortcut is overridden so Cmd+Q still actually quits the app instead of falling through the close-to-hide path. On macOS, clicking the dock icon while no windows are visible restores the window (handled via `RunEvent::Reopen`).
+- **"Check for new episodes now" tray action** — Forces an immediate release-checker run from the tray menu, bypassing the scheduled-tracking baseline so the user can verify their library against AllAnime/Jikan on demand.
+- **Live downloads count in the tray menu** — Active downloads (episodes + chapters, summed) are surfaced as a menu label that updates on every tick. Per-tick short-circuit avoids redundant menu rebuilds when the count hasn't changed.
+- **Autostart support** — `tauri-plugin-autostart` is registered and exposed via new `set_autostart` / `get_autostart_status` commands; Settings gains a "Launch at login" toggle. The app honors a `--hidden` boot flag so it can start straight into the tray without flashing a window.
+- **Native desktop notifications** — Release radar, new-episode, and app-update notifications now escalate to native OS banners in addition to in-app toasts. The escalation pipeline runs through a new `should_escalate_native` decision function (TDD-covered), a builder field (`escalate_to_native`) on the notification record, and a `with_native` builder convenience. Banners fire in all app states — earlier focused-suppression was dropped after UX testing.
+- **Desktop notifications Settings toggle** — `set_desktop_notifications_enabled` / `get_desktop_notifications_enabled` commands plus a Settings toggle let users disable native banners without losing in-app notifications.
+- **Backend deeplink listener at the router root** — Clicking a native notification routes the user to the relevant in-app screen via a backend-emitted deeplink event the React router now listens for at mount.
+- **Updater notifications** — App-update-available events are now surfaced as user-facing notifications (in-app + native banner) routed through the unified `emit_notification` chokepoint.
+
+### Changed
+- **Notification routing unification** — The release-checker and updater now both emit through a single `emit_notification` chokepoint (previously `emit_release_notification` lived as a release-checker-private helper). This is what makes native-banner escalation, deeplink attribution, and the Desktop-notifications toggle a single feature instead of three.
+- **Release-checker dispatch** — Force vs scheduled paths were two near-duplicate SQL functions; both collapsed into a single dynamic dispatch (`refactor(release_checker): collapse force/scheduled SQL into single dynamic select`).
+- **Tray setup borrow cleanup** — Dropped needless `app.handle()` borrows in tray initialization (no behavior change; quieter compile).
+
+### Fixed
+- **`cargo check` failed on Linux CI** — `tauri::RunEvent::Reopen` is a macOS-only enum variant; the unguarded match in `src-tauri/src/lib.rs:623` produced `E0599: variant not found` on the Ubuntu rust-check job. Gated the entire `if let` arm behind `#[cfg(target_os = "macos")]` and underscore-prefixed the closure parameters so the non-mac targets compile clean without unused-variable warnings.
+- **Tray downloads count missed chapter downloads** — The active-download count read only the episode queue; manga chapter downloads now contribute to the same number.
+- **Tray downloads count stale across pause/resume** — Pause and resume actions weren't triggering a tray menu refresh; the path now updates on both transitions, the dead "estimate" helper is removed, and a short-circuit guard prevents redundant rebuilds when state hasn't actually changed.
+- **Downloads Manager delete actions** — The UI delete control wasn't actually removing entries; wired through to the backend.
+- **Anime header sort ignored NSFW filtering** — The selected header sort is now applied to visible anime results *after* NSFW filtering instead of before, so toggling NSFW filtering doesn't desync the order.
+- **Release-checker tracking baselines** — Baseline comparison was using a stale snapshot in some paths; corrected.
+
+### Maintenance
+- **Vitest excludes Codex worktrees** — Prevented `.codex/worktrees/` shadow trees from polluting test discovery and slowing local runs.
+- **Tauri `tray-icon` feature enabled** in `Cargo.toml`; required for the new tray functionality.
+- **Implementation plan & design doc committed** — Sixteen-task bite-sized plan and the approved brainstorming output for the tray/background/notifications flow are checked into the repo as `docs/` references for the migration.
+
 ## [1.4.1] - 2026-05-12
 
 ### Fixed
