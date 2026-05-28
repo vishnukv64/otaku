@@ -68,6 +68,16 @@ pub fn run() {
     builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
   }
 
+  // Autostart plugin is desktop-only (register with --hidden so the app
+  // starts in the tray when launched by the system at login)
+  #[cfg(desktop)]
+  {
+    builder = builder.plugin(tauri_plugin_autostart::init(
+      tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+      Some(vec!["--hidden"]),
+    ));
+  }
+
   // Edge-to-edge plugin for iOS — makes WKWebView extend behind safe areas
   // (fixes the bottom gap where the webview doesn't reach the screen edge)
   #[cfg(target_os = "ios")]
@@ -215,6 +225,14 @@ pub fn run() {
 
       // Tray + window-close + deeplink lifecycle state.
       app_handle.manage(tray::TrayLifecycleState::default());
+
+      // If launched with --hidden (e.g. by the autostart LaunchAgent), start
+      // straight into the tray instead of showing the window.
+      if std::env::args().any(|a| a == "--hidden") {
+        if let Some(window) = app_handle.get_webview_window("main") {
+          let _ = window.hide();
+        }
+      }
 
       // Get app data directory - use match instead of expect
       let app_dir = match app_handle.path().app_data_dir() {
@@ -593,6 +611,11 @@ pub fn run() {
       commands::set_media_feedback,
       commands::get_media_feedback,
       commands::remove_media_feedback,
+      // Tray / background settings
+      commands::set_autostart,
+      commands::get_autostart_status,
+      commands::set_desktop_notifications_enabled,
+      commands::get_desktop_notifications_enabled,
     ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")

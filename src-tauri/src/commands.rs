@@ -3739,3 +3739,54 @@ pub async fn remove_media_feedback(
     let pool = state.database.pool();
     crate::database::feedback::remove_feedback(pool, &media_id).await.map_err(|e| e.to_string())
 }
+
+// ==================== Autostart ====================
+
+#[tauri::command]
+#[cfg(desktop)]
+pub async fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())
+    } else {
+        manager.disable().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+#[cfg(desktop)]
+pub async fn get_autostart_status(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+// Mobile no-ops so the frontend has one API to call.
+#[tauri::command]
+#[cfg(not(desktop))]
+pub async fn set_autostart(_enabled: bool) -> Result<(), String> { Ok(()) }
+
+#[tauri::command]
+#[cfg(not(desktop))]
+pub async fn get_autostart_status() -> Result<bool, String> { Ok(false) }
+
+// ==================== Desktop notifications toggle ====================
+
+#[tauri::command]
+pub async fn set_desktop_notifications_enabled(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let value = if enabled { "true" } else { "false" };
+    set_app_setting(state, "desktop_notifications_enabled".to_string(), value.to_string()).await
+}
+
+#[tauri::command]
+pub async fn get_desktop_notifications_enabled(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    match get_app_setting(state, "desktop_notifications_enabled".to_string()).await? {
+        Some(v) => Ok(v != "false" && v != "0"),
+        None => Ok(true),
+    }
+}
