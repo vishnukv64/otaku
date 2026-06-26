@@ -7,12 +7,18 @@
  */
 
 import { create } from 'zustand'
-import type { VideoSource } from '@/types/extension'
+import type { Subtitle, VideoSource } from '@/types/extension'
 import type { VideoServerUrls } from '@/utils/tauri-commands'
 
 export interface PipData {
   /** The specific source URL being played (HLS manifest or direct MP4) */
   sourceUrl: string
+  /** Optional CDN referer required by the source */
+  sourceReferrer?: string
+  /** Text tracks already resolved for the selected source */
+  sourceSubtitles?: Subtitle[]
+  /** Selected subtitle URL, or "off" */
+  sourceSubtitleUrl?: string
   /** Whether the source is an HLS stream */
   isHls: boolean
   /** Full sources array (for potential server switching in future) */

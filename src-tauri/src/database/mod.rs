@@ -112,6 +112,7 @@ impl Database {
             ("022_clear_mappings_v5.sql", include_str!("../../migrations/022_clear_mappings_v5.sql")),
             ("023_feedback_table.sql", include_str!("../../migrations/023_feedback_table.sql")),
             ("024_library_auto_download.sql", include_str!("../../migrations/024_library_auto_download.sql")),
+            ("025_download_source_referrer.sql", include_str!("../../migrations/025_download_source_referrer.sql")),
         ];
 
         for (name, migration_sql) in migrations {

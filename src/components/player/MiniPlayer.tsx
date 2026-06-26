@@ -19,13 +19,15 @@ interface WebKitVideoElement extends HTMLVideoElement {
   webkitSetPresentationMode?: (mode: 'inline' | 'picture-in-picture') => void
 }
 
-function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
-  return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}`
+function createProxyUrl(videoServer: VideoServerUrls, url: string, referrer?: string): string {
+  const referrerParam = referrer ? `&referrer=${encodeURIComponent(referrer)}` : ''
+  return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}${referrerParam}`
 }
 
-function createHlsProxyUrl(videoServer: VideoServerUrls, m3u8Url: string): string {
+function createHlsProxyUrl(videoServer: VideoServerUrls, m3u8Url: string, referrer?: string): string {
   const baseUrl = videoServer.proxy_base_url.replace(/\/proxy$/, '')
-  return `${baseUrl}/hls?token=${videoServer.token}&url=${encodeURIComponent(m3u8Url)}`
+  const referrerParam = referrer ? `&referrer=${encodeURIComponent(referrer)}` : ''
+  return `${baseUrl}/hls?token=${videoServer.token}&url=${encodeURIComponent(m3u8Url)}${referrerParam}`
 }
 
 export function MiniPlayer() {
@@ -57,6 +59,15 @@ export function MiniPlayer() {
   } | null>(null)
   // Track programmatic PiP exits so we don't double-close when user clicks X on native PiP window
   const programmaticExitRef = useRef(false)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const selectedIndex = data?.sourceSubtitles?.findIndex((track) => track.url === data.sourceSubtitleUrl) ?? -1
+    Array.from(video.textTracks).forEach((track, index) => {
+      track.mode = selectedIndex >= 0 && index === selectedIndex ? 'showing' : 'disabled'
+    })
+  }, [data?.sourceSubtitles, data?.sourceSubtitleUrl])
 
   // Check if native PiP is active via either standard or WebKit API
   const isInNativePip = useCallback(() => {
@@ -143,7 +154,7 @@ export function MiniPlayer() {
     const video = videoRef.current
     if (!video) return
 
-    const { sourceUrl, isHls, videoServer } = data
+    const { sourceUrl, sourceReferrer, isHls, videoServer } = data
 
     setLoading(true)
     console.log('[MiniPlayer] Loading video:', { sourceUrl, isHls })
@@ -167,15 +178,11 @@ export function MiniPlayer() {
         manifestLoadingTimeOut: 30000,
         fragLoadingTimeOut: 60000,
         fragLoadingMaxRetry: 3,
-        xhrSetup: (xhr, url) => {
-          xhr.open('GET', createProxyUrl(videoServer, url), true)
-        },
       })
 
       hlsRef.current = hls
 
-      const proxyUrl = createProxyUrl(videoServer, sourceUrl)
-      hls.loadSource(proxyUrl)
+      hls.loadSource(createHlsProxyUrl(videoServer, sourceUrl, sourceReferrer))
       hls.attachMedia(video)
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -206,7 +213,7 @@ export function MiniPlayer() {
           ) {
             hls.destroy()
             hlsRef.current = null
-            video.src = createProxyUrl(videoServer, sourceUrl)
+            video.src = createHlsProxyUrl(videoServer, sourceUrl, sourceReferrer)
             setLoading(false)
             video.currentTime = data.currentTime
             video.volume = data.volume
@@ -218,7 +225,7 @@ export function MiniPlayer() {
         }
       })
     } else if (isHls && isAndroid()) {
-      video.src = createHlsProxyUrl(videoServer, sourceUrl)
+      video.src = createHlsProxyUrl(videoServer, sourceUrl, sourceReferrer)
       video.addEventListener(
         'loadedmetadata',
         () => {
@@ -239,7 +246,7 @@ export function MiniPlayer() {
     } else {
       let videoUrl = sourceUrl
       if (sourceUrl.startsWith('http') && !sourceUrl.includes('127.0.0.1')) {
-        videoUrl = createProxyUrl(videoServer, sourceUrl)
+        videoUrl = createProxyUrl(videoServer, sourceUrl, sourceReferrer)
       }
       video.src = videoUrl
       video.addEventListener(
@@ -272,7 +279,7 @@ export function MiniPlayer() {
         video.load()
       }
     }
-  }, [isActive, data?.sourceUrl]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive, data?.sourceUrl, data?.sourceReferrer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Register MediaSession so the OS treats this as active media playback.
   // Without this, macOS may not route audio to Bluetooth devices in PiP.
@@ -502,7 +509,18 @@ export function MiniPlayer() {
         onMouseLeave={() => setShowControls(false)}
         onClick={togglePlay}
       >
-        <video ref={videoRef} className="w-full h-full object-contain" playsInline />
+        <video ref={videoRef} className="w-full h-full object-contain" playsInline>
+          {data?.sourceSubtitles?.map((track, index) => (
+            <track
+              key={`${track.url}-${index}`}
+              kind="subtitles"
+              src={track.url}
+              srcLang={track.language || track.label || `sub-${index + 1}`}
+              label={track.label || track.language || `Subtitles ${index + 1}`}
+              default={track.url === data.sourceSubtitleUrl}
+            />
+          ))}
+        </video>
 
         {/* Loading spinner */}
         {loading && (

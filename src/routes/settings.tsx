@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useSettingsStore } from '../store/settingsStore'
-import { usePlayerStore } from '../store/playerStore'
+import { usePlayerStore, type SubtitleFontFamily } from '../store/playerStore'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion, getTauriVersion } from '@tauri-apps/api/app'
 import { useEffect, useState } from 'react'
@@ -33,7 +33,14 @@ import { Link } from '@tanstack/react-router'
 import { isMobile } from '@/utils/platform'
 import { ApiStatusIndicator } from '@/components/layout/ApiStatusIndicator'
 
-type SettingsPage = 'appearance' | 'playback' | 'reader' | 'downloads' | 'notifications' | 'privacy' | 'about'
+type SettingsPage =
+  | 'appearance'
+  | 'playback'
+  | 'reader'
+  | 'downloads'
+  | 'notifications'
+  | 'privacy'
+  | 'about'
 
 const settingsNavItems: { key: SettingsPage; label: string; icon: typeof Palette }[] = [
   { key: 'appearance', label: 'Appearance', icon: Palette },
@@ -69,10 +76,7 @@ function SettingsScreen() {
 
   const loadVersionInfo = async () => {
     try {
-      const [version, tauri] = await Promise.all([
-        getVersion(),
-        getTauriVersion(),
-      ])
+      const [version, tauri] = await Promise.all([getVersion(), getTauriVersion()])
       setAppVersion(version)
       setTauriVersion(tauri)
     } catch (error) {
@@ -203,7 +207,9 @@ function SettingsScreen() {
         {activePage === 'appearance' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">Appearance</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">Customize how Otaku looks and feels</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Customize how Otaku looks and feels
+            </p>
 
             <SettingSection title="General" description="App-wide preferences">
               <SettingRow
@@ -221,18 +227,13 @@ function SettingsScreen() {
               >
                 <SettingToggle
                   value={settings.showContinueWatching}
-                  onChange={(value) =>
-                    settings.updateSettings({ showContinueWatching: value })
-                  }
+                  onChange={(value) => settings.updateSettings({ showContinueWatching: value })}
                 />
               </SettingRow>
             </SettingSection>
 
             <SettingSection title="Grid & Layout" description="Card and grid display options">
-              <SettingRow
-                label="Grid Density"
-                description="Spacing and size of media cards"
-              >
+              <SettingRow label="Grid Density" description="Spacing and size of media cards">
                 <SettingDropdown
                   value={settings.gridDensity}
                   options={[
@@ -255,7 +256,9 @@ function SettingsScreen() {
         {activePage === 'playback' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">Playback</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">Control how videos are played</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Control how videos are played
+            </p>
 
             <SettingSection title="Player" description="Video playback preferences">
               <SettingRow
@@ -267,18 +270,13 @@ function SettingsScreen() {
                   onChange={(value) => updatePlayerSettings({ autoPlayNext: value })}
                 />
               </SettingRow>
-              <SettingRow
-                label="Default Volume"
-                description="Starting volume for new videos"
-              >
+              <SettingRow label="Default Volume" description="Starting volume for new videos">
                 <SettingSlider
                   value={settings.defaultVolume * 100}
                   min={0}
                   max={100}
                   step={5}
-                  onChange={(value) =>
-                    settings.updateSettings({ defaultVolume: value / 100 })
-                  }
+                  onChange={(value) => settings.updateSettings({ defaultVolume: value / 100 })}
                   formatValue={(v) => `${Math.round(v)}%`}
                 />
               </SettingRow>
@@ -307,10 +305,97 @@ function SettingsScreen() {
                   min={50}
                   max={100}
                   step={5}
-                  onChange={(value) =>
-                    settings.updateSettings({ markWatchedThreshold: value })
-                  }
+                  onChange={(value) => settings.updateSettings({ markWatchedThreshold: value })}
                   formatValue={(v) => `${v}%`}
+                />
+              </SettingRow>
+              <SettingRow label="Subtitle Size" description="Scale subtitles in the video player">
+                <SettingSlider
+                  value={playerSettings.subtitleFontScale ?? 100}
+                  min={75}
+                  max={200}
+                  step={5}
+                  onChange={(value) => updatePlayerSettings({ subtitleFontScale: value })}
+                  formatValue={(v) => `${Math.round(v)}%`}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Subtitle Font"
+                description="Choose the font used for player subtitles"
+              >
+                <SettingDropdown
+                  value={playerSettings.subtitleFontFamily ?? 'system'}
+                  options={[
+                    { value: 'system', label: 'System' },
+                    { value: 'inter', label: 'Inter' },
+                    { value: 'display', label: 'Space Grotesk' },
+                    { value: 'mono', label: 'JetBrains Mono' },
+                    { value: 'serif', label: 'Serif' },
+                  ]}
+                  onChange={(value) =>
+                    updatePlayerSettings({
+                      subtitleFontFamily: value as SubtitleFontFamily,
+                    })
+                  }
+                />
+              </SettingRow>
+              <SettingRow
+                label="Streaming Provider"
+                description="Use only the selected provider for playback"
+              >
+                <SettingDropdown
+                  value={settings.streamingProvider}
+                  options={[
+                    { value: 'allanime', label: 'AllAnime' },
+                    { value: 'anikoto', label: 'Anikoto' },
+                  ]}
+                  onChange={(value) =>
+                    settings.updateSettings({
+                      streamingProvider: value as typeof settings.streamingProvider,
+                    })
+                  }
+                />
+              </SettingRow>
+              <SettingRow
+                label="Anikoto API Base URL"
+                description="Deploy the Anikoto API and paste its base URL"
+              >
+                <input
+                  type="url"
+                  value={settings.anikotoApiBaseUrl}
+                  onChange={(event) =>
+                    settings.updateSettings({ anikotoApiBaseUrl: event.target.value })
+                  }
+                  className="w-[240px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:ring-opacity-50"
+                  placeholder="https://your-app.vercel.app/api"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Anikoto Site Domain"
+                description="Source site domain used by compatible Anikoto API deployments"
+              >
+                <input
+                  type="url"
+                  value={settings.anikotoSiteBaseUrl}
+                  onChange={(event) =>
+                    settings.updateSettings({ anikotoSiteBaseUrl: event.target.value })
+                  }
+                  className="w-[240px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:ring-opacity-50"
+                  placeholder="https://anikoto.cz"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Yotochan Domain"
+                description="Video-domain hint used by compatible Anikoto API deployments"
+              >
+                <input
+                  type="url"
+                  value={settings.anikotoYotochanBaseUrl}
+                  onChange={(event) =>
+                    settings.updateSettings({ anikotoYotochanBaseUrl: event.target.value })
+                  }
+                  className="w-[240px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:ring-opacity-50"
+                  placeholder="https://yotuchan.com"
                 />
               </SettingRow>
             </SettingSection>
@@ -321,9 +406,14 @@ function SettingsScreen() {
         {activePage === 'reader' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">Reader</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">Manga and light novel reading preferences</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Manga and light novel reading preferences
+            </p>
 
-            <SettingSection title="Reading Mode" description="Default reading direction and page layout">
+            <SettingSection
+              title="Reading Mode"
+              description="Default reading direction and page layout"
+            >
               <SettingRow
                 label="Default Reading Direction"
                 description="Direction for page navigation"
@@ -338,10 +428,7 @@ function SettingsScreen() {
                   onChange={() => {}}
                 />
               </SettingRow>
-              <SettingRow
-                label="Page Fit"
-                description="How pages fit within the viewport"
-              >
+              <SettingRow label="Page Fit" description="How pages fit within the viewport">
                 <SettingDropdown
                   value="width"
                   options={[
@@ -375,7 +462,9 @@ function SettingsScreen() {
         {activePage === 'downloads' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">Downloads</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">Configure download behavior and storage</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Configure download behavior and storage
+            </p>
 
             <SettingSection title="Downloads" description="Download settings">
               {!isMobile() && (
@@ -385,9 +474,7 @@ function SettingsScreen() {
                 >
                   <SettingFileInput
                     value={settings.downloadLocation}
-                    onChange={(value) =>
-                      settings.updateSettings({ downloadLocation: value })
-                    }
+                    onChange={(value) => settings.updateSettings({ downloadLocation: value })}
                   />
                 </SettingRow>
               )}
@@ -400,9 +487,7 @@ function SettingsScreen() {
                   min={1}
                   max={10}
                   step={1}
-                  onChange={(value) =>
-                    settings.updateSettings({ maxConcurrentDownloads: value })
-                  }
+                  onChange={(value) => settings.updateSettings({ maxConcurrentDownloads: value })}
                   formatValue={(v) => String(v)}
                 />
               </SettingRow>
@@ -412,9 +497,7 @@ function SettingsScreen() {
               >
                 <SettingToggle
                   value={settings.autoDeleteWatched}
-                  onChange={(value) =>
-                    settings.updateSettings({ autoDeleteWatched: value })
-                  }
+                  onChange={(value) => settings.updateSettings({ autoDeleteWatched: value })}
                 />
               </SettingRow>
               {storageUsage && (
@@ -442,7 +525,9 @@ function SettingsScreen() {
         {activePage === 'notifications' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">Notifications</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">Manage notification preferences</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Manage notification preferences
+            </p>
 
             <SettingSection title="App" description="App launch and background behavior">
               <SettingRow
@@ -472,10 +557,7 @@ function SettingsScreen() {
               >
                 <SettingToggle value={true} onChange={() => {}} />
               </SettingRow>
-              <SettingRow
-                label="Download Complete"
-                description="Notify when a download finishes"
-              >
+              <SettingRow label="Download Complete" description="Notify when a download finishes">
                 <SettingToggle value={true} onChange={() => {}} />
               </SettingRow>
             </SettingSection>
@@ -486,9 +568,14 @@ function SettingsScreen() {
         {activePage === 'privacy' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">Privacy</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">Control your data and privacy settings</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Control your data and privacy settings
+            </p>
 
-            <SettingSection title="Data & Privacy" description="Manage your data and reset settings">
+            <SettingSection
+              title="Data & Privacy"
+              description="Manage your data and reset settings"
+            >
               <SettingRow
                 label="Clear Watch History"
                 description="Remove all watch progress and continue watching data"
@@ -560,13 +647,12 @@ function SettingsScreen() {
         {activePage === 'about' && (
           <div>
             <h2 className="font-display font-bold text-xl mb-1.5">About</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">App information and credits</p>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              App information and credits
+            </p>
 
             <SettingSection title="Version" description="Application information">
-              <SettingRow
-                label="App Version"
-                description="Current application version"
-              >
+              <SettingRow label="App Version" description="Current application version">
                 <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
                   <Info size={16} />
                   <span className="font-mono text-sm">
@@ -574,10 +660,7 @@ function SettingsScreen() {
                   </span>
                 </div>
               </SettingRow>
-              <SettingRow
-                label="Tauri Version"
-                description="Underlying Tauri framework version"
-              >
+              <SettingRow label="Tauri Version" description="Underlying Tauri framework version">
                 <span className="font-mono text-sm text-[var(--color-text-secondary)]">
                   {tauriVersion ? `v${tauriVersion}` : 'Loading...'}
                 </span>

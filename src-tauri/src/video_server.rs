@@ -381,6 +381,7 @@ struct ProxyQuery {
     #[allow(dead_code)]
     token: Option<String>,
     url: Option<String>,
+    referrer: Option<String>,
 }
 
 // Proxy remote video URLs with streaming and Range support
@@ -392,6 +393,7 @@ async fn proxy_video(
         Some(u) => u,
         None => return (StatusCode::BAD_REQUEST, "Missing url parameter").into_response(),
     };
+    let referrer = query.referrer.as_deref().unwrap_or("https://allmanga.to");
 
     log::debug!("Proxying video");
 
@@ -406,12 +408,14 @@ async fn proxy_video(
     let mut remote_request = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .header("Referer", "https://allmanga.to")
-        .header("Origin", "https://allmanga.to");
+        .header("Referer", referrer)
+        .header("Origin", origin_from_referrer(referrer));
 
     // Forward Range header if present - this is critical for video seeking
+    let mut has_range = false;
     if let Some(range) = request.headers().get(header::RANGE) {
         if let Ok(range_str) = range.to_str() {
+            has_range = true;
             remote_request = remote_request.header("Range", range_str);
         }
     }
@@ -450,6 +454,26 @@ async fn proxy_video(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    if !has_range && should_normalize_hls_segment(&url, &content_type) {
+        let bytes = match response.bytes().await {
+            Ok(b) => normalize_hls_segment(b.to_vec()),
+            Err(e) => {
+                log::error!("Proxy body read failed: {}", e);
+                return (StatusCode::BAD_GATEWAY, format!("Proxy body read error: {}", e)).into_response();
+            }
+        };
+
+        return Response::builder()
+            .status(status.as_u16())
+            .header(header::CONTENT_TYPE, "video/mp2t")
+            .header(header::CONTENT_LENGTH, bytes.len().to_string())
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range, Accept-Ranges, Content-Length")
+            .header(header::ACCEPT_RANGES, "bytes")
+            .body(Body::from(bytes))
+            .unwrap();
+    }
+
     // Stream the response body directly without buffering
     // This is the key to handling large files
     let stream = response.bytes_stream();
@@ -485,6 +509,7 @@ struct HlsQuery {
     #[allow(dead_code)]
     token: Option<String>,
     url: Option<String>,
+    referrer: Option<String>,
 }
 
 // Proxy and rewrite HLS manifest so segment URLs go through our /proxy endpoint.
@@ -500,6 +525,7 @@ async fn proxy_hls_manifest(
     };
 
     let token = query.token.unwrap_or_default();
+    let referrer = query.referrer.as_deref().unwrap_or("https://allmanga.to");
 
     log::debug!("Proxying HLS manifest");
 
@@ -513,8 +539,8 @@ async fn proxy_hls_manifest(
     let response = match client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .header("Referer", "https://allmanga.to")
-        .header("Origin", "https://allmanga.to")
+        .header("Referer", referrer)
+        .header("Origin", origin_from_referrer(referrer))
         .send()
         .await
     {
@@ -524,6 +550,21 @@ async fn proxy_hls_manifest(
             return (StatusCode::BAD_GATEWAY, format!("HLS manifest fetch error: {}", e)).into_response();
         }
     };
+
+    let status = response.status();
+    if !status.is_success() {
+        log::warn!("HLS manifest fetch returned {}", status);
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| format!("HLS manifest fetch returned {}", status));
+        return Response::builder()
+            .status(status.as_u16())
+            .header(header::CONTENT_TYPE, "text/plain")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .body(Body::from(body))
+            .unwrap();
+    }
 
     let manifest_text = match response.text().await {
         Ok(t) => t,
@@ -548,7 +589,7 @@ async fn proxy_hls_manifest(
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 // Check for URI= attributes in EXT-X-MAP or EXT-X-MEDIA tags
                 if trimmed.contains("URI=\"") {
-                    rewrite_uri_attribute(trimmed, &base_url, &token)
+                    rewrite_uri_attribute(trimmed, &base_url, &token, Some(referrer))
                 } else {
                     line.to_string()
                 }
@@ -563,10 +604,10 @@ async fn proxy_hls_manifest(
 
                 // Check if this is a sub-playlist (.m3u8) — route through /hls for recursive rewriting
                 if full_url.contains(".m3u8") {
-                    format!("/hls?token={}&url={}", token, urlencoding::encode(&full_url))
+                    proxied_path("hls", &token, &full_url, Some(referrer))
                 } else {
                     // Segment file — route through /proxy
-                    format!("/proxy?token={}&url={}", token, urlencoding::encode(&full_url))
+                    proxied_path("proxy", &token, &full_url, Some(referrer))
                 }
             }
         })
@@ -582,7 +623,7 @@ async fn proxy_hls_manifest(
 }
 
 /// Rewrite URI="..." attributes inside HLS tags (e.g., EXT-X-MAP, EXT-X-MEDIA)
-fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
+fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str, referrer: Option<&str>) -> String {
     // Find URI="..." and rewrite the URL inside
     if let Some(start) = line.find("URI=\"") {
         let uri_start = start + 5; // skip URI="
@@ -593,7 +634,7 @@ fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
             } else {
                 format!("{}{}", base_url, original_uri)
             };
-            let proxied = format!("/proxy?token={}&url={}", token, urlencoding::encode(&full_url));
+            let proxied = proxied_path("proxy", token, &full_url, referrer);
             return format!("{}URI=\"{}\"{}",
                 &line[..start],
                 proxied,
@@ -602,4 +643,86 @@ fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
         }
     }
     line.to_string()
+}
+
+pub(crate) fn origin_from_referrer(referrer: &str) -> String {
+    reqwest::Url::parse(referrer)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_else(|_| "https://allmanga.to".to_string())
+}
+
+fn proxied_path(route: &str, token: &str, url: &str, referrer: Option<&str>) -> String {
+    let referrer_param = referrer
+        .map(|value| format!("&referrer={}", urlencoding::encode(value)))
+        .unwrap_or_default();
+    format!(
+        "/{}?token={}&url={}{}",
+        route,
+        token,
+        urlencoding::encode(url),
+        referrer_param
+    )
+}
+
+fn should_normalize_hls_segment(url: &str, content_type: &str) -> bool {
+    let lower_url = url.to_ascii_lowercase();
+    let lower_content_type = content_type.to_ascii_lowercase();
+    lower_url.contains(".ts")
+        || lower_url.contains("/seg-")
+        || lower_content_type.starts_with("image/png")
+}
+
+fn normalize_hls_segment(bytes: Vec<u8>) -> Vec<u8> {
+    if bytes.first() == Some(&0x47) {
+        return bytes;
+    }
+
+    const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    if !bytes.starts_with(PNG_SIGNATURE) {
+        return bytes;
+    }
+
+    match bytes[PNG_SIGNATURE.len()..].iter().position(|byte| *byte == 0x47) {
+        Some(relative_offset) => {
+            let offset = PNG_SIGNATURE.len() + relative_offset;
+            bytes[offset..].to_vec()
+        }
+        None => bytes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_hls_segment_keeps_mpeg_ts_sync_byte_at_start() {
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2];
+        bytes.extend_from_slice(&[0x47, 0x40, 0x11, 0x10, 0x00]);
+
+        let stripped = normalize_hls_segment(bytes);
+
+        assert_eq!(stripped, vec![0x47, 0x40, 0x11, 0x10, 0x00]);
+    }
+
+    #[test]
+    fn normalize_hls_segment_leaves_normal_ts_unchanged() {
+        let bytes = vec![0x47, 0x40, 0x11, 0x10, 0x00];
+
+        let stripped = normalize_hls_segment(bytes.clone());
+
+        assert_eq!(stripped, bytes);
+    }
+
+    #[test]
+    fn should_normalize_anikoto_fake_segment_extensions() {
+        assert!(should_normalize_hls_segment(
+            "https://cdn.test/anime/id/hash/seg-1-f2-v1-a1.jpg",
+            "image/jpeg"
+        ));
+        assert!(should_normalize_hls_segment(
+            "https://cdn.test/anime/id/hash/seg-2-f2-v1-a1.html",
+            "text/html"
+        ));
+    }
 }

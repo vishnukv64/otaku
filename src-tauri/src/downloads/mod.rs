@@ -42,6 +42,8 @@ pub struct DownloadProgress {
     pub episode_number: i32,
     pub filename: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_referrer: Option<String>,
     pub file_path: String,
     pub total_bytes: u64,
     pub downloaded_bytes: u64,
@@ -101,7 +103,7 @@ impl DownloadManager {
         if let Some(pool) = &self.db_pool {
             let rows = sqlx::query(
                 r#"
-                SELECT id, media_id, episode_id, episode_number, filename, url, file_path,
+                SELECT id, media_id, episode_id, episode_number, filename, url, source_referrer, file_path,
                        total_bytes, downloaded_bytes, percentage, speed, status, error_message
                 FROM downloads
                 "#
@@ -155,6 +157,7 @@ impl DownloadManager {
                             episode_number: row.try_get("episode_number")?,
                             filename: row.try_get("filename")?,
                             url: row.try_get("url")?,
+                            source_referrer: row.try_get("source_referrer")?,
                             file_path: file_path.clone(),
                             total_bytes,
                             downloaded_bytes,
@@ -174,6 +177,7 @@ impl DownloadManager {
                     episode_number: row.try_get("episode_number")?,
                     filename: row.try_get("filename")?,
                     url: row.try_get("url")?,
+                    source_referrer: row.try_get("source_referrer")?,
                     file_path,
                     total_bytes,
                     downloaded_bytes,
@@ -206,12 +210,13 @@ impl DownloadManager {
             sqlx::query(
                 r#"
                 INSERT INTO downloads (
-                    id, media_id, episode_id, episode_number, filename, url, file_path,
+                    id, media_id, episode_id, episode_number, filename, url, source_referrer, file_path,
                     total_bytes, downloaded_bytes, percentage, speed, status, error_message,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
+                    source_referrer = ?,
                     downloaded_bytes = ?,
                     percentage = ?,
                     speed = ?,
@@ -226,6 +231,7 @@ impl DownloadManager {
             .bind(download.episode_number)
             .bind(&download.filename)
             .bind(&download.url)
+            .bind(&download.source_referrer)
             .bind(&download.file_path)
             .bind(download.total_bytes as i64)
             .bind(download.downloaded_bytes as i64)
@@ -234,6 +240,7 @@ impl DownloadManager {
             .bind(&status_str)
             .bind(&download.error_message)
             // For UPDATE
+            .bind(&download.source_referrer)
             .bind(download.downloaded_bytes as i64)
             .bind(download.percentage)
             .bind(download.speed as i64)
@@ -266,6 +273,7 @@ impl DownloadManager {
         url: String,
         filename: String,
         custom_path: Option<String>,
+        source_referrer: Option<String>,
     ) -> Result<()> {
         // Use custom path if provided, otherwise use default download_dir
         let download_dir = custom_path
@@ -284,6 +292,7 @@ impl DownloadManager {
             episode_number,
             filename,
             url,
+            source_referrer,
             file_path: file_path.to_string_lossy().to_string(),
             total_bytes: 0,
             downloaded_bytes: 0,
@@ -504,12 +513,13 @@ impl DownloadManager {
         sqlx::query(
             r#"
             INSERT INTO downloads (
-                id, media_id, episode_id, episode_number, filename, url, file_path,
+                id, media_id, episode_id, episode_number, filename, url, source_referrer, file_path,
                 total_bytes, downloaded_bytes, percentage, speed, status, error_message,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(id) DO UPDATE SET
+                source_referrer = ?,
                 downloaded_bytes = ?,
                 percentage = ?,
                 speed = ?,
@@ -524,6 +534,7 @@ impl DownloadManager {
         .bind(progress.episode_number)
         .bind(&progress.filename)
         .bind(&progress.url)
+        .bind(&progress.source_referrer)
         .bind(&progress.file_path)
         .bind(progress.total_bytes as i64)
         .bind(progress.downloaded_bytes as i64)
@@ -532,6 +543,7 @@ impl DownloadManager {
         .bind(&status_str)
         .bind(&progress.error_message)
         // For UPDATE
+        .bind(&progress.source_referrer)
         .bind(progress.downloaded_bytes as i64)
         .bind(progress.percentage)
         .bind(progress.speed as i64)
@@ -539,6 +551,262 @@ impl DownloadManager {
         .bind(&progress.error_message)
         .execute(pool.as_ref())
         .await?;
+        Ok(())
+    }
+
+    fn is_hls_url(url: &str) -> bool {
+        url.to_ascii_lowercase().contains(".m3u8")
+    }
+
+    fn absolutize_hls_uri(uri: &str, base_url: &str) -> Result<String> {
+        if uri.starts_with("http://") || uri.starts_with("https://") {
+            return Ok(uri.to_string());
+        }
+
+        reqwest::Url::parse(base_url)
+            .context("Invalid HLS playlist URL")?
+            .join(uri)
+            .context("Invalid HLS playlist entry")
+            .map(|url| url.to_string())
+    }
+
+    fn parse_hls_attribute(line: &str, name: &str) -> Option<String> {
+        let pattern = format!("{}=", name);
+        let start = line.find(&pattern)? + pattern.len();
+        let rest = &line[start..];
+
+        if let Some(quoted) = rest.strip_prefix('"') {
+            return quoted.find('"').map(|end| quoted[..end].to_string());
+        }
+
+        rest.split(',').next().map(|value| value.trim().to_string())
+    }
+
+    fn hls_variant_height(line: &str) -> u32 {
+        Self::parse_hls_attribute(line, "RESOLUTION")
+            .and_then(|resolution| resolution.split_once('x').map(|(_, height)| height.to_string()))
+            .and_then(|height| height.parse::<u32>().ok())
+            .unwrap_or(0)
+    }
+
+    fn parse_hls_playlist(text: &str, base_url: &str) -> Result<(Vec<(u32, String)>, Vec<String>)> {
+        let mut variants = Vec::new();
+        let mut segments = Vec::new();
+        let mut pending_variant_height: Option<u32> = None;
+
+        for raw_line in text.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            if line.starts_with("#EXT-X-KEY") && !line.contains("METHOD=NONE") {
+                return Err(anyhow::anyhow!("Encrypted HLS downloads are not supported yet"));
+            }
+
+            if line.starts_with("#EXT-X-STREAM-INF") {
+                pending_variant_height = Some(Self::hls_variant_height(line));
+                continue;
+            }
+
+            if let Some(height) = pending_variant_height.take() {
+                if line.starts_with('#') {
+                    pending_variant_height = Some(height);
+                    continue;
+                }
+                variants.push((height, Self::absolutize_hls_uri(line, base_url)?));
+                continue;
+            }
+
+            if line.starts_with("#EXT-X-MAP") {
+                if let Some(uri) = Self::parse_hls_attribute(line, "URI") {
+                    segments.push(Self::absolutize_hls_uri(&uri, base_url)?);
+                }
+                continue;
+            }
+
+            if !line.starts_with('#') {
+                segments.push(Self::absolutize_hls_uri(line, base_url)?);
+            }
+        }
+
+        Ok((variants, segments))
+    }
+
+    async fn fetch_hls_text(client: &reqwest::Client, url: &str, referrer: &str) -> Result<String> {
+        let response = client
+            .get(url)
+            .header("User-Agent", "Mozilla/5.0")
+            .header("Referer", referrer)
+            .header("Origin", crate::video_server::origin_from_referrer(referrer))
+            .send()
+            .await
+            .context("Failed to fetch HLS playlist")?
+            .error_for_status()
+            .context("HLS playlist request failed")?;
+
+        response.text().await.context("Failed to read HLS playlist")
+    }
+
+    async fn resolve_hls_segments(
+        client: &reqwest::Client,
+        url: &str,
+        referrer: &str,
+    ) -> Result<Vec<String>> {
+        let mut playlist_url = url.to_string();
+
+        for _ in 0..4 {
+            let text = Self::fetch_hls_text(client, &playlist_url, referrer).await?;
+            let (variants, segments) = Self::parse_hls_playlist(&text, &playlist_url)?;
+
+            if !segments.is_empty() {
+                return Ok(segments);
+            }
+
+            if let Some((_, next_url)) = variants.into_iter().max_by_key(|(height, _)| *height) {
+                playlist_url = next_url;
+                continue;
+            }
+
+            return Err(anyhow::anyhow!("HLS playlist did not contain media segments"));
+        }
+
+        Err(anyhow::anyhow!("HLS playlist nesting is too deep"))
+    }
+
+    fn normalize_hls_segment(bytes: Vec<u8>) -> Vec<u8> {
+        if bytes.first() == Some(&0x47) {
+            return bytes;
+        }
+
+        const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        if !bytes.starts_with(PNG_SIGNATURE) {
+            return bytes;
+        }
+
+        match bytes[PNG_SIGNATURE.len()..].iter().position(|byte| *byte == 0x47) {
+            Some(relative_offset) => {
+                let offset = PNG_SIGNATURE.len() + relative_offset;
+                bytes[offset..].to_vec()
+            }
+            None => bytes,
+        }
+    }
+
+    async fn perform_hls_download(
+        download_id: String,
+        downloads: Arc<RwLock<HashMap<String, DownloadProgress>>>,
+        db_pool: Option<Arc<SqlitePool>>,
+        app_handle: Option<AppHandle>,
+        client: reqwest::Client,
+        url: String,
+        referrer: String,
+        file_path: String,
+    ) -> Result<()> {
+        let segments = Self::resolve_hls_segments(&client, &url, &referrer).await?;
+        if segments.is_empty() {
+            return Err(anyhow::anyhow!("HLS playlist did not contain media segments"));
+        }
+
+        {
+            let mut downloads_map = downloads.write().await;
+            if let Some(progress) = downloads_map.get_mut(&download_id) {
+                progress.downloaded_bytes = 0;
+                progress.total_bytes = 0;
+                progress.percentage = 0.0;
+                progress.speed = 0;
+            }
+        }
+
+        let mut file = File::create(&file_path)
+            .await
+            .context("Failed to create HLS download file")?;
+        let is_obfuscated = file_path.ends_with(".otaku");
+        let start_time = std::time::Instant::now();
+        let mut downloaded: u64 = 0;
+        let mut last_event_time = std::time::Instant::now();
+        let mut last_db_save: u64 = 0;
+        const DB_SAVE_INTERVAL: u64 = 5 * 1024 * 1024;
+        const EVENT_THROTTLE_MS: u128 = 500;
+
+        for (index, segment_url) in segments.iter().enumerate() {
+            {
+                let downloads_map = downloads.read().await;
+                if let Some(progress) = downloads_map.get(&download_id) {
+                    if progress.status == DownloadStatus::Cancelled {
+                        tokio::fs::remove_file(&file_path).await.ok();
+                        return Err(anyhow::anyhow!("Download cancelled"));
+                    }
+                    if progress.status == DownloadStatus::Paused {
+                        file.flush().await.ok();
+                        return Err(anyhow::anyhow!("Download paused"));
+                    }
+                }
+            }
+
+            let response = client
+                .get(segment_url)
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", &referrer)
+                .header("Origin", crate::video_server::origin_from_referrer(&referrer))
+                .send()
+                .await
+                .with_context(|| format!("Failed to fetch HLS segment {}", index + 1))?
+                .error_for_status()
+                .with_context(|| format!("HLS segment {} request failed", index + 1))?;
+
+            let mut data = Self::normalize_hls_segment(
+                response
+                    .bytes()
+                    .await
+                    .with_context(|| format!("Failed to read HLS segment {}", index + 1))?
+                    .to_vec(),
+            );
+
+            let write_len = data.len() as u64;
+            if is_obfuscated {
+                obfuscation::xor_transform(&mut data, downloaded);
+            }
+            file.write_all(&data)
+                .await
+                .with_context(|| format!("Failed to write HLS segment {}", index + 1))?;
+            downloaded += write_len;
+
+            let elapsed = start_time.elapsed().as_secs();
+            let speed = if elapsed > 0 { downloaded / elapsed } else { 0 };
+            let percentage = ((index + 1) as f32 / segments.len() as f32) * 100.0;
+            let should_save_db = downloaded - last_db_save >= DB_SAVE_INTERVAL;
+            let should_emit_event = last_event_time.elapsed().as_millis() >= EVENT_THROTTLE_MS;
+
+            let progress_snapshot = {
+                let mut downloads_map = downloads.write().await;
+                downloads_map.get_mut(&download_id).map(|progress| {
+                    progress.downloaded_bytes = downloaded;
+                    progress.total_bytes = downloaded;
+                    progress.percentage = percentage;
+                    progress.speed = speed;
+                    progress.clone()
+                })
+            };
+
+            if let Some(progress) = progress_snapshot {
+                if should_emit_event {
+                    if let Some(ref handle) = app_handle {
+                        let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
+                    }
+                    last_event_time = std::time::Instant::now();
+                }
+
+                if should_save_db {
+                    if let Some(pool) = &db_pool {
+                        Self::save_progress_to_db(pool, &progress).await.ok();
+                    }
+                    last_db_save = downloaded;
+                }
+            }
+        }
+
+        file.flush().await.context("Failed to flush HLS download file")?;
         Ok(())
     }
 
@@ -550,7 +818,7 @@ impl DownloadManager {
         app_handle: Option<AppHandle>,
     ) -> Result<()> {
         // Get download info, check if cancelled, and get resume offset
-        let (url, file_path, resume_from, existing_total) = {
+        let (url, source_referrer, file_path, resume_from, existing_total) = {
             let downloads_map = downloads.read().await;
             let progress = downloads_map
                 .get(&download_id)
@@ -563,6 +831,7 @@ impl DownloadManager {
 
             (
                 progress.url.clone(),
+                progress.source_referrer.clone(),
                 progress.file_path.clone(),
                 progress.downloaded_bytes,
                 progress.total_bytes,
@@ -590,10 +859,26 @@ impl DownloadManager {
             .build()
             .context("Failed to create HTTP client")?;
 
+        let referrer = source_referrer.as_deref().unwrap_or("https://allmanga.to");
+        if Self::is_hls_url(&url) {
+            return Self::perform_hls_download(
+                download_id,
+                downloads,
+                db_pool,
+                app_handle,
+                client,
+                url,
+                referrer.to_string(),
+                file_path,
+            )
+            .await;
+        }
+
         let mut request = client
             .get(&url)
             .header("User-Agent", "Mozilla/5.0")
-            .header("Referer", "https://allmanga.to");
+            .header("Referer", referrer)
+            .header("Origin", crate::video_server::origin_from_referrer(referrer));
 
         // Add Range header for resume
         if resume_offset > 0 {
@@ -1127,6 +1412,7 @@ mod tests {
             speed: 0,
             status,
             error_message: None,
+            source_referrer: None,
         }
     }
 
@@ -1163,6 +1449,7 @@ mod tests {
                 episode_number INTEGER NOT NULL DEFAULT 0,
                 filename TEXT NOT NULL DEFAULT '',
                 url TEXT NOT NULL DEFAULT '',
+                source_referrer TEXT,
                 file_path TEXT NOT NULL,
                 total_bytes INTEGER NOT NULL DEFAULT 0,
                 downloaded_bytes INTEGER NOT NULL DEFAULT 0,

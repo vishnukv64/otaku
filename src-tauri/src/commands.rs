@@ -970,15 +970,17 @@ pub async fn proxy_video_request(
 #[tauri::command]
 pub async fn proxy_hls_playlist(
     url: String,
+    referrer: Option<String>,
 ) -> Result<String, String> {
     log::debug!("Proxying HLS playlist");
 
     use std::io::Read;
 
+    let referrer = referrer.as_deref().unwrap_or("https://allmanga.to");
     let request = ureq::get(&url)
-        .set("Referer", "https://allmanga.to")
+        .set("Referer", referrer)
         .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .set("Origin", "https://allmanga.to");
+        .set("Origin", &crate::video_server::origin_from_referrer(referrer));
 
     match request.call() {
         Ok(response) => {
@@ -1080,6 +1082,7 @@ pub async fn start_download(
     url: String,
     filename: String,
     custom_path: Option<String>,
+    source_referrer: Option<String>,
 ) -> Result<String, String> {
     let download_id = format!("{}_{}", media_id, episode_number);
 
@@ -1094,6 +1097,7 @@ pub async fn start_download(
             url,
             filename,
             custom_path,
+            source_referrer,
         )
         .await
         .map_err(|e| format!("Failed to queue download: {}", e))?;

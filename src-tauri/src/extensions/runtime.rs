@@ -341,7 +341,19 @@ impl ExtensionRuntime {
 
             // Call the search method
             let search_fn: rquickjs::Function = ext_obj.get("search")?;
-            let result: rquickjs::Value = search_fn.call((query, page))?;
+            let result: rquickjs::Value = search_fn.call((query, page)).catch(&ctx)
+                .map_err(|caught| {
+                    let msg = match caught {
+                        CaughtError::Exception(ex) => format!(
+                            "JS exception in search: {} | stack: {}",
+                            ex.message().unwrap_or_default(),
+                            ex.stack().unwrap_or_default()
+                        ),
+                        CaughtError::Value(v) => format!("JS non-Error thrown in search: {:?}", v),
+                        CaughtError::Error(e) => format!("rquickjs error in search: {}", e),
+                    };
+                    anyhow!("{}", msg)
+                })?;
 
             // Convert to JSON and deserialize
             let json_str: String = ctx.json_stringify(result)?

@@ -123,7 +123,7 @@ export function DownloadButton({
 
       const safeTitle = animeTitle.replace(/[^a-zA-Z0-9]/g, '_')
       const filename = `${safeTitle}_EP${episodeNumber}_${resolvedLabel}.otaku`
-      await startDownload(mediaId, episodeId, episodeNumber, downloadUrl, filename, customDownloadLocation || undefined)
+      await startDownload(mediaId, episodeId, episodeNumber, downloadUrl, filename, customDownloadLocation || undefined, source.referrer)
 
       setCompleted(true)
       setTimeout(() => {

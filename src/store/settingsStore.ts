@@ -13,9 +13,17 @@
 import { create } from 'zustand'
 import { getAppSetting, setAppSetting } from '@/utils/tauri-commands'
 import { isMobile } from '@/utils/platform'
+import {
+  ANIKOTO_DEFAULT_API_BASE_URL,
+  ANIKOTO_DEFAULT_SITE_BASE_URL,
+  ANIKOTO_DEFAULT_YOTOCHAN_BASE_URL,
+  ANIKOTO_LEGACY_LOCAL_API_BASE_URL,
+} from '@/extensions/anikoto-extension'
 
 // Database key for all settings
 const DB_KEY_SETTINGS = 'app_settings'
+
+export type StreamingProviderMode = 'allanime' | 'anikoto'
 
 interface SettingsData {
   // Appearance
@@ -35,6 +43,10 @@ interface SettingsData {
   defaultVolume: number
   defaultPlaybackSpeed: number
   markWatchedThreshold: number
+  streamingProvider: StreamingProviderMode
+  anikotoApiBaseUrl: string
+  anikotoSiteBaseUrl: string
+  anikotoYotochanBaseUrl: string
 
   // Onboarding
   onboardingCompleted: boolean
@@ -69,6 +81,10 @@ const defaultSettings: SettingsData = {
   defaultVolume: 1.0,
   defaultPlaybackSpeed: 1.0,
   markWatchedThreshold: 90,
+  streamingProvider: 'allanime',
+  anikotoApiBaseUrl: ANIKOTO_DEFAULT_API_BASE_URL,
+  anikotoSiteBaseUrl: ANIKOTO_DEFAULT_SITE_BASE_URL,
+  anikotoYotochanBaseUrl: ANIKOTO_DEFAULT_YOTOCHAN_BASE_URL,
 
   // Onboarding
   onboardingCompleted: false,
@@ -98,6 +114,10 @@ const extractSettingsData = (state: SettingsState): SettingsData => ({
   defaultVolume: state.defaultVolume,
   defaultPlaybackSpeed: state.defaultPlaybackSpeed,
   markWatchedThreshold: state.markWatchedThreshold,
+  streamingProvider: state.streamingProvider,
+  anikotoApiBaseUrl: state.anikotoApiBaseUrl,
+  anikotoSiteBaseUrl: state.anikotoSiteBaseUrl,
+  anikotoYotochanBaseUrl: state.anikotoYotochanBaseUrl,
   onboardingCompleted: state.onboardingCompleted,
 })
 
@@ -131,14 +151,30 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       const stored = await getAppSetting(DB_KEY_SETTINGS)
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<SettingsData>
+        const anikotoApiBaseUrl = !parsed.anikotoApiBaseUrl || parsed.anikotoApiBaseUrl === ANIKOTO_LEGACY_LOCAL_API_BASE_URL
+          ? ANIKOTO_DEFAULT_API_BASE_URL
+          : parsed.anikotoApiBaseUrl
+        const streamingProvider: StreamingProviderMode = parsed.streamingProvider === 'anikoto' ? 'anikoto' : 'allanime'
         // Merge with defaults to handle new settings added in updates
         const mergedSettings = {
           ...defaultSettings,
           ...parsed,
+          streamingProvider,
+          anikotoApiBaseUrl,
+          anikotoSiteBaseUrl: parsed.anikotoSiteBaseUrl || ANIKOTO_DEFAULT_SITE_BASE_URL,
+          anikotoYotochanBaseUrl: parsed.anikotoYotochanBaseUrl || ANIKOTO_DEFAULT_YOTOCHAN_BASE_URL,
           // Existing users upgrading won't have this field — skip onboarding for them
           onboardingCompleted: parsed.onboardingCompleted ?? true,
         }
         set({ ...mergedSettings, _initialized: true })
+        if (
+          streamingProvider !== parsed.streamingProvider ||
+          anikotoApiBaseUrl !== parsed.anikotoApiBaseUrl ||
+          !parsed.anikotoSiteBaseUrl ||
+          !parsed.anikotoYotochanBaseUrl
+        ) {
+          await saveToDatabase(mergedSettings)
+        }
         // Sync NSFW filter key for the release checker
         await setAppSetting('nsfw_filter', mergedSettings.nsfwFilter ? '1' : '0')
       } else {

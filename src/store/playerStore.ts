@@ -24,6 +24,8 @@ interface WatchProgress {
   completed: boolean
 }
 
+export type SubtitleFontFamily = 'system' | 'inter' | 'display' | 'mono' | 'serif'
+
 interface PlayerSettings {
   volume: number
   muted: boolean
@@ -32,6 +34,8 @@ interface PlayerSettings {
   preferredServer: number
   playbackSpeed: number
   videoFitMode: 'contain' | 'cover' | 'fill'
+  subtitleFontScale: number
+  subtitleFontFamily: SubtitleFontFamily
 }
 
 interface PlayerState {
@@ -68,6 +72,8 @@ const defaultSettings: PlayerSettings = {
   preferredServer: 0,
   playbackSpeed: 1.0,
   videoFitMode: 'contain',
+  subtitleFontScale: 100,
+  subtitleFontFamily: 'system',
 }
 
 // Helper to save settings to database

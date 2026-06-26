@@ -56,7 +56,7 @@ export function pickHlsVariant(
 }
 
 export async function listAdaptiveVariants(source: VideoSource): Promise<ResolvedVariant[]> {
-  const text = await proxyHlsPlaylist(source.url)
+  const text = await proxyHlsPlaylist(source.url, source.referrer)
   return parseHlsMaster(text, source.url)
 }
 

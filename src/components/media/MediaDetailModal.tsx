@@ -82,8 +82,11 @@ import {
   type JikanNews,
   jikanAnimeEpisodeDetail,
   type JikanEpisodeDetail,
+  searchAnime,
 } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { createAnikotoExtension } from '@/extensions/anikoto-extension'
+import { resolveAnikotoSlug } from '@/utils/anikotoResolver'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -180,6 +183,10 @@ export function MediaDetailModal({
   const navigate = useNavigate()
   const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
+  const streamingProvider = useSettingsStore((state) => state.streamingProvider)
+  const anikotoApiBaseUrl = useSettingsStore((state) => state.anikotoApiBaseUrl)
+  const anikotoSiteBaseUrl = useSettingsStore((state) => state.anikotoSiteBaseUrl)
+  const anikotoYotochanBaseUrl = useSettingsStore((state) => state.anikotoYotochanBaseUrl)
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -250,45 +257,101 @@ export function MediaDetailModal({
     }
   }, [episodeInfoTarget])
 
-  // AllAnime extension for video sources (downloads)
-  const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
-  const [allanimeShowId, setAllanimeShowId] = useState<string | null>(null)
+  // Selected streaming extension for video sources (downloads).
+  const [downloadExtId, setDownloadExtId] = useState<string | null>(null)
+  const [downloadProviderMediaId, setDownloadProviderMediaId] = useState<string | null>(null)
   const [bridgeFailed, setBridgeFailed] = useState(false)
-  useEffect(() => {
-    if (!allanimeExtId) {
-      loadExtension(ALLANIME_EXTENSION)
-        .then((meta) => setAllanimeExtId(meta.id))
-        .catch(() => {})
-    }
-  }, [allanimeExtId])
+  const downloadProviderLabel = streamingProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+  const downloadProviderResolving =
+    !!details && !bridgeFailed && (!downloadExtId || !downloadProviderMediaId)
 
-  // Resolve AllAnime show ID for downloads (maps MAL ID → AllAnime ID)
   useEffect(() => {
-    if (!details || allanimeShowId) return
-    resolveAllanimeId(
-      details.title,
-      'anime',
-      media.id,
-      details.english_name,
-      details.year,
-      details.title_synonyms,
-      details.type,
-      details.episode_count,
-      details.native_name,
-      details.season?.quarter
-    )
-      .then((id) => {
+    if (!details) return
+
+    let cancelled = false
+    setDownloadExtId(null)
+    setDownloadProviderMediaId(null)
+    setBridgeFailed(false)
+
+    const loadSelectedProvider = async () => {
+      try {
+        if (streamingProvider === 'anikoto') {
+          const metadata = await loadExtension(
+            createAnikotoExtension({
+              apiBaseUrl: anikotoApiBaseUrl,
+              siteBaseUrl: anikotoSiteBaseUrl,
+              yotochanBaseUrl: anikotoYotochanBaseUrl,
+            })
+          )
+          if (cancelled) return
+          setDownloadExtId(metadata.id)
+          const anikotoDetails = {
+            ...details,
+            native_name: details.native_name || media.native_name,
+            title_synonyms: Array.from(
+              new Set(
+                [
+                  ...(details.title_synonyms || []),
+                  ...(media.title_synonyms || []),
+                  media.native_name || '',
+                ].filter((value): value is string => Boolean(value))
+              )
+            ),
+          }
+          const match = await resolveAnikotoSlug(anikotoDetails, (query) =>
+            searchAnime(metadata.id, query, 5)
+          )
+          if (cancelled) return
+          if (match?.id) {
+            setDownloadProviderMediaId(match.id)
+            setBridgeFailed(false)
+          } else {
+            setBridgeFailed(true)
+          }
+          return
+        }
+
+        const metadata = extensionId ? { id: extensionId } : await loadExtension(ALLANIME_EXTENSION)
+        if (cancelled) return
+        setDownloadExtId(metadata.id)
+        const id = await resolveAllanimeId(
+          details.title,
+          'anime',
+          media.id,
+          details.english_name,
+          details.year,
+          details.title_synonyms,
+          details.type,
+          details.episode_count,
+          details.native_name,
+          details.season?.quarter
+        )
+        if (cancelled) return
         if (id) {
-          setAllanimeShowId(id)
+          setDownloadProviderMediaId(id)
           setBridgeFailed(false)
         } else {
           setBridgeFailed(true)
         }
-      })
-      .catch(() => {
-        setBridgeFailed(true)
-      })
-  }, [details, allanimeShowId, media.id])
+      } catch {
+        if (!cancelled) setBridgeFailed(true)
+      }
+    }
+
+    loadSelectedProvider()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    details,
+    extensionId,
+    media.id,
+    streamingProvider,
+    anikotoApiBaseUrl,
+    anikotoSiteBaseUrl,
+    anikotoYotochanBaseUrl,
+  ])
 
   // Tag state
   const [mediaTags, setMediaTags] = useState<LibraryTag[]>([])
@@ -435,9 +498,14 @@ export function MediaDetailModal({
   }
 
   const handleDownloadEpisode = async (episodeId: string, episodeNumber: number) => {
-    if (!details || !allanimeExtId || !allanimeShowId) {
-      if (!allanimeShowId) {
-        notifyError('Download Failed', 'Could not resolve anime on AllAnime. Try again.')
+    if (!details || !downloadExtId || !downloadProviderMediaId) {
+      if (!downloadProviderMediaId) {
+        notifyError(
+          'Download Failed',
+          downloadProviderResolving
+            ? `${downloadProviderLabel} is still resolving this anime. Try again in a moment.`
+            : `Could not resolve anime on ${downloadProviderLabel}. Switch provider in Settings and try again.`
+        )
       }
       return
     }
@@ -448,10 +516,9 @@ export function MediaDetailModal({
     }
 
     try {
-      // Build AllAnime-format episode ID: {allanimeShowId}::{episodeNumber}
-      const allanimeEpisodeId = `${allanimeShowId}::${episodeNumber}`
+      const providerEpisodeId = `${downloadProviderMediaId}::${episodeNumber}`
       // Get video sources
-      const videoSources = await getVideoSources(allanimeExtId, allanimeEpisodeId)
+      const videoSources = await getVideoSources(downloadExtId, providerEpisodeId)
       if (!videoSources || !videoSources.sources || videoSources.sources.length === 0) {
         notifyError('Download Failed', `No video sources found for Episode ${episodeNumber}`)
         return
@@ -475,7 +542,8 @@ export function MediaDetailModal({
         episodeNumber,
         videoUrl,
         filename,
-        customDownloadLocation || undefined
+        customDownloadLocation || undefined,
+        source.referrer
       )
       notifySuccess(media.title, `Started downloading Episode ${episodeNumber}`, {
         source: 'download',
@@ -488,9 +556,14 @@ export function MediaDetailModal({
   }
 
   const handleDownloadAll = async () => {
-    if (!details || !allanimeExtId || !allanimeShowId) {
-      if (!allanimeShowId) {
-        notifyError('Download Failed', 'Could not resolve anime on AllAnime. Try again.')
+    if (!details || !downloadExtId || !downloadProviderMediaId) {
+      if (!downloadProviderMediaId) {
+        notifyError(
+          'Download Failed',
+          downloadProviderResolving
+            ? `${downloadProviderLabel} is still resolving this anime. Try again in a moment.`
+            : `Could not resolve anime on ${downloadProviderLabel}. Switch provider in Settings and try again.`
+        )
       }
       return
     }
@@ -509,10 +582,9 @@ export function MediaDetailModal({
             continue
           }
 
-          // Build AllAnime-format episode ID: {allanimeShowId}::{episodeNumber}
-          const allanimeEpisodeId = `${allanimeShowId}::${episode.number}`
+          const providerEpisodeId = `${downloadProviderMediaId}::${episode.number}`
           // Get video sources
-          const sources = await getVideoSources(allanimeExtId, allanimeEpisodeId)
+          const sources = await getVideoSources(downloadExtId, providerEpisodeId)
           if (!sources.sources || sources.sources.length === 0) {
             console.error(`No sources found for episode ${episode.number}`)
             failCount++
@@ -520,7 +592,8 @@ export function MediaDetailModal({
           }
 
           // Pick the best quality source (first one is usually highest quality)
-          const videoUrl = sources.sources[0].url
+          const source = sources.sources[0]
+          const videoUrl = source.url
 
           // Generate filename
           const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.otaku`
@@ -532,7 +605,8 @@ export function MediaDetailModal({
             episode.number,
             videoUrl,
             filename,
-            customDownloadLocation || undefined
+            customDownloadLocation || undefined,
+            source.referrer
           )
           successCount++
         } catch (err) {
@@ -577,9 +651,14 @@ export function MediaDetailModal({
       return
     }
 
-    if (!details || !allanimeExtId || !allanimeShowId) {
-      if (!allanimeShowId) {
-        notifyError('Download Failed', 'Could not resolve anime on AllAnime. Try again.')
+    if (!details || !downloadExtId || !downloadProviderMediaId) {
+      if (!downloadProviderMediaId) {
+        notifyError(
+          'Download Failed',
+          downloadProviderResolving
+            ? `${downloadProviderLabel} is still resolving this anime. Try again in a moment.`
+            : `Could not resolve anime on ${downloadProviderLabel}. Switch provider in Settings and try again.`
+        )
       }
       return
     }
@@ -600,10 +679,9 @@ export function MediaDetailModal({
             continue
           }
 
-          // Build AllAnime-format episode ID: {allanimeShowId}::{episodeNumber}
-          const allanimeEpisodeId = `${allanimeShowId}::${episode.number}`
+          const providerEpisodeId = `${downloadProviderMediaId}::${episode.number}`
           // Get video sources
-          const sources = await getVideoSources(allanimeExtId, allanimeEpisodeId)
+          const sources = await getVideoSources(downloadExtId, providerEpisodeId)
           if (!sources.sources || sources.sources.length === 0) {
             console.error(`No sources found for episode ${episode.number}`)
             failCount++
@@ -611,7 +689,8 @@ export function MediaDetailModal({
           }
 
           // Pick the best quality source
-          const videoUrl = sources.sources[0].url
+          const source = sources.sources[0]
+          const videoUrl = source.url
 
           // Generate filename
           const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.otaku`
@@ -623,7 +702,8 @@ export function MediaDetailModal({
             episode.number,
             videoUrl,
             filename,
-            customDownloadLocation || undefined
+            customDownloadLocation || undefined,
+            source.referrer
           )
           successCount++
         } catch (err) {
@@ -702,12 +782,10 @@ export function MediaDetailModal({
       // back to m.status (which can be stale, e.g. "Not Yet Released").
       if (details && details.episodes.length > 0) {
         try {
-          const latestEp = details.episodes.reduce((max, ep) =>
-            ep.number > max.number ? ep : max
-          )
+          const latestEp = details.episodes.reduce((max, ep) => (ep.number > max.number ? ep : max))
           await initializeReleaseTrackingV2(
             media.id,
-            allanimeExtId || 'jikan',
+            downloadExtId || 'jikan',
             'anime',
             details.episodes.length,
             latestEp.number,
@@ -793,7 +871,7 @@ export function MediaDetailModal({
             )
             await initializeReleaseTrackingV2(
               media.id,
-              allanimeExtId || 'jikan',
+              downloadExtId || 'jikan',
               'anime',
               details.episodes.length,
               latestEp.number,
@@ -839,7 +917,7 @@ export function MediaDetailModal({
       await setAutoDownload(media.id, next)
       toastSuccess(
         'Auto-download',
-        next ? 'New episodes will download automatically.' : 'Auto-download disabled.',
+        next ? 'New episodes will download automatically.' : 'Auto-download disabled.'
       )
     } catch (error) {
       console.error('Failed to update auto-download:', error)
@@ -1660,8 +1738,14 @@ export function MediaDetailModal({
                     ? 'bg-sky-500/20 text-sky-300 border-sky-400/60'
                     : 'bg-[var(--color-glass-bg)] text-[var(--color-text-muted)] border-[var(--color-glass-border)] hover:bg-[var(--color-glass-bg-hover)] hover:text-white'
                 }`}
-                aria-label={autoDownload ? 'Disable auto-download' : 'Enable auto-download for new episodes'}
-                title={autoDownload ? 'Auto-download is on for new episodes' : 'Auto-download new episodes'}
+                aria-label={
+                  autoDownload ? 'Disable auto-download' : 'Enable auto-download for new episodes'
+                }
+                title={
+                  autoDownload
+                    ? 'Auto-download is on for new episodes'
+                    : 'Auto-download new episodes'
+                }
               >
                 <DownloadCloud className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
@@ -1995,7 +2079,11 @@ export function MediaDetailModal({
                             </button>
                             <button
                               onClick={handleDownloadSelected}
-                              disabled={selectedEpisodes.size === 0}
+                              disabled={
+                                selectedEpisodes.size === 0 ||
+                                downloadProviderResolving ||
+                                bridgeFailed
+                              }
                               className="px-2 sm:px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
                             >
                               <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -2016,7 +2104,8 @@ export function MediaDetailModal({
                           <>
                             <button
                               onClick={handleDownloadAll}
-                              className="px-2 sm:px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
+                              disabled={downloadProviderResolving || bridgeFailed}
+                              className="px-2 sm:px-3 py-1.5 bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap"
                             >
                               <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               Download All
@@ -2194,6 +2283,7 @@ export function MediaDetailModal({
                                 {/* Small download/delete button at top right on hover (only in normal mode, not downloading, bridge resolved, already aired) */}
                                 {!selectionMode &&
                                   !bridgeFailed &&
+                                  !downloadProviderResolving &&
                                   !isUnaired &&
                                   !downloadingEpisodes.has(episode.number) && (
                                     <>

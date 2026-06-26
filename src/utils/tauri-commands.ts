@@ -539,8 +539,8 @@ export async function proxyVideoRequest(
  * @param url - URL of the m3u8 playlist
  * @returns Rewritten playlist content
  */
-export async function proxyHlsPlaylist(url: string): Promise<string> {
-  return await invoke('proxy_hls_playlist', { url })
+export async function proxyHlsPlaylist(url: string, referrer?: string): Promise<string> {
+  return await invoke('proxy_hls_playlist', { url, referrer })
 }
 
 /**
@@ -559,9 +559,10 @@ export async function startDownload(
   episodeNumber: number,
   url: string,
   filename: string,
-  customPath?: string
+  customPath?: string,
+  sourceReferrer?: string
 ): Promise<string> {
-  return await invoke('start_download', { mediaId, episodeId, episodeNumber, url, filename, customPath })
+  return await invoke('start_download', { mediaId, episodeId, episodeNumber, url, filename, customPath, sourceReferrer })
 }
 
 /**
@@ -699,6 +700,7 @@ export interface DownloadProgress {
   episode_number: number
   filename: string
   url: string
+  source_referrer?: string
   file_path: string
   total_bytes: number
   downloaded_bytes: number

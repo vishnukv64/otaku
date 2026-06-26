@@ -18,7 +18,12 @@ import {
   acknowledgeNewReleases,
 } from '@/utils/tauri-commands'
 import { NotificationItem } from './NotificationItem'
-import { ReleaseRadarGroupCard, groupReleaseNotifications, type ReleaseGroup } from './ReleaseRadarGroupCard'
+import {
+  ReleaseRadarGroupCard,
+  groupReleaseNotifications,
+  isReleaseSummaryNotification,
+  type ReleaseGroup,
+} from './ReleaseRadarGroupCard'
 
 /** Format relative time for last check */
 function formatRelativeTime(timestamp: number | null): string {
@@ -94,10 +99,22 @@ export function NotificationCenter() {
     return notifications.filter((n) => getNotifCategory(n) === activeTab)
   }, [notifications, activeTab])
 
+  const shouldGroupReleases =
+    activeTab === 'all' || activeTab === 'episode' || activeTab === 'chapter'
   const releaseGroups = useMemo(() => {
-    if (activeTab !== 'episode' && activeTab !== 'chapter') return []
+    if (!shouldGroupReleases) return []
     return groupReleaseNotifications(filteredNotifications, coverUrls)
-  }, [activeTab, filteredNotifications, coverUrls])
+  }, [shouldGroupReleases, filteredNotifications, coverUrls])
+
+  const visibleNotifications = useMemo(() => {
+    const withoutSummary = filteredNotifications.filter((n) => !isReleaseSummaryNotification(n))
+    if (releaseGroups.length === 0) return withoutSummary
+    return withoutSummary.filter((n) => n.source !== 'release')
+  }, [filteredNotifications, releaseGroups.length])
+
+  const displayedNotificationCount =
+    visibleNotifications.length +
+    releaseGroups.reduce((total, group) => total + group.notifications.length, 0)
 
   // Load release settings, status, and cover URLs when panel opens
   useEffect(() => {
@@ -254,7 +271,9 @@ export function NotificationCenter() {
   }
 
   // Calculate unread count
-  const unreadCount = notifications.filter((n) => !n.read && !n.dismissed).length
+  const unreadCount = notifications.filter(
+    (n) => !n.read && !n.dismissed && !isReleaseSummaryNotification(n)
+  ).length
 
   // Close panel on escape key
   useEffect(() => {
@@ -295,14 +314,14 @@ export function NotificationCenter() {
       }
       setIsOpen(false)
     },
-    [markAsRead, navigate],
+    [markAsRead, navigate]
   )
 
   const handleReleaseGroupDismiss = useCallback(
     (group: ReleaseGroup) => {
       group.notifications.forEach((notification) => dismiss(notification.id))
     },
-    [dismiss],
+    [dismiss]
   )
 
   const handleReleaseGroupAcknowledge = useCallback(
@@ -321,7 +340,7 @@ export function NotificationCenter() {
         }
       })
     },
-    [markAsRead],
+    [markAsRead]
   )
 
   const tabs: { key: TabType; label: string }[] = [
@@ -510,7 +529,7 @@ export function NotificationCenter() {
 
             {/* Notification List */}
             <div className="flex-1 overflow-y-auto px-2 py-2" style={{ scrollbarWidth: 'thin' }}>
-              {filteredNotifications.length === 0 ? (
+              {displayedNotificationCount === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 px-5 gap-3 text-[var(--color-text-muted)] text-center">
                   <Bell size={40} style={{ opacity: 0.3 }} />
                   <div className="font-semibold text-[0.9375rem] text-[var(--color-text-secondary)]">
@@ -518,7 +537,7 @@ export function NotificationCenter() {
                   </div>
                   <div className="text-[0.8125rem]">New updates will appear here</div>
                 </div>
-              ) : releaseGroups.length > 0 ? (
+              ) : (
                 <div className="space-y-2 px-1 py-1">
                   {releaseGroups.map((group) => (
                     <ReleaseRadarGroupCard
@@ -529,30 +548,29 @@ export function NotificationCenter() {
                       onAcknowledge={handleReleaseGroupAcknowledge}
                     />
                   ))}
+                  {visibleNotifications.map((notification) => (
+                    <NotificationItem
+                      key={notification.id}
+                      notification={notification}
+                      coverUrl={
+                        coverUrls[(notification.metadata?.media_id as string) || ''] ||
+                        (notification.metadata?.thumbnail as string)
+                      }
+                      onDismiss={dismiss}
+                      onAction={handleNotificationAction}
+                      onMarkRead={markAsRead}
+                    />
+                  ))}
                 </div>
-              ) : (
-                filteredNotifications.map((notification) => (
-                  <NotificationItem
-                    key={notification.id}
-                    notification={notification}
-                    coverUrl={
-                      coverUrls[(notification.metadata?.media_id as string) || ''] ||
-                      (notification.metadata?.thumbnail as string)
-                    }
-                    onDismiss={dismiss}
-                    onAction={handleNotificationAction}
-                    onMarkRead={markAsRead}
-                  />
-                ))
               )}
             </div>
 
             {/* Footer */}
-            {filteredNotifications.length > 0 && (
+            {displayedNotificationCount > 0 && (
               <div className="px-5 py-3 border-t border-[var(--color-glass-border)] text-center flex-shrink-0 flex items-center justify-center gap-3">
                 <span className="text-xs text-[var(--color-text-muted)]">
-                  {filteredNotifications.length} notification
-                  {filteredNotifications.length !== 1 ? 's' : ''}
+                  {displayedNotificationCount} notification
+                  {displayedNotificationCount !== 1 ? 's' : ''}
                   {activeTab === 'all' && unreadCount > 0 && ` (${unreadCount} unread)`}
                 </span>
                 <button
