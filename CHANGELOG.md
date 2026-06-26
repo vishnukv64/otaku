@@ -5,6 +5,18 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-26
+
+### Added
+- **Anikoto streaming provider** — Added Anikoto as a streaming source with resolver coverage and provider tests.
+- **Sub/Dub download tabs** — Download option pickers now separate subtitled and dubbed sources, including bulk anime downloads.
+- **Download speed display** — Active downloads show current transfer speed alongside progress and remaining-time estimates.
+
+### Fixed
+- **Offline HLS playback** — Downloaded HLS episodes are saved as local playlists with segment files instead of concatenated transport streams, so local playback and seeking no longer stall like remote buffering.
+- **Downloaded subtitle playback** — Selected subtitles are persisted with downloads and loaded for offline playback, including multi-select and download-all flows.
+- **Download totals and resume** — HLS download totals stay pinned while progress updates, completed sizes reflect the real local files, and pause/resume continues from existing segment files instead of starting over.
+
 ## [1.5.0] - 2026-05-28
 
 ### Added
