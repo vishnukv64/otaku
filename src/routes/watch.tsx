@@ -10,12 +10,41 @@ import { Loader2 } from 'lucide-react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { useMobileLayout } from '@/hooks/useMobileLayout'
-import { jikanAnimeDetails, loadExtension, resolveAllanimeId, clearAllanimeMapping, getVideoSources, saveMediaDetails, saveEpisodes, getCachedMediaDetails, getEpisodeFilePath, getWatchProgress, getLocalVideoUrl, getLocalFileSize, getVideoServerInfo, type MediaEntry, type EpisodeEntry, type VideoServerUrls } from '@/utils/tauri-commands'
+import {
+  jikanAnimeDetails,
+  loadExtension,
+  resolveAllanimeId,
+  clearAllanimeMapping,
+  getVideoSources,
+  searchAnime,
+  saveMediaDetails,
+  saveEpisodes,
+  getCachedMediaDetails,
+  getEpisodeFilePath,
+  getWatchProgress,
+  getLocalVideoUrl,
+  getLocalFileSize,
+  isLegacyTsDownload,
+  getDownloadedSubtitles,
+  getVideoServerInfo,
+  type MediaEntry,
+  type EpisodeEntry,
+  type VideoServerUrls,
+} from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
+import { createAnikotoExtension } from '@/extensions/anikoto-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
 import { isAndroid } from '@/utils/platform'
 import { usePipStore } from '@/store/pipStore'
+import { useSettingsStore } from '@/store/settingsStore'
+import { buildAnikotoSearchQueries, resolveAnikotoSlug } from '@/utils/anikotoResolver'
+import {
+  canSeekLocalDownload,
+  getInitialPlaybackTime,
+  isLocalHlsPlaylist,
+  shouldUseLocalDownload,
+} from '@/utils/downloadedPlayback'
 
 interface WatchSearch {
   malId: string
@@ -33,7 +62,6 @@ export const Route = createFileRoute('/watch')({
 })
 
 function WatchPage() {
-
   const { malId, episodeId: initialEpisodeId } = Route.useSearch()
 
   const [details, setDetails] = useState<MediaDetails | null>(null)
@@ -42,9 +70,14 @@ function WatchPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resumeTime, setResumeTime] = useState<number>(0)
+  const [isLegacyLocalTsDownload, setIsLegacyLocalTsDownload] = useState(false)
   const [videoServerInfo, setVideoServerInfo] = useState<VideoServerUrls | null>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
   const [allanimeId, setAllanimeId] = useState<string | null>(null)
+  const [anikotoExtId, setAnikotoExtId] = useState<string | null>(null)
+  const [anikotoSlug, setAnikotoSlug] = useState<string | null>(null)
+  const [anikotoResolveError, setAnikotoResolveError] = useState<string | null>(null)
+  const [providersResolved, setProvidersResolved] = useState(false)
   const shownResumeToastRef = useRef<string | null>(null)
   const shownOfflineToastRef = useRef<string | null>(null)
   /** When expanding from PiP, skip the DB resume time (pip time takes priority) */
@@ -54,6 +87,11 @@ function WatchPage() {
   const pipExpandTime = usePipStore((s) => s.expandTime)
   const pipData = usePipStore((s) => s.data)
   const clearPipExpandTime = usePipStore((s) => s.clearExpandTime)
+  const streamingProvider = useSettingsStore((s) => s.streamingProvider)
+  const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
+  const anikotoSiteBaseUrl = useSettingsStore((s) => s.anikotoSiteBaseUrl)
+  const anikotoYotochanBaseUrl = useSettingsStore((s) => s.anikotoYotochanBaseUrl)
+  const updateSettings = useSettingsStore((s) => s.updateSettings)
 
   // Load video server info on mount
   useEffect(() => {
@@ -124,7 +162,7 @@ function WatchPage() {
 
           // Also cache episodes for offline playback
           if (result.episodes.length > 0) {
-            const episodeEntries: EpisodeEntry[] = result.episodes.map(ep => ({
+            const episodeEntries: EpisodeEntry[] = result.episodes.map((ep) => ({
               id: ep.id,
               media_id: result!.id,
               extension_id: 'jikan',
@@ -162,14 +200,19 @@ function WatchPage() {
               rating: cached.media.rating,
               episode_count: cached.media.episode_count,
               episode_duration: cached.media.episode_duration,
-              season: cached.media.season_quarter && cached.media.season_year
-                ? { quarter: cached.media.season_quarter, year: cached.media.season_year }
-                : undefined,
+              season:
+                cached.media.season_quarter && cached.media.season_year
+                  ? { quarter: cached.media.season_quarter, year: cached.media.season_year }
+                  : undefined,
               aired_start: cached.media.aired_start_year
-                ? { year: cached.media.aired_start_year, month: cached.media.aired_start_month, date: cached.media.aired_start_date }
+                ? {
+                    year: cached.media.aired_start_year,
+                    month: cached.media.aired_start_month,
+                    date: cached.media.aired_start_date,
+                  }
                 : undefined,
               genres: cached.media.genres ? JSON.parse(cached.media.genres) : [],
-              episodes: cached.episodes.map(ep => ({
+              episodes: cached.episodes.map((ep) => ({
                 id: ep.id,
                 number: ep.number,
                 title: ep.title,
@@ -192,29 +235,90 @@ function WatchPage() {
       }
 
       setDetails(result)
+      setAllanimeExtId(null)
+      setAllanimeId(null)
+      setAnikotoExtId(null)
+      setAnikotoSlug(null)
+      setAnikotoResolveError(null)
+      setProvidersResolved(false)
 
-      // Load AllAnime extension and resolve ID for video sources
       try {
-        const metadata = await loadExtension(ALLANIME_EXTENSION)
-        setAllanimeExtId(metadata.id)
-        console.log('[Watch] Resolving AllAnime ID for:', {
-          title: result.title,
-          english_name: result.english_name,
-          synonyms: result.title_synonyms,
-          type: result.type,
-          episode_count: result.episode_count,
-          year: result.year,
-          malId,
-        })
-        const resolvedId = await resolveAllanimeId(result.title, 'anime', malId, result.english_name, result.year, result.title_synonyms, result.type, result.episode_count, result.native_name, result.season?.quarter)
-        console.log('[Watch] Resolved AllAnime ID:', resolvedId)
-        if (resolvedId) {
-          setAllanimeId(resolvedId)
-        } else {
-          console.warn('[Watch] Could not resolve AllAnime ID for:', result.title)
+        // Load only the selected provider. No automatic fallback.
+        if (streamingProvider === 'allanime') {
+          try {
+            const metadata = await loadExtension(ALLANIME_EXTENSION)
+            setAllanimeExtId(metadata.id)
+            console.log('[Watch] Resolving AllAnime ID for:', {
+              title: result.title,
+              english_name: result.english_name,
+              synonyms: result.title_synonyms,
+              type: result.type,
+              episode_count: result.episode_count,
+              year: result.year,
+              malId,
+            })
+            const resolvedId = await resolveAllanimeId(
+              result.title,
+              'anime',
+              malId,
+              result.english_name,
+              result.year,
+              result.title_synonyms,
+              result.type,
+              result.episode_count,
+              result.native_name,
+              result.season?.quarter
+            )
+            console.log('[Watch] Resolved AllAnime ID:', resolvedId)
+            if (resolvedId) {
+              setAllanimeId(resolvedId)
+            } else {
+              console.warn('[Watch] Could not resolve AllAnime ID for:', result.title)
+            }
+          } catch (err) {
+            console.warn('[Watch] Failed to load AllAnime extension:', err)
+          }
         }
-      } catch (err) {
-        console.warn('[Watch] Failed to load AllAnime extension:', err)
+
+        if (streamingProvider === 'anikoto') {
+          try {
+            const metadata = await loadExtension(
+              createAnikotoExtension({
+                apiBaseUrl: anikotoApiBaseUrl,
+                siteBaseUrl: anikotoSiteBaseUrl,
+                yotochanBaseUrl: anikotoYotochanBaseUrl,
+              })
+            )
+            setAnikotoExtId(metadata.id)
+            const match = await resolveAnikotoSlug(result, (query) =>
+              searchAnime(metadata.id, query, 5)
+            )
+            const queries = buildAnikotoSearchQueries(result)
+            if (match?.id) {
+              console.log('[Watch] Resolved Anikoto slug:', {
+                query: match.query,
+                slug: match.id,
+                title: match.title,
+                score: match.score,
+              })
+              setAnikotoSlug(match.id)
+              setAnikotoResolveError(null)
+            } else if (queries.length > 0) {
+              setAnikotoResolveError(`No Anikoto match found for: ${queries.join(', ')}`)
+              console.warn('[Watch] Could not resolve Anikoto slug from queries:', queries)
+            } else if (!queries.length) {
+              setAnikotoResolveError(`No Anikoto search query available for ${result.title}`)
+              console.warn('[Watch] No Anikoto search queries for:', result.title)
+            }
+          } catch (err) {
+            const msg =
+              err instanceof Error ? err.message : typeof err === 'string' ? err : String(err)
+            setAnikotoResolveError(`Search failed against ${anikotoApiBaseUrl}: ${msg}`)
+            console.warn('[Watch] Failed to resolve Anikoto slug:', err)
+          }
+        }
+      } finally {
+        setProvidersResolved(true)
       }
 
       // Set initial episode if not provided
@@ -269,7 +373,14 @@ function WatchPage() {
     }
 
     loadDetails()
-  }, [malId, initialEpisodeId])
+  }, [
+    malId,
+    initialEpisodeId,
+    streamingProvider,
+    anikotoApiBaseUrl,
+    anikotoSiteBaseUrl,
+    anikotoYotochanBaseUrl,
+  ])
 
   // Define current episode variables
   const currentEpisode = details?.episodes.find((ep) => ep.id === currentEpisodeId)
@@ -284,6 +395,7 @@ function WatchPage() {
       setLoading(true)
       setError(null)
       setSources(null)
+      setIsLegacyLocalTsDownload(false)
 
       let didComplete = false
       try {
@@ -293,22 +405,22 @@ function WatchPage() {
             // PiP expand already set the resume time — don't overwrite with DB value
             pipResumeOverrideRef.current = false
           } else {
-          const progress = await getWatchProgress(currentEpisodeId)
+            const progress = await getWatchProgress(currentEpisodeId)
 
-          if (progress && progress.progress_seconds > 0) {
-            const minutes = Math.floor(progress.progress_seconds / 60)
-            const seconds = Math.floor(progress.progress_seconds % 60)
-            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
-            setResumeTime(progress.progress_seconds)
+            if (progress && progress.progress_seconds > 0) {
+              const minutes = Math.floor(progress.progress_seconds / 60)
+              const seconds = Math.floor(progress.progress_seconds % 60)
+              const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
+              setResumeTime(progress.progress_seconds)
 
-            // Only show toast once per episode (avoid duplicates from effect re-runs)
-            if (shownResumeToastRef.current !== currentEpisodeId) {
-              shownResumeToastRef.current = currentEpisodeId
-              toastInfo('Resuming Playback', `Resuming from ${timeStr}`)
+              // Only show toast once per episode (avoid duplicates from effect re-runs)
+              if (shownResumeToastRef.current !== currentEpisodeId) {
+                shownResumeToastRef.current = currentEpisodeId
+                toastInfo('Resuming Playback', `Resuming from ${timeStr}`)
+              }
+            } else {
+              setResumeTime(0)
             }
-          } else {
-            setResumeTime(0)
-          }
           } // close else (pip override check)
         } catch {
           setResumeTime(0)
@@ -325,14 +437,18 @@ function WatchPage() {
           filePath = null
         }
         let localSourceLoaded = false
+        let localIsLegacyTsDownload = false
 
         if (filePath) {
           try {
             const fileSize = await getLocalFileSize(filePath)
             // Guard against earlier buggy downloads that saved only the HLS
             // playlist text (~tens of KB) instead of the actual media.
-            if (fileSize < 1_000_000) {
-              console.warn('[Watch] Local download too small to be valid video, ignoring', { filePath, fileSize })
+            if (!shouldUseLocalDownload(filePath, fileSize)) {
+              console.warn('[Watch] Local download too small to be valid video, ignoring', {
+                filePath,
+                fileSize,
+              })
               filePath = null
             }
           } catch (sizeErr) {
@@ -341,18 +457,37 @@ function WatchPage() {
           }
         }
 
+        if (filePath) {
+          try {
+            localIsLegacyTsDownload = await isLegacyTsDownload(filePath)
+          } catch (legacyErr) {
+            console.warn('[Watch] Failed to inspect local download container', legacyErr)
+          }
+        }
+
+        const downloadedSubtitles = filePath
+          ? await getDownloadedSubtitles(filePath).catch((err) => {
+              console.warn('[Watch] Failed to load downloaded subtitles', err)
+              return []
+            })
+          : []
+        const localSourceType = filePath && isLocalHlsPlaylist(filePath) ? 'hls' : 'video/mp4'
+
         if (filePath && isAndroid()) {
           // Android: Use convertFileSrc to serve via https://asset.localhost/
           // This avoids mixed content issues (HTTPS page loading HTTP video server)
           const localUrl = convertFileSrc(filePath)
+          setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
           setSources({
-            sources: [{
-              url: localUrl,
-              quality: 'Downloaded',
-              type: 'video/mp4',
-              server: 'Local'
-            }],
-            subtitles: []
+            sources: [
+              {
+                url: localUrl,
+                quality: 'Downloaded',
+                type: localSourceType,
+                server: 'Local',
+              },
+            ],
+            subtitles: downloadedSubtitles,
           })
           localSourceLoaded = true
           if (shownOfflineToastRef.current !== currentEpisodeId) {
@@ -362,14 +497,17 @@ function WatchPage() {
         } else if (filePath && videoServerInfo) {
           // Desktop/iOS: Use video server for local file (proper Range request support for large files)
           const localUrl = `http://127.0.0.1:${videoServerInfo.port}/absolute?path=${encodeURIComponent(filePath)}&token=${videoServerInfo.token}`
+          setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
           setSources({
-            sources: [{
-              url: localUrl,
-              quality: 'Downloaded',
-              type: 'video/mp4',
-              server: 'Local'
-            }],
-            subtitles: []
+            sources: [
+              {
+                url: localUrl,
+                quality: 'Downloaded',
+                type: localSourceType,
+                server: 'Local',
+              },
+            ],
+            subtitles: downloadedSubtitles,
           })
           localSourceLoaded = true
           if (shownOfflineToastRef.current !== currentEpisodeId) {
@@ -380,14 +518,17 @@ function WatchPage() {
           // Fallback: Try getLocalVideoUrl command with full path
           try {
             const localUrl = await getLocalVideoUrl(filePath)
+            setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
             setSources({
-              sources: [{
-                url: localUrl,
-                quality: 'Downloaded',
-                type: 'video/mp4',
-                server: 'Local'
-              }],
-              subtitles: []
+              sources: [
+                {
+                  url: localUrl,
+                  quality: 'Downloaded',
+                  type: localSourceType,
+                  server: 'Local',
+                },
+              ],
+              subtitles: downloadedSubtitles,
             })
             localSourceLoaded = true
             if (shownOfflineToastRef.current !== currentEpisodeId) {
@@ -400,28 +541,72 @@ function WatchPage() {
           }
         }
 
-        // Fetch from AllAnime via bridge if no local source was loaded
+        // Fetch streaming sources if no local source was loaded
         if (!localSourceLoaded) {
-          if (!allanimeExtId || !allanimeId) {
-            // Bridge still resolving - keep loading spinner visible
-            // Effect will re-run when allanimeId becomes available
+          setIsLegacyLocalTsDownload(false)
+          const canUseAllAnime = streamingProvider === 'allanime' && !!allanimeExtId && !!allanimeId
+          const canUseAnikoto = streamingProvider === 'anikoto' && !!anikotoExtId && !!anikotoSlug
+
+          if (!canUseAllAnime && !canUseAnikoto) {
+            if (providersResolved) {
+              if (anikotoResolveError && streamingProvider === 'anikoto') {
+                throw new Error(`Anikoto provider failed: ${anikotoResolveError}`)
+              }
+              const providerName = streamingProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+              throw new Error(
+                `${providerName} could not resolve this anime. Switch provider in Settings or use the button here.`
+              )
+            }
+            // Providers still resolving - keep loading spinner visible.
             return
           }
-          // Build AllAnime episode ID: {allanimeId}::{episodeNumber}
-          const allanimeEpisodeId = `${allanimeId}::${currentEpisode.number}`
-          let result = await getVideoSources(allanimeExtId, allanimeEpisodeId)
 
-          // If no valid sources, the cached AllAnime ID may be wrong - clear and re-resolve
-          const hasValidSources = result.sources.some(s => s.url && s.url.length > 0)
-          if (!hasValidSources && malId && details) {
-            console.warn('[Watch] No valid sources - clearing stale mapping and re-resolving')
-            await clearAllanimeMapping(malId)
-            const freshId = await resolveAllanimeId(details.title, 'anime', malId, details.english_name, details.year, details.title_synonyms, details.type, details.episode_count, details.native_name, details.season?.quarter)
-            if (freshId && freshId !== allanimeId) {
-              setAllanimeId(freshId)
-              const freshEpisodeId = `${freshId}::${currentEpisode.number}`
-              result = await getVideoSources(allanimeExtId, freshEpisodeId)
+          let result: VideoSources | null = null
+
+          if (canUseAllAnime) {
+            // Build AllAnime episode ID: {allanimeId}::{episodeNumber}
+            const allanimeEpisodeId = `${allanimeId}::${currentEpisode.number}`
+            result = await getVideoSources(allanimeExtId, allanimeEpisodeId)
+
+            // If no valid sources, the cached AllAnime ID may be wrong - clear and re-resolve
+            const hasValidSources = result.sources.some((s) => s.url && s.url.length > 0)
+            if (!hasValidSources && malId && details) {
+              console.warn(
+                '[Watch] No valid AllAnime sources - clearing stale mapping and re-resolving'
+              )
+              await clearAllanimeMapping(malId)
+              const freshId = await resolveAllanimeId(
+                details.title,
+                'anime',
+                malId,
+                details.english_name,
+                details.year,
+                details.title_synonyms,
+                details.type,
+                details.episode_count,
+                details.native_name,
+                details.season?.quarter
+              )
+              if (freshId && freshId !== allanimeId) {
+                setAllanimeId(freshId)
+                const freshEpisodeId = `${freshId}::${currentEpisode.number}`
+                result = await getVideoSources(allanimeExtId, freshEpisodeId)
+              }
             }
+          }
+
+          if (canUseAnikoto) {
+            const anikotoEpisodeId = `${anikotoSlug}::${currentEpisode.number}`
+            result = await getVideoSources(anikotoExtId, anikotoEpisodeId)
+          }
+
+          const hasFinalPlayableSources =
+            result?.sources.some((s) => s.url && s.url.length > 0) ?? false
+          if (!hasFinalPlayableSources) {
+            const providerName = streamingProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+            throw new Error(
+              `${providerName} returned no playable sources. Switch provider in Settings or use the button here.`
+            )
           }
 
           setSources(result)
@@ -431,13 +616,14 @@ function WatchPage() {
         // Tauri rejects with a String (from Result<T, String>), not an Error.
         // Extract the actual message instead of falling back to a generic one,
         // so users see the real failure reason in the UI.
-        const msg = err instanceof Error
-          ? err.message
-          : typeof err === 'string'
-            ? err
-            : err && typeof err === 'object' && 'message' in err
-              ? String((err as { message: unknown }).message)
-              : `Failed to load video sources (${String(err)})`
+        const msg =
+          err instanceof Error
+            ? err.message
+            : typeof err === 'string'
+              ? err
+              : err && typeof err === 'object' && 'message' in err
+                ? String((err as { message: unknown }).message)
+                : `Failed to load video sources (${String(err)})`
         setError(msg)
         didComplete = true
       } finally {
@@ -449,7 +635,20 @@ function WatchPage() {
     }
 
     loadProgressAndSources()
-  }, [currentEpisodeId, currentEpisode, malId, videoServerInfo, allanimeExtId, allanimeId])
+  }, [
+    currentEpisodeId,
+    currentEpisode,
+    malId,
+    details,
+    videoServerInfo,
+    allanimeExtId,
+    allanimeId,
+    anikotoExtId,
+    anikotoSlug,
+    anikotoResolveError,
+    providersResolved,
+    streamingProvider,
+  ])
 
   const handleNextEpisode = () => {
     if (!details || currentEpisodeIndex === -1) return
@@ -479,6 +678,28 @@ function WatchPage() {
 
   const { isMobile, isPortrait } = useMobileLayout()
   const mobilePortrait = isMobile && isPortrait
+  const alternateProvider = streamingProvider === 'anikoto' ? 'allanime' : 'anikoto'
+  const alternateProviderLabel = alternateProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+  const switchProvider = () => {
+    setError(null)
+    setSources(null)
+    setLoading(true)
+    updateSettings({ streamingProvider: alternateProvider })
+  }
+  const providerSwitchButton = (
+    <button
+      onClick={switchProvider}
+      className="mt-4 rounded-md bg-[#e50914] px-4 py-2 text-sm font-semibold text-white hover:bg-[#f21b2a]"
+    >
+      Try {alternateProviderLabel}
+    </button>
+  )
+  const initialPlaybackTime = getInitialPlaybackTime(resumeTime, {
+    isLegacyTsDownload: isLegacyLocalTsDownload,
+  })
+  const canSeekCurrentSource = canSeekLocalDownload({
+    isLegacyTsDownload: isLegacyLocalTsDownload,
+  })
 
   // Mobile portrait: video top + episode list below (scrollable page)
   if (mobilePortrait) {
@@ -491,7 +712,12 @@ function WatchPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 text-white/80 active:text-white text-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
             </svg>
             Back
           </button>
@@ -508,11 +734,13 @@ function WatchPage() {
             <div className="w-full h-full flex flex-col items-center justify-center text-white p-4">
               <p className="text-base font-semibold mb-1">Error Loading Video</p>
               <p className="text-sm text-[var(--color-text-secondary)]">{error}</p>
+              {providerSwitchButton}
             </div>
           )}
           {!loading && !error && sources && sources.sources.length > 0 && (
             <VideoPlayer
               sources={sources.sources}
+              subtitles={sources.subtitles}
               mediaId={malId}
               episodeId={currentEpisodeId}
               episodeTitle={currentEpisode?.title}
@@ -522,7 +750,8 @@ function WatchPage() {
               onEpisodeSelect={handleEpisodeSelect}
               onNextEpisode={handleNextEpisode}
               onPreviousEpisode={handlePreviousEpisode}
-              initialTime={resumeTime}
+              initialTime={initialPlaybackTime}
+              disableSeeking={!canSeekCurrentSource}
               autoPlay
               posterUrl={currentEpisode?.thumbnail || details?.cover_url}
             />
@@ -530,7 +759,10 @@ function WatchPage() {
           {!loading && !error && sources && sources.sources.length === 0 && (
             <div className="w-full h-full flex flex-col items-center justify-center text-white p-4">
               <p className="text-base font-semibold mb-1">No Video Sources</p>
-              <p className="text-sm text-[var(--color-text-secondary)]">No streaming sources available.</p>
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                No streaming sources available.
+              </p>
+              {providerSwitchButton}
             </div>
           )}
         </div>
@@ -542,7 +774,8 @@ function WatchPage() {
               <h2 className="text-lg font-bold text-white">{details.title}</h2>
               {currentEpisode && (
                 <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-                  Episode {currentEpisode.number}{currentEpisode.title ? ` - ${currentEpisode.title}` : ''}
+                  Episode {currentEpisode.number}
+                  {currentEpisode.title ? ` - ${currentEpisode.title}` : ''}
                 </p>
               )}
             </div>
@@ -551,7 +784,9 @@ function WatchPage() {
           {/* Episode grid */}
           {details?.episodes && details.episodes.length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">Episodes</h3>
+              <h3 className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">
+                Episodes
+              </h3>
               <div className="grid grid-cols-4 gap-2">
                 {details.episodes.map((ep) => (
                   <button
@@ -588,12 +823,14 @@ function WatchPage() {
         <div className="w-full h-full flex flex-col items-center justify-center text-white">
           <p className="text-lg font-semibold mb-2">Error Loading Video</p>
           <p className="text-white/60">{error}</p>
+          {providerSwitchButton}
         </div>
       )}
 
       {!loading && !error && sources && sources.sources.length > 0 && (
         <VideoPlayer
           sources={sources.sources}
+          subtitles={sources.subtitles}
           mediaId={malId}
           episodeId={currentEpisodeId}
           animeTitle={details?.title}
@@ -605,7 +842,8 @@ function WatchPage() {
           onNextEpisode={handleNextEpisode}
           onPreviousEpisode={handlePreviousEpisode}
           onGoBack={handleGoBack}
-          initialTime={resumeTime}
+          initialTime={initialPlaybackTime}
+          disableSeeking={!canSeekCurrentSource}
           autoPlay
           posterUrl={currentEpisode?.thumbnail || details?.cover_url}
         />
@@ -614,7 +852,10 @@ function WatchPage() {
       {!loading && !error && sources && sources.sources.length === 0 && (
         <div className="w-full h-full flex flex-col items-center justify-center text-white">
           <p className="text-lg font-semibold mb-2">No Video Sources Available</p>
-          <p className="text-white/60">This episode does not have any available streaming sources.</p>
+          <p className="text-white/60">
+            This episode does not have any available streaming sources.
+          </p>
+          {providerSwitchButton}
         </div>
       )}
     </div>

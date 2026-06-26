@@ -423,6 +423,7 @@ pub fn run() {
       commands::resume_download,
       commands::is_episode_downloaded,
       commands::get_episode_file_path,
+      commands::get_downloaded_subtitles,
       commands::get_total_storage_used,
       commands::get_downloads_directory,
       commands::open_downloads_folder,
@@ -491,6 +492,7 @@ pub fn run() {
       commands::get_video_server_info,
       commands::get_local_video_url,
       commands::get_local_file_size,
+      commands::is_legacy_ts_download,
       commands::get_proxy_video_url,
       // System Stats
       commands::get_system_stats,

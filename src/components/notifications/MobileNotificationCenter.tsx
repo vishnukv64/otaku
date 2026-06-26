@@ -25,7 +25,12 @@ import {
   getCachedMediaDetails,
 } from '@/utils/tauri-commands'
 import { NotificationItem } from './NotificationItem'
-import { ReleaseRadarGroupCard, groupReleaseNotifications, type ReleaseGroup } from './ReleaseRadarGroupCard'
+import {
+  ReleaseRadarGroupCard,
+  groupReleaseNotifications,
+  isReleaseSummaryNotification,
+  type ReleaseGroup,
+} from './ReleaseRadarGroupCard'
 
 /** Interval options for release checking */
 const INTERVAL_OPTIONS = [
@@ -89,9 +94,19 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
   }, [notifications, activeTab])
 
   const releaseGroups = useMemo(() => {
-    if (activeTab !== 'releases') return []
+    if (activeTab !== 'all' && activeTab !== 'releases') return []
     return groupReleaseNotifications(filteredNotifications, coverUrls)
   }, [activeTab, filteredNotifications, coverUrls])
+
+  const visibleNotifications = useMemo(() => {
+    const withoutSummary = filteredNotifications.filter((n) => !isReleaseSummaryNotification(n))
+    if (releaseGroups.length === 0) return withoutSummary
+    return withoutSummary.filter((n) => n.source !== 'release')
+  }, [filteredNotifications, releaseGroups.length])
+
+  const displayedNotificationCount =
+    visibleNotifications.length +
+    releaseGroups.reduce((total, group) => total + group.notifications.length, 0)
 
   useEffect(() => {
     const mediaIds = new Set<string>()
@@ -120,10 +135,14 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
 
   // Count release notifications for badge
   const releaseCount = useMemo(() => {
-    return notifications.filter((n) => n.source === 'release' && !n.read && !n.dismissed).length
+    return notifications.filter(
+      (n) => n.source === 'release' && !n.read && !n.dismissed && !isReleaseSummaryNotification(n)
+    ).length
   }, [notifications])
 
-  const unreadCount = notifications.filter((n) => !n.read && !n.dismissed).length
+  const unreadCount = notifications.filter(
+    (n) => !n.read && !n.dismissed && !isReleaseSummaryNotification(n)
+  ).length
 
   // Load release settings on mount
   useEffect(() => {
@@ -222,14 +241,14 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
       }
       onNavigateAway?.()
     },
-    [markAsRead, navigate, onNavigateAway],
+    [markAsRead, navigate, onNavigateAway]
   )
 
   const handleReleaseGroupDismiss = useCallback(
     (group: ReleaseGroup) => {
       group.notifications.forEach((notification) => dismiss(notification.id))
     },
-    [dismiss],
+    [dismiss]
   )
 
   const handleReleaseGroupAcknowledge = useCallback(
@@ -248,7 +267,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
         }
       })
     },
-    [markAsRead],
+    [markAsRead]
   )
 
   // Release check handlers
@@ -461,7 +480,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
 
       {/* Notification List */}
       <div className="flex-1 overflow-y-auto">
-        {filteredNotifications.length === 0 ? (
+        {displayedNotificationCount === 0 ? (
           <div className="py-16 px-4 text-center">
             <Bell size={40} className="mx-auto mb-4 text-[var(--color-text-muted)]" />
             <p className="text-[var(--color-text-secondary)] font-medium">
@@ -473,7 +492,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
                 : 'Download updates and alerts will appear here'}
             </p>
           </div>
-        ) : releaseGroups.length > 0 ? (
+        ) : (
           <div className="space-y-2 px-3 py-3">
             {releaseGroups.map((group) => (
               <ReleaseRadarGroupCard
@@ -484,30 +503,29 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
                 onAcknowledge={handleReleaseGroupAcknowledge}
               />
             ))}
+            {visibleNotifications.map((notification) => (
+              <NotificationItem
+                key={notification.id}
+                notification={notification}
+                coverUrl={
+                  coverUrls[(notification.metadata?.media_id as string) || ''] ||
+                  (notification.metadata?.thumbnail as string)
+                }
+                onDismiss={dismiss}
+                onAction={handleAction}
+                onMarkRead={markAsRead}
+              />
+            ))}
           </div>
-        ) : (
-          filteredNotifications.map((notification) => (
-            <NotificationItem
-              key={notification.id}
-              notification={notification}
-              coverUrl={
-                coverUrls[(notification.metadata?.media_id as string) || ''] ||
-                (notification.metadata?.thumbnail as string)
-              }
-              onDismiss={dismiss}
-              onAction={handleAction}
-              onMarkRead={markAsRead}
-            />
-          ))
         )}
       </div>
 
       {/* Footer */}
-      {filteredNotifications.length > 0 && (
+      {displayedNotificationCount > 0 && (
         <div className="px-4 py-2 border-t border-white/10 text-center flex-shrink-0">
           <span className="text-xs text-[var(--color-text-muted)]">
-            {filteredNotifications.length} notification
-            {filteredNotifications.length !== 1 ? 's' : ''}
+            {displayedNotificationCount} notification
+            {displayedNotificationCount !== 1 ? 's' : ''}
             {activeTab === 'all' && unreadCount > 0 && ` (${unreadCount} unread)`}
           </span>
         </div>

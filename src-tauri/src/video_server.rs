@@ -196,6 +196,7 @@ async fn serve_absolute_path(
     Query(query): Query<AbsolutePathQuery>,
     request: Request<Body>,
 ) -> Response {
+    let token = query.token.clone().unwrap_or_default();
     let file_path = match query.path {
         Some(p) => {
             // URL decode the path
@@ -240,22 +241,52 @@ async fn serve_absolute_path(
     };
 
     // Determine content type from extension
-    // .otaku files are obfuscated MP4s — report as video/mp4 after decryption
+    // .otaku files are obfuscated media; old HLS downloads may contain TS bytes.
     let is_obfuscated = file_path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.eq_ignore_ascii_case("otaku"))
         .unwrap_or(false);
 
-    let content_type = file_path.extension()
+    let mut content_type = file_path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| match ext.to_lowercase().as_str() {
             "mp4" | "otaku" => "video/mp4",
+            "m3u8" => "application/vnd.apple.mpegurl",
+            "ts" => "video/mp2t",
+            "m4s" => "video/iso.segment",
             "mkv" => "video/x-matroska",
             "webm" => "video/webm",
             "avi" => "video/x-msvideo",
             _ => "application/octet-stream",
         })
         .unwrap_or("application/octet-stream");
+
+    if is_obfuscated {
+        content_type = sniff_obfuscated_file_type(&file_path).await;
+    }
+
+    if file_path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("m3u8"))
+        .unwrap_or(false)
+    {
+        match tokio::fs::read_to_string(&file_path).await {
+            Ok(text) => {
+                let body = rewrite_local_hls_playlist(&text, &file_path, &token);
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::CONTENT_LENGTH, body.len().to_string())
+                    .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .body(Body::from(body))
+                    .unwrap();
+            }
+            Err(e) => {
+                log::error!("Failed to read HLS playlist: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read playlist").into_response();
+            }
+        }
+    }
 
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -349,6 +380,50 @@ async fn serve_absolute_path(
     }
 }
 
+fn local_absolute_url(path: &std::path::Path, token: &str) -> String {
+    format!(
+        "/absolute?path={}&token={}",
+        urlencoding::encode(&path.to_string_lossy()),
+        urlencoding::encode(token)
+    )
+}
+
+fn rewrite_hls_map_line(line: &str, playlist_dir: &std::path::Path, token: &str) -> String {
+    let Some(uri_start) = line.find("URI=\"") else {
+        return line.to_string();
+    };
+    let value_start = uri_start + 5;
+    let Some(relative_end) = line[value_start..].find('"') else {
+        return line.to_string();
+    };
+    let value_end = value_start + relative_end;
+    let uri = &line[value_start..value_end];
+    if uri.starts_with("http://") || uri.starts_with("https://") || uri.starts_with("/absolute?") {
+        return line.to_string();
+    }
+    let rewritten = local_absolute_url(&playlist_dir.join(uri), token);
+    format!("{}{}{}", &line[..value_start], rewritten, &line[value_end..])
+}
+
+fn rewrite_local_hls_playlist(text: &str, playlist_path: &std::path::Path, token: &str) -> String {
+    let playlist_dir = playlist_path.parent().unwrap_or_else(|| std::path::Path::new(""));
+    let mut out = String::new();
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.starts_with("#EXT-X-MAP") {
+            out.push_str(&rewrite_hls_map_line(line, playlist_dir, token));
+        } else if line.is_empty() || line.starts_with('#') || line.starts_with("http://") || line.starts_with("https://") {
+            out.push_str(line);
+        } else {
+            out.push_str(&local_absolute_url(&playlist_dir.join(line), token));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
 // Parse HTTP Range header
 fn parse_range_header(range: &str, file_size: u64) -> Option<(u64, u64)> {
     if !range.starts_with("bytes=") {
@@ -381,6 +456,7 @@ struct ProxyQuery {
     #[allow(dead_code)]
     token: Option<String>,
     url: Option<String>,
+    referrer: Option<String>,
 }
 
 // Proxy remote video URLs with streaming and Range support
@@ -392,6 +468,7 @@ async fn proxy_video(
         Some(u) => u,
         None => return (StatusCode::BAD_REQUEST, "Missing url parameter").into_response(),
     };
+    let referrer = query.referrer.as_deref().unwrap_or("https://allmanga.to");
 
     log::debug!("Proxying video");
 
@@ -406,12 +483,14 @@ async fn proxy_video(
     let mut remote_request = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .header("Referer", "https://allmanga.to")
-        .header("Origin", "https://allmanga.to");
+        .header("Referer", referrer)
+        .header("Origin", origin_from_referrer(referrer));
 
     // Forward Range header if present - this is critical for video seeking
+    let mut has_range = false;
     if let Some(range) = request.headers().get(header::RANGE) {
         if let Ok(range_str) = range.to_str() {
+            has_range = true;
             remote_request = remote_request.header("Range", range_str);
         }
     }
@@ -450,6 +529,26 @@ async fn proxy_video(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    if !has_range && should_normalize_hls_segment(&url, &content_type) {
+        let bytes = match response.bytes().await {
+            Ok(b) => normalize_hls_segment(b.to_vec()),
+            Err(e) => {
+                log::error!("Proxy body read failed: {}", e);
+                return (StatusCode::BAD_GATEWAY, format!("Proxy body read error: {}", e)).into_response();
+            }
+        };
+
+        return Response::builder()
+            .status(status.as_u16())
+            .header(header::CONTENT_TYPE, "video/mp2t")
+            .header(header::CONTENT_LENGTH, bytes.len().to_string())
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range, Accept-Ranges, Content-Length")
+            .header(header::ACCEPT_RANGES, "bytes")
+            .body(Body::from(bytes))
+            .unwrap();
+    }
+
     // Stream the response body directly without buffering
     // This is the key to handling large files
     let stream = response.bytes_stream();
@@ -485,6 +584,7 @@ struct HlsQuery {
     #[allow(dead_code)]
     token: Option<String>,
     url: Option<String>,
+    referrer: Option<String>,
 }
 
 // Proxy and rewrite HLS manifest so segment URLs go through our /proxy endpoint.
@@ -500,6 +600,7 @@ async fn proxy_hls_manifest(
     };
 
     let token = query.token.unwrap_or_default();
+    let referrer = query.referrer.as_deref().unwrap_or("https://allmanga.to");
 
     log::debug!("Proxying HLS manifest");
 
@@ -513,8 +614,8 @@ async fn proxy_hls_manifest(
     let response = match client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0")
-        .header("Referer", "https://allmanga.to")
-        .header("Origin", "https://allmanga.to")
+        .header("Referer", referrer)
+        .header("Origin", origin_from_referrer(referrer))
         .send()
         .await
     {
@@ -524,6 +625,21 @@ async fn proxy_hls_manifest(
             return (StatusCode::BAD_GATEWAY, format!("HLS manifest fetch error: {}", e)).into_response();
         }
     };
+
+    let status = response.status();
+    if !status.is_success() {
+        log::warn!("HLS manifest fetch returned {}", status);
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| format!("HLS manifest fetch returned {}", status));
+        return Response::builder()
+            .status(status.as_u16())
+            .header(header::CONTENT_TYPE, "text/plain")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .body(Body::from(body))
+            .unwrap();
+    }
 
     let manifest_text = match response.text().await {
         Ok(t) => t,
@@ -548,7 +664,7 @@ async fn proxy_hls_manifest(
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 // Check for URI= attributes in EXT-X-MAP or EXT-X-MEDIA tags
                 if trimmed.contains("URI=\"") {
-                    rewrite_uri_attribute(trimmed, &base_url, &token)
+                    rewrite_uri_attribute(trimmed, &base_url, &token, Some(referrer))
                 } else {
                     line.to_string()
                 }
@@ -563,10 +679,10 @@ async fn proxy_hls_manifest(
 
                 // Check if this is a sub-playlist (.m3u8) — route through /hls for recursive rewriting
                 if full_url.contains(".m3u8") {
-                    format!("/hls?token={}&url={}", token, urlencoding::encode(&full_url))
+                    proxied_path("hls", &token, &full_url, Some(referrer))
                 } else {
                     // Segment file — route through /proxy
-                    format!("/proxy?token={}&url={}", token, urlencoding::encode(&full_url))
+                    proxied_path("proxy", &token, &full_url, Some(referrer))
                 }
             }
         })
@@ -582,7 +698,7 @@ async fn proxy_hls_manifest(
 }
 
 /// Rewrite URI="..." attributes inside HLS tags (e.g., EXT-X-MAP, EXT-X-MEDIA)
-fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
+fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str, referrer: Option<&str>) -> String {
     // Find URI="..." and rewrite the URL inside
     if let Some(start) = line.find("URI=\"") {
         let uri_start = start + 5; // skip URI="
@@ -593,7 +709,7 @@ fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
             } else {
                 format!("{}{}", base_url, original_uri)
             };
-            let proxied = format!("/proxy?token={}&url={}", token, urlencoding::encode(&full_url));
+            let proxied = proxied_path("proxy", token, &full_url, referrer);
             return format!("{}URI=\"{}\"{}",
                 &line[..start],
                 proxied,
@@ -602,4 +718,142 @@ fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str) -> String {
         }
     }
     line.to_string()
+}
+
+pub(crate) fn origin_from_referrer(referrer: &str) -> String {
+    reqwest::Url::parse(referrer)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_else(|_| "https://allmanga.to".to_string())
+}
+
+fn proxied_path(route: &str, token: &str, url: &str, referrer: Option<&str>) -> String {
+    let referrer_param = referrer
+        .map(|value| format!("&referrer={}", urlencoding::encode(value)))
+        .unwrap_or_default();
+    format!(
+        "/{}?token={}&url={}{}",
+        route,
+        token,
+        urlencoding::encode(url),
+        referrer_param
+    )
+}
+
+fn should_normalize_hls_segment(url: &str, content_type: &str) -> bool {
+    let lower_url = url.to_ascii_lowercase();
+    let lower_content_type = content_type.to_ascii_lowercase();
+    lower_url.contains(".ts")
+        || lower_url.contains("/seg-")
+        || lower_content_type.starts_with("image/png")
+}
+
+fn normalize_hls_segment(bytes: Vec<u8>) -> Vec<u8> {
+    if bytes.first() == Some(&0x47) {
+        return bytes;
+    }
+
+    const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    if !bytes.starts_with(PNG_SIGNATURE) {
+        return bytes;
+    }
+
+    match bytes[PNG_SIGNATURE.len()..].iter().position(|byte| *byte == 0x47) {
+        Some(relative_offset) => {
+            let offset = PNG_SIGNATURE.len() + relative_offset;
+            bytes[offset..].to_vec()
+        }
+        None => bytes,
+    }
+}
+
+fn sniff_decrypted_video_type(header: &[u8]) -> &'static str {
+    if header.first() == Some(&0x47) {
+        return "video/mp2t";
+    }
+    if header.len() >= 8 && &header[4..8] == b"ftyp" {
+        return "video/mp4";
+    }
+    "video/mp4"
+}
+
+pub(crate) async fn is_obfuscated_mpeg_ts_file(file_path: &std::path::Path) -> bool {
+    file_path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("otaku"))
+        .unwrap_or(false)
+        && sniff_obfuscated_file_type(file_path).await == "video/mp2t"
+}
+
+async fn sniff_obfuscated_file_type(file_path: &std::path::Path) -> &'static str {
+    use tokio::io::AsyncReadExt;
+
+    let mut file = match tokio::fs::File::open(file_path).await {
+        Ok(file) => file,
+        Err(_) => return "video/mp4",
+    };
+    let mut header = [0u8; 16];
+    let read = match file.read(&mut header).await {
+        Ok(read) => read,
+        Err(_) => return "video/mp4",
+    };
+    obfuscation::xor_transform(&mut header[..read], 0);
+    sniff_decrypted_video_type(&header[..read])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_hls_segment_keeps_mpeg_ts_sync_byte_at_start() {
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2];
+        bytes.extend_from_slice(&[0x47, 0x40, 0x11, 0x10, 0x00]);
+
+        let stripped = normalize_hls_segment(bytes);
+
+        assert_eq!(stripped, vec![0x47, 0x40, 0x11, 0x10, 0x00]);
+    }
+
+    #[test]
+    fn normalize_hls_segment_leaves_normal_ts_unchanged() {
+        let bytes = vec![0x47, 0x40, 0x11, 0x10, 0x00];
+
+        let stripped = normalize_hls_segment(bytes.clone());
+
+        assert_eq!(stripped, bytes);
+    }
+
+    #[test]
+    fn should_normalize_anikoto_fake_segment_extensions() {
+        assert!(should_normalize_hls_segment(
+            "https://cdn.test/anime/id/hash/seg-1-f2-v1-a1.jpg",
+            "image/jpeg"
+        ));
+        assert!(should_normalize_hls_segment(
+            "https://cdn.test/anime/id/hash/seg-2-f2-v1-a1.html",
+            "text/html"
+        ));
+    }
+
+    #[test]
+    fn sniff_obfuscated_video_type_detects_legacy_ts_downloads() {
+        assert_eq!(sniff_decrypted_video_type(&[0x47, 0x40, 0x00, 0x10]), "video/mp2t");
+        assert_eq!(sniff_decrypted_video_type(&[0, 0, 0, 32, b'f', b't', b'y', b'p']), "video/mp4");
+    }
+
+    #[tokio::test]
+    async fn detects_obfuscated_mpeg_ts_files() {
+        let mut bytes = vec![0x47, 0x40, 0x00, 0x10, 0x00, 0x00];
+        obfuscation::xor_transform(&mut bytes, 0);
+
+        let path = std::env::temp_dir().join(format!(
+            "otaku-legacy-ts-{}.otaku",
+            std::process::id()
+        ));
+        tokio::fs::write(&path, bytes).await.unwrap();
+
+        assert!(is_obfuscated_mpeg_ts_file(&path).await);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
 }

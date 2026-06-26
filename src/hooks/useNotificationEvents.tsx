@@ -82,6 +82,10 @@ function getToastIcon(type: NotificationType): string {
   }
 }
 
+function isReleaseSummaryNotification(notification: Notification): boolean {
+  return notification.source === 'release' && notification.metadata?.is_summary === true
+}
+
 interface UseNotificationEventsReturn {
   /** Load notifications from backend */
   loadNotifications: () => Promise<void>
@@ -175,6 +179,10 @@ export function useNotificationEvents(): UseNotificationEventsReturn {
 
         // Add to store (uses the current store state)
         useNotificationStore.getState().addNotification(notification)
+
+        if (isReleaseSummaryNotification(notification)) {
+          return
+        }
 
         // On mobile, send a system notification instead of in-app toast
         if (isMobile()) {

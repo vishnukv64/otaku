@@ -45,13 +45,23 @@ function getSummary(group: ReleaseGroup): string {
   return `${group.totalNewReleases} ${noun}${group.totalNewReleases === 1 ? '' : 's'} waiting${latest}`
 }
 
+export function isReleaseSummaryNotification(notification: Notification): boolean {
+  return notification.source === 'release' && notification.metadata?.is_summary === true
+}
+
+function isPerTitleReleaseNotification(notification: Notification): boolean {
+  return notification.source === 'release' && !isReleaseSummaryNotification(notification)
+}
+
 export function groupReleaseNotifications(
   notifications: Notification[],
-  coverUrls: Record<string, string> = {},
+  coverUrls: Record<string, string> = {}
 ): ReleaseGroup[] {
   const groups = new Map<string, ReleaseGroup>()
 
   for (const notification of notifications) {
+    if (!isPerTitleReleaseNotification(notification)) continue
+
     const mediaId = (notification.metadata?.media_id as string | undefined) ?? null
     const mediaTitle =
       (notification.metadata?.media_title as string | undefined) ??
@@ -69,7 +79,9 @@ export function groupReleaseNotifications(
         ? notification.metadata.current_number
         : null
     const newReleases =
-      typeof notification.metadata?.new_releases === 'number' ? notification.metadata.new_releases : 1
+      typeof notification.metadata?.new_releases === 'number'
+        ? notification.metadata.new_releases
+        : 1
 
     const existing = groups.get(key)
     if (existing) {
@@ -208,7 +220,9 @@ export function ReleaseRadarGroupCard({
                   key={notification.id}
                   className="rounded bg-white/[0.03] px-3 py-2 text-[0.74rem] text-[var(--color-text-secondary)]"
                 >
-                  <div className="font-medium text-[var(--color-text-primary)]">{notification.title}</div>
+                  <div className="font-medium text-[var(--color-text-primary)]">
+                    {notification.title}
+                  </div>
                   {notification.message && <div className="mt-0.5">{notification.message}</div>}
                 </div>
               ))}

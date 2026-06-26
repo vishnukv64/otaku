@@ -32,10 +32,15 @@ interface DownloadPageContentProps {
   onNavigateAway?: () => void
 }
 
+interface DisplayDownloadProgress extends DownloadProgress {
+  display_total_bytes?: number
+  display_total_estimated?: boolean
+}
+
 interface GroupedDownloads {
   mediaId: string
   mediaTitle: string
-  downloads: DownloadProgress[]
+  downloads: DisplayDownloadProgress[]
 }
 
 interface GroupedChapterDownloads {
@@ -44,12 +49,71 @@ interface GroupedChapterDownloads {
   downloads: ChapterDownloadWithTitle[]
 }
 
+const MIN_ACTIVE_TOTAL_ESTIMATE_BYTES = 1024 * 1024
+
+function withStableActiveDisplayTotal(
+  download: DownloadProgress,
+  previous?: DisplayDownloadProgress
+): DisplayDownloadProgress {
+  const isActive = download.status === 'downloading' || download.status === 'paused'
+  if (!isActive || download.total_bytes > download.downloaded_bytes) {
+    return download
+  }
+
+  if (
+    previous?.display_total_estimated &&
+    previous.display_total_bytes &&
+    previous.display_total_bytes > download.downloaded_bytes
+  ) {
+    return {
+      ...download,
+      display_total_bytes: previous.display_total_bytes,
+      display_total_estimated: true,
+    }
+  }
+
+  if (
+    download.downloaded_bytes < MIN_ACTIVE_TOTAL_ESTIMATE_BYTES ||
+    download.percentage <= 0 ||
+    download.percentage >= 100
+  ) {
+    return download
+  }
+
+  const estimatedTotal = Math.ceil(download.downloaded_bytes / (download.percentage / 100))
+  if (!Number.isFinite(estimatedTotal) || estimatedTotal <= download.downloaded_bytes) {
+    return download
+  }
+
+  return {
+    ...download,
+    display_total_bytes: estimatedTotal,
+    display_total_estimated: true,
+  }
+}
+
+function displayTotalBytes(download: DisplayDownloadProgress): number {
+  return Math.max(
+    download.display_total_bytes ?? 0,
+    download.total_bytes,
+    download.downloaded_bytes
+  )
+}
+
+function withStableActiveDisplayTotals(
+  downloads: DownloadProgress[],
+  previousDownloads: DisplayDownloadProgress[] = []
+): DisplayDownloadProgress[] {
+  const previousById = new Map(previousDownloads.map(download => [download.id, download]))
+  return downloads.map(download => withStableActiveDisplayTotal(download, previousById.get(download.id)))
+}
+
 /**
  * Standalone download content — no modal wrapper, no backdrop, no fixed positioning.
  * Used directly by the /downloads route and mounted inside DownloadManager's modal shell.
  */
 export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps) {
-  const [downloads, setDownloads] = useState<DownloadProgress[]>([])
+  const [downloads, setDownloads] = useState<DisplayDownloadProgress[]>([])
   const [chapterDownloads, setChapterDownloads] = useState<ChapterDownloadWithTitle[]>([])
   const [loading, setLoading] = useState(false)
   const [totalStorage, setTotalStorage] = useState(0)
@@ -79,7 +143,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   useEffect(() => {
     let isMounted = true
     let unlisten: UnlistenFn | null = null
-    const downloadsMap = new Map<string, DownloadProgress>()
+    const downloadsMap = new Map<string, DisplayDownloadProgress>()
     const chapterDownloadsMap = new Map<string, ChapterDownloadWithTitle>()
 
     const fetchInitialDownloads = async () => {
@@ -91,9 +155,9 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         ])
 
         if (isMounted) {
-          downloadsList.forEach(d => downloadsMap.set(d.id, d))
+          downloadsList.forEach(d => downloadsMap.set(d.id, withStableActiveDisplayTotal(d)))
           chaptersList.forEach(d => chapterDownloadsMap.set(d.id, d))
-          setDownloads(downloadsList)
+          setDownloads(Array.from(downloadsMap.values()))
           setChapterDownloads(chaptersList)
 
           if (downloadsList.length > 0 || chaptersList.length > 0) {
@@ -129,7 +193,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         if (!isMounted) return
 
         const progress = event.payload
-        downloadsMap.set(progress.id, progress)
+        downloadsMap.set(progress.id, withStableActiveDisplayTotal(progress, downloadsMap.get(progress.id)))
         setDownloads(Array.from(downloadsMap.values()))
 
         // Update storage when a download completes
@@ -204,7 +268,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       await cancelDownload(downloadId)
       // Refresh downloads
       const result = await listDownloads()
-      setDownloads(result)
+      setDownloads(withStableActiveDisplayTotals(result, downloads))
       notifySuccess('Download Cancelled', `Cancelled ${displayName}`, mediaMeta(download?.media_id))
     } catch (error) {
       console.error('Failed to cancel download:', error)
@@ -255,7 +319,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         listDownloads(),
         getTotalStorageUsed()
       ])
-      setDownloads(downloadsList)
+      setDownloads(withStableActiveDisplayTotals(downloadsList, downloads))
       setTotalStorage(storage)
       notifySuccess('Download Deleted', `Deleted "${cleanFilename}"`, mediaMeta(download?.media_id))
     } catch (error) {
@@ -285,7 +349,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         listDownloads(),
         listAllChapterDownloads(),
       ])
-      setDownloads(downloadsList)
+      setDownloads(withStableActiveDisplayTotals(downloadsList, downloads))
       setChapterDownloads(chaptersList)
       notifySuccess('Downloads Cleared', `Cleared ${completedCount} completed download(s)`)
     } catch (error) {
@@ -315,7 +379,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         listDownloads(),
         listAllChapterDownloads(),
       ])
-      setDownloads(downloadsList)
+      setDownloads(withStableActiveDisplayTotals(downloadsList, downloads))
       setChapterDownloads(chaptersList)
       notifySuccess('Downloads Cleared', `Cleared ${failedCount} failed download(s)`)
     } catch (error) {
@@ -359,7 +423,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         listDownloads(),
         getTotalStorageUsed()
       ])
-      setDownloads(downloadsList)
+      setDownloads(withStableActiveDisplayTotals(downloadsList, downloads))
       setTotalStorage(storage)
 
       notifySuccess(mediaTitle, `Deleted ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''}`, mediaMeta(mediaId))
@@ -460,7 +524,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     try {
       await Promise.all(activeDownloads.map(d => pauseDownload(d.id)))
       const downloadsList = await listDownloads()
-      setDownloads(downloadsList)
+      setDownloads(withStableActiveDisplayTotals(downloadsList, downloads))
       notifySuccess('Downloads Paused', `Paused ${activeDownloads.length} download(s)`)
     } catch {
       notifyError('Pause Failed', 'Failed to pause some downloads')
@@ -473,7 +537,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     try {
       await Promise.all(pausedDownloads.map(d => resumeDownload(d.id)))
       const downloadsList = await listDownloads()
-      setDownloads(downloadsList)
+      setDownloads(withStableActiveDisplayTotals(downloadsList, downloads))
       notifySuccess('Downloads Resumed', `Resumed ${pausedDownloads.length} download(s)`)
     } catch {
       notifyError('Resume Failed', 'Failed to resume some downloads')
@@ -736,7 +800,8 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
           {/* Anime groups */}
           {filteredAnimeGroups.map((group) => {
             const isCollapsed = collapsedGroups.has(group.mediaId)
-            const groupTotalSize = group.downloads.reduce((sum, d) => sum + Math.max(d.total_bytes, d.downloaded_bytes), 0)
+            const groupTotalSize = group.downloads.reduce((sum, d) => sum + displayTotalBytes(d), 0)
+            const groupTotalEstimated = group.downloads.some(d => d.display_total_estimated)
             const downloadingCount = group.downloads.filter(d => d.status === 'downloading').length
             const grpFailedCount = group.downloads.filter(d => d.status === 'failed').length
             const hasFailed = grpFailedCount > 0
@@ -763,7 +828,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                     <div className="flex-1 text-left min-w-0">
                       <div className="text-[0.95rem] font-semibold truncate">{group.mediaTitle}</div>
                       <div className="flex items-center gap-2 text-[0.8rem] text-[var(--color-text-muted)] mt-0.5 flex-wrap">
-                        <span>{formatBytes(groupTotalSize)}</span>
+                        <span>{groupTotalEstimated ? '~' : ''}{formatBytes(groupTotalSize)}</span>
                         <div className="w-[3px] h-[3px] rounded-full bg-[var(--color-text-dim)] flex-shrink-0" />
                         <span>{group.downloads.length} episode{group.downloads.length !== 1 ? 's' : ''}</span>
                         {downloadingCount > 0 && (
@@ -985,7 +1050,7 @@ function DownloadItem({
   extractQuality,
   formatBytes,
 }: {
-  download: DownloadProgress
+  download: DisplayDownloadProgress
   onCancel: (id: string) => void
   onDelete: (id: string, filename: string) => void
   onPause: (id: string) => void
@@ -995,9 +1060,9 @@ function DownloadItem({
   formatBytes: (bytes: number) => string
 }) {
   const formatEta = (dl: DownloadProgress): string | null => {
-    if (dl.speed <= 0 || dl.total_bytes <= 0) return null
-    const remaining = dl.total_bytes - dl.downloaded_bytes
-    if (remaining <= 0) return null
+    const totalBytes = displayTotalBytes(dl)
+    if (dl.speed <= 0 || totalBytes <= dl.downloaded_bytes) return null
+    const remaining = totalBytes - dl.downloaded_bytes
     const secs = Math.ceil(remaining / dl.speed)
     if (secs < 60) return `~${secs}s remaining`
     if (secs < 3600) return `~${Math.ceil(secs / 60)} min remaining`
@@ -1008,6 +1073,11 @@ function DownloadItem({
 
   const quality = extractQuality(download.filename)
   const isFailed = download.status === 'failed'
+  const totalBytes = displayTotalBytes(download)
+  const hasKnownTotal = totalBytes > download.downloaded_bytes || download.status === 'completed'
+  const totalPrefix = download.display_total_estimated ? '~' : ''
+  const speedText = download.speed > 0 ? `${formatBytes(download.speed)}/s` : null
+  const etaText = formatEta(download)
 
   return (
     <div className={`group flex items-center gap-3.5 py-3 px-[18px] pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}>
@@ -1031,8 +1101,10 @@ function DownloadItem({
           )}
 
           {/* Size */}
-          {download.total_bytes > 0 && (
-            <span className="text-[0.8rem] text-[var(--color-text-muted)]">{formatBytes(download.total_bytes)}</span>
+          {totalBytes > 0 && (
+            <span className="text-[0.8rem] text-[var(--color-text-muted)]">
+              {totalPrefix}{formatBytes(totalBytes)}
+            </span>
           )}
 
           {/* Status badge */}
@@ -1090,8 +1162,10 @@ function DownloadItem({
               </div>
             </div>
             <div className="font-mono text-[0.68rem] text-[var(--color-text-muted)] mt-0.5">
-              {formatBytes(download.downloaded_bytes)} / {formatBytes(download.total_bytes)}
-              {formatEta(download) && <span className="ml-2">{formatEta(download)}</span>}
+              {formatBytes(download.downloaded_bytes)}
+              {hasKnownTotal && ` / ${totalPrefix}${formatBytes(totalBytes)}`}
+              {speedText && <span className="ml-2">{speedText}</span>}
+              {etaText && <span className="ml-2">{etaText}</span>}
             </div>
           </div>
         )}

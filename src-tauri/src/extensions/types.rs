@@ -62,6 +62,12 @@ pub struct SearchResult {
     /// Genres for NSFW filtering
     #[serde(default)]
     pub genres: Option<Vec<String>>,
+    /// Native/romaji title from providers that expose it in search results.
+    #[serde(default)]
+    pub native_name: Option<String>,
+    /// Provider-side title aliases used for cross-provider matching.
+    #[serde(default)]
+    pub title_synonyms: Option<Vec<String>>,
     /// MAL rank (from Jikan)
     #[serde(default)]
     pub rank: Option<i32>,
@@ -187,6 +193,8 @@ pub struct VideoSource {
     pub resolution: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
+    #[serde(default, alias = "audioType", skip_serializing_if = "Option::is_none")]
+    pub audio_type: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<Subtitle>,
 }

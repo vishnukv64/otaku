@@ -14,11 +14,11 @@
  * - Keyboard shortcuts hint (auto-fades)
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
 import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
-import type { VideoSource } from '@/types/extension'
+import type { Subtitle, VideoSource } from '@/types/extension'
 import {
   saveWatchProgress,
   deleteEpisodeDownload,
@@ -26,7 +26,7 @@ import {
   type VideoServerUrls,
 } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
-import { usePlayerStore } from '@/store/playerStore'
+import { usePlayerStore, type SubtitleFontFamily } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { usePipStore } from '@/store/pipStore'
 import { notifySuccess } from '@/utils/notify'
@@ -39,16 +39,122 @@ import {
   type QualityPreference,
 } from '@/utils/pickSource'
 
+type AudioMode = 'sub' | 'dub'
+interface ParsedSubtitleCue {
+  start: number
+  end: number
+  text: string
+}
+
+const subtitleFontFamilies: Record<SubtitleFontFamily, string> = {
+  system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  inter: "'Inter', system-ui, sans-serif",
+  display: "'Space Grotesk', 'Inter', system-ui, sans-serif",
+  mono: "'JetBrains Mono', ui-monospace, monospace",
+  serif: "Georgia, 'Times New Roman', serif",
+}
+
+function disableNativeTextTracks(video: HTMLVideoElement | null) {
+  if (!video) return
+  Array.from(video.textTracks).forEach((track) => {
+    track.mode = 'disabled'
+  })
+}
+
 // Helper to create proxy URL for HLS streaming via embedded video server
-function createProxyUrl(videoServer: VideoServerUrls, url: string): string {
-  return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}`
+function createProxyUrl(videoServer: VideoServerUrls, url: string, referrer?: string): string {
+  const referrerParam = referrer ? `&referrer=${encodeURIComponent(referrer)}` : ''
+  return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}${referrerParam}`
 }
 
 // Helper to create HLS manifest rewriting URL (rewrites segment URLs to go through /proxy)
 // Used for native HLS playback on Android where HLS.js MSE fails
-function createHlsProxyUrl(videoServer: VideoServerUrls, m3u8Url: string): string {
+function createHlsProxyUrl(
+  videoServer: VideoServerUrls,
+  m3u8Url: string,
+  referrer?: string
+): string {
   const baseUrl = videoServer.proxy_base_url.replace(/\/proxy$/, '')
-  return `${baseUrl}/hls?token=${videoServer.token}&url=${encodeURIComponent(m3u8Url)}`
+  const referrerParam = referrer ? `&referrer=${encodeURIComponent(referrer)}` : ''
+  return `${baseUrl}/hls?token=${videoServer.token}&url=${encodeURIComponent(m3u8Url)}${referrerParam}`
+}
+
+function createPlayableHlsUrl(
+  videoServer: VideoServerUrls,
+  m3u8Url: string,
+  referrer?: string
+): string {
+  if (m3u8Url.startsWith(`http://127.0.0.1:${videoServer.port}/`)) {
+    return m3u8Url
+  }
+  return createHlsProxyUrl(videoServer, m3u8Url, referrer)
+}
+
+function sourceAudioMode(source: VideoSource): AudioMode | null {
+  if (!source.audio_type) return null
+  return source.audio_type.toLowerCase().includes('dub') ? 'dub' : 'sub'
+}
+
+function parseSubtitleTime(value: string): number {
+  const parts = value.trim().replace(',', '.').split(':')
+  const seconds = Number.parseFloat(parts.pop() || '0')
+  const minutes = Number.parseFloat(parts.pop() || '0')
+  const hours = Number.parseFloat(parts.pop() || '0')
+  return hours * 3600 + minutes * 60 + seconds
+}
+
+function cleanSubtitleText(value: string): string {
+  let withoutTags = ''
+  let insideTag = false
+
+  for (const char of value) {
+    if (char === '<') {
+      insideTag = true
+      continue
+    }
+    if (char === '>') {
+      insideTag = false
+      continue
+    }
+    if (!insideTag) {
+      withoutTags += char
+    }
+  }
+
+  return withoutTags
+    .replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (entity, value) => {
+      const normalized = value.toLowerCase()
+      if (normalized === 'amp') return '&'
+      if (normalized === 'lt') return '<'
+      if (normalized === 'gt') return '>'
+      if (normalized === 'quot') return '"'
+      if (normalized === 'apos') return "'"
+      if (normalized === 'nbsp') return ' '
+
+      const codePoint = normalized.startsWith('#x')
+        ? Number.parseInt(normalized.slice(2), 16)
+        : Number.parseInt(normalized.slice(1), 10)
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity
+    })
+    .trim()
+}
+
+function parseVtt(text: string): ParsedSubtitleCue[] {
+  return text
+    .replace(/^\uFEFF/, '')
+    .split(/\n\s*\n/)
+    .flatMap((block) => {
+      const lines = block.trim().split(/\r?\n/).filter(Boolean)
+      const timeIndex = lines.findIndex((line) => line.includes('-->'))
+      if (timeIndex === -1) return []
+      const [startRaw, endRaw] = lines[timeIndex]!.split('-->').map(
+        (part) => part.trim().split(/\s+/)[0]
+      )
+      if (!startRaw || !endRaw) return []
+      const cueText = cleanSubtitleText(lines.slice(timeIndex + 1).join('\n'))
+      if (!cueText) return []
+      return [{ start: parseSubtitleTime(startRaw), end: parseSubtitleTime(endRaw), text: cueText }]
+    })
 }
 
 interface Episode {
@@ -67,12 +173,14 @@ interface VideoPlayerProps {
   currentEpisode?: number
   totalEpisodes?: number
   episodes?: Episode[]
+  subtitles?: Subtitle[]
   onNextEpisode?: () => void
   onPreviousEpisode?: () => void
   onEpisodeSelect?: (episodeId: string) => void
   onGoBack?: () => void
   onProgress?: (time: number) => void
   initialTime?: number
+  disableSeeking?: boolean
   autoPlay?: boolean
   posterUrl?: string
 }
@@ -85,12 +193,14 @@ export function VideoPlayer({
   episodeTitle,
   currentEpisode,
   episodes,
+  subtitles = [],
   onNextEpisode,
   onPreviousEpisode,
   onEpisodeSelect,
   onGoBack,
   onProgress,
   initialTime = 0,
+  disableSeeking = false,
   autoPlay = true,
   posterUrl,
 }: VideoPlayerProps) {
@@ -187,26 +297,65 @@ export function VideoPlayer({
   // Persisted to playerStore.preferredQuality; parsed defensively to tolerate
   // legacy string values ("720p", "1080p") written by pre-v1.3 builds.
   const [qualityPref, setQualityPref] = useState<QualityPreference>(
-    parseQualityPreference(playerSettings.preferredQuality),
+    parseQualityPreference(playerSettings.preferredQuality)
   )
   // HLS variant heights discovered at playback time (adaptive sources only).
   // Empty for fixed-MP4 sources; those expose resolutions via sources[] instead.
   const [hlsLevels, setHlsLevels] = useState<number[]>([])
   const [videoServer, setVideoServer] = useState<VideoServerUrls | null>(null)
 
-  // New mock-matching UI state
-  const [showSidebar, setShowSidebar] = useState(!isMobile()) // Open by default on desktop
+  // Start with full-width video; users can open the episode rail when needed.
+  const [showSidebar, setShowSidebar] = useState(false)
   const [showShortcutsHint, setShowShortcutsHint] = useState(true)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false)
+  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false)
   const [serverMenuOpen, setServerMenuOpen] = useState(false)
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
+  const [selectedSubtitleUrl, setSelectedSubtitleUrl] = useState('off')
+  const [subtitleCues, setSubtitleCues] = useState<ParsedSubtitleCue[]>([])
+  const [subtitleClock, setSubtitleClock] = useState(0)
 
   // Progress bar drag state
   const [isDragging, setIsDragging] = useState(false)
 
+  const [selectedAudioMode, setSelectedAudioMode] = useState<AudioMode>('sub')
+  const audioModes = useMemo(() => {
+    const out: AudioMode[] = []
+    for (const source of sources) {
+      const mode = sourceAudioMode(source)
+      if (mode && !out.includes(mode)) out.push(mode)
+    }
+    return out
+  }, [sources])
+  const playbackSources = useMemo(
+    () =>
+      audioModes.length > 0
+        ? sources.filter((source) => {
+            const mode = sourceAudioMode(source)
+            return !mode || mode === selectedAudioMode
+          })
+        : sources,
+    [sources, audioModes, selectedAudioMode]
+  )
+  const sourceSetKey = useMemo(
+    () => playbackSources.map((source) => `${source.server}:${source.url}`).join('|'),
+    [playbackSources]
+  )
+
+  useEffect(() => {
+    if (audioModes.length > 0 && !audioModes.includes(selectedAudioMode)) {
+      setSelectedAudioMode(audioModes[0]!)
+    }
+  }, [audioModes, selectedAudioMode])
+
+  useEffect(() => {
+    setSelectedServer(0)
+  }, [episodeId, sourceSetKey])
+
   // Group sources by server (memoized to prevent unnecessary recalculations)
   const serverGroups = useMemo(() => {
-    return sources.reduce(
+    return playbackSources.reduce(
       (acc, source, index) => {
         const serverName = source.server || `Server ${index + 1}`
         if (!acc[serverName]) {
@@ -217,7 +366,7 @@ export function VideoPlayer({
       },
       {} as Record<string, Array<VideoSource & { originalIndex: number }>>
     )
-  }, [sources])
+  }, [playbackSources])
 
   const servers = useMemo(() => Object.keys(serverGroups), [serverGroups])
   const currentServerSources = useMemo(
@@ -231,23 +380,125 @@ export function VideoPlayer({
   const currentSource = useMemo(() => {
     const serverName = servers[selectedServer]
     if (!serverName) return undefined
-    return pickSource(sources, serverName, qualityPref)
-  }, [sources, servers, selectedServer, qualityPref])
+    return pickSource(playbackSources, serverName, qualityPref)
+  }, [playbackSources, servers, selectedServer, qualityPref])
 
   // Fixed-variant resolutions available on the currently selected server.
   // UI uses this to render quality options for non-HLS sources; adaptive
   // HLS servers rely on hlsLevels populated by the MANIFEST_PARSED event.
   const fixedResolutions = useMemo(
-    () => (servers[selectedServer] ? resolutionsForServer(sources, servers[selectedServer]) : []),
-    [sources, servers, selectedServer],
+    () =>
+      servers[selectedServer] ? resolutionsForServer(playbackSources, servers[selectedServer]) : [],
+    [playbackSources, servers, selectedServer]
   )
+
+  const subtitleTracks = useMemo(() => {
+    const seen = new Set<string>()
+    const out: Subtitle[] = []
+    const candidateSubtitles = currentSource?.subtitles?.length
+      ? currentSource.subtitles
+      : subtitles
+    for (const sub of candidateSubtitles) {
+      const label = sub.label || sub.language || ''
+      if (!sub.url || /thumbnail/i.test(`${label} ${sub.url}`)) continue
+      const key = label.toLowerCase().trim() || sub.url
+      if (seen.has(key)) continue
+      seen.add(key)
+      const shouldProxySubtitle =
+        videoServer &&
+        /^https?:\/\//i.test(sub.url) &&
+        !sub.url.startsWith(`http://127.0.0.1:${videoServer.port}/`)
+      out.push({
+        ...sub,
+        url: shouldProxySubtitle
+          ? createProxyUrl(videoServer, sub.url, currentSource?.referrer)
+          : sub.url,
+      })
+    }
+    return out
+  }, [currentSource?.subtitles, currentSource?.referrer, subtitles, videoServer])
+
+  useEffect(() => {
+    if (selectedServer >= servers.length) setSelectedServer(0)
+  }, [selectedServer, servers.length])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const disable = () => disableNativeTextTracks(video)
+    disable()
+    video.textTracks.addEventListener?.('addtrack', disable)
+    video.textTracks.addEventListener?.('change', disable)
+
+    return () => {
+      video.textTracks.removeEventListener?.('addtrack', disable)
+      video.textTracks.removeEventListener?.('change', disable)
+    }
+  }, [currentSource?.url, selectedSubtitleUrl])
+
+  useEffect(() => {
+    if (
+      selectedSubtitleUrl !== 'off' &&
+      !subtitleTracks.some((track) => track.url === selectedSubtitleUrl)
+    ) {
+      setSelectedSubtitleUrl('off')
+    }
+  }, [subtitleTracks, selectedSubtitleUrl])
+
+  const selectedSubtitleLabel = useMemo(() => {
+    if (selectedSubtitleUrl === 'off') return 'CC Off'
+    const track = subtitleTracks.find((sub) => sub.url === selectedSubtitleUrl)
+    return track?.label || track?.language || 'Subtitles'
+  }, [selectedSubtitleUrl, subtitleTracks])
+
+  useEffect(() => {
+    let cancelled = false
+    setSubtitleCues([])
+    if (selectedSubtitleUrl === 'off') return
+
+    fetch(selectedSubtitleUrl)
+      .then((response) => response.text())
+      .then((text) => {
+        if (!cancelled) setSubtitleCues(parseVtt(text))
+      })
+      .catch((err) => console.warn('[VideoPlayer] Failed to load subtitles:', err))
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSubtitleUrl])
+
+  const activeSubtitleText = useMemo(() => {
+    if (selectedSubtitleUrl === 'off') return ''
+    return (
+      subtitleCues.find((cue) => subtitleClock >= cue.start && subtitleClock <= cue.end)?.text || ''
+    )
+  }, [selectedSubtitleUrl, subtitleCues, subtitleClock])
+
+  useEffect(() => {
+    if (selectedSubtitleUrl === 'off') return
+    const interval = window.setInterval(() => {
+      const video = videoRef.current
+      if (video) setSubtitleClock(video.currentTime)
+    }, 200)
+    return () => window.clearInterval(interval)
+  }, [selectedSubtitleUrl])
 
   // Unified quality options exposed to the UI. Label '' is the 'Auto' entry.
   const availableQualities = useMemo(() => {
     const out = ['Auto']
     const seen = new Set<number>()
-    for (const h of hlsLevels) if (!seen.has(h)) { seen.add(h); out.push(`${h}p`) }
-    for (const h of fixedResolutions) if (!seen.has(h)) { seen.add(h); out.push(`${h}p`) }
+    for (const h of hlsLevels)
+      if (!seen.has(h)) {
+        seen.add(h)
+        out.push(`${h}p`)
+      }
+    for (const h of fixedResolutions)
+      if (!seen.has(h)) {
+        seen.add(h)
+        out.push(`${h}p`)
+      }
     return out
   }, [hlsLevels, fixedResolutions])
 
@@ -261,8 +512,9 @@ export function VideoPlayer({
   const playbackSpeedOptions = useMemo(() => [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], [])
 
   const selectedPlaybackSpeedLabel = useMemo(
-    () => `${playerSettings.playbackSpeed.toFixed(playerSettings.playbackSpeed % 1 === 0 ? 1 : 2)}x`,
-    [playerSettings.playbackSpeed],
+    () =>
+      `${playerSettings.playbackSpeed.toFixed(playerSettings.playbackSpeed % 1 === 0 ? 1 : 2)}x`,
+    [playerSettings.playbackSpeed]
   )
 
   // Load video server info on mount
@@ -331,19 +583,13 @@ export function VideoPlayer({
             levelLoadingMaxRetry: 3,
             fragLoadingTimeOut: 60000, // 60 seconds for fragments (large segments)
             fragLoadingMaxRetry: 5,
-            // Use xhrSetup to proxy all requests through video server
-            xhrSetup: (xhr, url) => {
-              // Rewrite URL to go through our video server proxy
-              const proxyUrl = createProxyUrl(videoServer, url)
-              xhr.open('GET', proxyUrl, true)
-            },
           })
 
           hlsRef.current = hls
 
-          // Load the proxied URL
-          const proxyUrl = createProxyUrl(videoServer, currentSource.url)
-          hls.loadSource(proxyUrl)
+          // Load the local rewritten manifest so relative variant playlists are
+          // resolved against the upstream CDN before requests hit /proxy.
+          hls.loadSource(createPlayableHlsUrl(videoServer, currentSource.url, currentSource.referrer))
           hls.attachMedia(video)
 
           hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
@@ -365,13 +611,13 @@ export function VideoPlayer({
             } else if (qualityPref === 'best') {
               const maxIdx = data.levels.reduce(
                 (best, lvl, i) => (lvl.height > data.levels[best].height ? i : best),
-                0,
+                0
               )
               hls.currentLevel = maxIdx
             } else if (qualityPref === 'worst') {
               const minIdx = data.levels.reduce(
                 (worst, lvl, i) => (lvl.height < data.levels[worst].height ? i : worst),
-                0,
+                0
               )
               hls.currentLevel = minIdx
             } else {
@@ -393,7 +639,9 @@ export function VideoPlayer({
             if (data.fatal) {
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
-                  // If it's a manifest error, this is not an HLS stream - fall back to direct playback
+                  // If HLS.js cannot parse/load the playlist, let WebKit try
+                  // native HLS with the rewritten manifest. Do not proxy an
+                  // m3u8 through /proxy as direct video; it just buffers.
                   if (
                     (data.details === 'manifestLoadError' ||
                       data.details === 'manifestParsingError') &&
@@ -402,9 +650,11 @@ export function VideoPlayer({
                     hls.destroy()
                     hlsRef.current = null
 
-                    // Use video server proxy for direct video playback
-                    const proxyUrl = createProxyUrl(videoServer, currentSource.url)
-                    video.src = proxyUrl
+                    video.src = createPlayableHlsUrl(
+                      videoServer,
+                      currentSource.url,
+                      currentSource.referrer
+                    )
                     setLoading(false)
 
                     if (autoPlay) {
@@ -429,7 +679,11 @@ export function VideoPlayer({
                     hls.destroy()
                     hlsRef.current = null
 
-                    const hlsUrl = createHlsProxyUrl(videoServer, currentSource.url)
+                    const hlsUrl = createPlayableHlsUrl(
+                      videoServer,
+                      currentSource.url,
+                      currentSource.referrer
+                    )
                     video.src = hlsUrl
                     setError(null)
 
@@ -459,7 +713,11 @@ export function VideoPlayer({
                     hls.destroy()
                     hlsRef.current = null
 
-                    const hlsUrl2 = createHlsProxyUrl(videoServer, currentSource.url)
+                    const hlsUrl2 = createPlayableHlsUrl(
+                      videoServer,
+                      currentSource.url,
+                      currentSource.referrer
+                    )
                     video.src = hlsUrl2
                     setError(null)
 
@@ -491,10 +749,7 @@ export function VideoPlayer({
           // so segment URLs go through our proxy (which adds Referer headers).
           // Note: On Android, this branch is only reached if Hls.isSupported() is false
           // (rare). The primary Android path is HLS.js with error-handler fallback above.
-          const hlsUrl = isAndroid()
-            ? createHlsProxyUrl(videoServer, currentSource.url)
-            : createProxyUrl(videoServer, currentSource.url)
-          video.src = hlsUrl
+          video.src = createPlayableHlsUrl(videoServer, currentSource.url, currentSource.referrer)
 
           // Seek to initial time when metadata is loaded
           const handleLoadedMetadata = () => {
@@ -520,7 +775,7 @@ export function VideoPlayer({
             !currentSource.url.includes('127.0.0.1')
           ) {
             // Remote URL - proxy through video server
-            videoUrl = createProxyUrl(videoServer, currentSource.url)
+            videoUrl = createProxyUrl(videoServer, currentSource.url, currentSource.referrer)
           }
 
           video.src = videoUrl
@@ -579,10 +834,10 @@ export function VideoPlayer({
         video.load()
       }
     }
-    // currentSource?.url as a primitive dep avoids re-running when the
-    // memoized object reference changes but the URL does not.
+    // currentSource fields as primitive deps avoid re-running when the
+    // memoized object reference changes but playback inputs do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServer, sources, videoServer, currentSource?.url])
+  }, [selectedServer, sources, videoServer, currentSource?.url, currentSource?.referrer])
 
   // Close MiniPlayer when VideoPlayer starts playing (user navigated to /watch manually)
   useEffect(() => {
@@ -622,12 +877,18 @@ export function VideoPlayer({
 
     navigator.mediaSession.setActionHandler('play', () => video?.play().catch(() => {}))
     navigator.mediaSession.setActionHandler('pause', () => video?.pause())
-    navigator.mediaSession.setActionHandler('seekbackward', () => {
-      if (video) video.currentTime = Math.max(0, video.currentTime - 10)
-    })
-    navigator.mediaSession.setActionHandler('seekforward', () => {
-      if (video) video.currentTime = Math.min(video.duration || 0, video.currentTime + 10)
-    })
+    navigator.mediaSession.setActionHandler(
+      'seekbackward',
+      disableSeeking || !video ? null : () => {
+        video.currentTime = Math.max(0, video.currentTime - 10)
+      }
+    )
+    navigator.mediaSession.setActionHandler(
+      'seekforward',
+      disableSeeking || !video ? null : () => {
+        video.currentTime = Math.min(video.duration || 0, video.currentTime + 10)
+      }
+    )
     navigator.mediaSession.setActionHandler('previoustrack', () => onPreviousEpisode?.())
     navigator.mediaSession.setActionHandler('nexttrack', () => onNextEpisode?.())
 
@@ -640,7 +901,7 @@ export function VideoPlayer({
       navigator.mediaSession.setActionHandler('previoustrack', null)
       navigator.mediaSession.setActionHandler('nexttrack', null)
     }
-  }, [animeTitle, currentEpisode, onNextEpisode, onPreviousEpisode])
+  }, [animeTitle, currentEpisode, disableSeeking, onNextEpisode, onPreviousEpisode])
 
   // Video event handlers
   useEffect(() => {
@@ -651,9 +912,17 @@ export function VideoPlayer({
       setIsPlaying(true)
       setBuffering(false)
     }
+    const handlePlaying = () => {
+      setLoading(false)
+      setBuffering(false)
+    }
     const handlePause = () => setIsPlaying(false)
     const handleTimeUpdate = () => {
       const now = Date.now()
+      setSubtitleClock(video.currentTime)
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        setBuffering(false)
+      }
 
       // Throttle to max 2 updates per second to prevent frame drops
       if (now - lastTimeUpdateRef.current < 500) return
@@ -688,6 +957,7 @@ export function VideoPlayer({
     }
     const handleLoadedData = () => {
       setLoading(false)
+      setBuffering(false)
     }
     const handleProgress = () => {
       // Update buffered percentage (throttled in handleTimeUpdate now)
@@ -700,6 +970,7 @@ export function VideoPlayer({
     }
 
     video.addEventListener('play', handlePlay)
+    video.addEventListener('playing', handlePlaying)
     video.addEventListener('pause', handlePause)
     video.addEventListener('timeupdate', handleTimeUpdate)
     video.addEventListener('durationchange', handleDurationChange)
@@ -707,11 +978,13 @@ export function VideoPlayer({
     video.addEventListener('ended', handleEnded)
     video.addEventListener('waiting', handleWaiting)
     video.addEventListener('canplay', handleCanPlay)
+    video.addEventListener('canplaythrough', handleCanPlay)
     video.addEventListener('loadeddata', handleLoadedData)
     video.addEventListener('progress', handleProgress)
 
     return () => {
       video.removeEventListener('play', handlePlay)
+      video.removeEventListener('playing', handlePlaying)
       video.removeEventListener('pause', handlePause)
       video.removeEventListener('timeupdate', handleTimeUpdate)
       video.removeEventListener('durationchange', handleDurationChange)
@@ -719,6 +992,7 @@ export function VideoPlayer({
       video.removeEventListener('ended', handleEnded)
       video.removeEventListener('waiting', handleWaiting)
       video.removeEventListener('canplay', handleCanPlay)
+      video.removeEventListener('canplaythrough', handleCanPlay)
       video.removeEventListener('loadeddata', handleLoadedData)
       video.removeEventListener('progress', handleProgress)
     }
@@ -796,21 +1070,24 @@ export function VideoPlayer({
       return
     }
 
-    const currentSource = currentServerSources[0]
-    if (!currentSource) {
+    const pipSource = currentSource || currentServerSources[0]
+    if (!pipSource) {
       console.warn('[VideoPlayer] PiP blocked - no current source')
       return
     }
 
-    const isHls = currentSource.url.toLowerCase().includes('.m3u8')
+    const isHls = pipSource.url.toLowerCase().includes('.m3u8')
     console.log('[VideoPlayer] Entering PiP:', {
-      sourceUrl: currentSource.url,
+      sourceUrl: pipSource.url,
       isHls,
       currentTime: video.currentTime,
     })
 
     enterPip({
-      sourceUrl: currentSource.url,
+      sourceUrl: pipSource.url,
+      sourceReferrer: pipSource.referrer,
+      sourceSubtitles: subtitleTracks,
+      sourceSubtitleUrl: selectedSubtitleUrl,
       isHls,
       sources,
       selectedServer,
@@ -1179,7 +1456,8 @@ export function VideoPlayer({
   }
 
   // Helper function to seek with proper audio sync
-  const seekToTime = (time: number) => {
+  const seekToTime = useCallback((time: number) => {
+    if (disableSeeking) return
     const video = videoRef.current
     if (!video) return
 
@@ -1205,10 +1483,11 @@ export function VideoPlayer({
     }
 
     video.addEventListener('seeked', handleSeeked)
-  }
+  }, [disableSeeking])
 
   // Handle skip with stacking - clicking multiple times accumulates the skip amount
   const handleSkip = (direction: 'forward' | 'backward') => {
+    if (disableSeeking) return
     const video = videoRef.current
     if (!video) return
 
@@ -1334,7 +1613,7 @@ export function VideoPlayer({
             playbackSpeedOptions[
               Math.min(
                 playbackSpeedOptions.length - 1,
-                playbackSpeedOptions.indexOf(playerSettings.playbackSpeed) + 1,
+                playbackSpeedOptions.indexOf(playerSettings.playbackSpeed) + 1
               )
             ] ?? playbackSpeedOptions[playbackSpeedOptions.length - 1]
           )
@@ -1345,9 +1624,17 @@ export function VideoPlayer({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration, onNextEpisode, onPreviousEpisode, playerSettings.playbackSpeed, playbackSpeedOptions])
+  }, [
+    duration,
+    disableSeeking,
+    onNextEpisode,
+    onPreviousEpisode,
+    playerSettings.playbackSpeed,
+    playbackSpeedOptions,
+  ])
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (disableSeeking) return
     const video = videoRef.current
     if (!video) return
 
@@ -1402,13 +1689,13 @@ export function VideoPlayer({
       } else if (next === 'best') {
         const maxIdx = hls.levels.reduce(
           (best, lvl, i) => (lvl.height > hls.levels[best].height ? i : best),
-          0,
+          0
         )
         hls.currentLevel = maxIdx
       } else if (next === 'worst') {
         const minIdx = hls.levels.reduce(
           (worst, lvl, i) => (lvl.height < hls.levels[worst].height ? i : worst),
-          0,
+          0
         )
         hls.currentLevel = minIdx
       }
@@ -1420,6 +1707,12 @@ export function VideoPlayer({
   const changePlaybackSpeed = (speed: number) => {
     updatePlayerSettings({ playbackSpeed: speed })
     setSpeedMenuOpen(false)
+  }
+
+  const changeAudioMode = (mode: AudioMode) => {
+    setSelectedAudioMode(mode)
+    setSelectedServer(0)
+    setAudioMenuOpen(false)
   }
 
   const changeServer = (serverIndex: number) => {
@@ -1532,7 +1825,7 @@ export function VideoPlayer({
 
   // Progress bar drag handling
   useEffect(() => {
-    if (!isDragging) return
+    if (!isDragging || disableSeeking) return
 
     const handleMouseMove = (e: MouseEvent) => {
       const progressBar = progressBarRef.current
@@ -1562,10 +1855,14 @@ export function VideoPlayer({
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDragging, duration])
+  }, [isDragging, duration, disableSeeking, seekToTime])
 
   const mobile = isMobile()
+  const subtitleScale = Math.max(0.75, Math.min(2, (playerSettings.subtitleFontScale ?? 100) / 100))
+  const subtitleFontSize = `${(mobile ? 17.6 : 23.2) * subtitleScale}px`
+  const subtitleFontFamily =
+    subtitleFontFamilies[playerSettings.subtitleFontFamily ?? 'system'] ??
+    subtitleFontFamilies.system
 
   // Compute progress percentage
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
@@ -1651,6 +1948,27 @@ export function VideoPlayer({
           }}
         />
 
+        {activeSubtitleText && (
+          <div
+            className="absolute left-6 right-6 z-[11] pointer-events-none flex justify-center"
+            style={{ bottom: showControls || !isPlaying ? '104px' : '42px' }}
+          >
+            <div
+              className="max-w-[86%] whitespace-pre-line text-center font-semibold leading-tight text-white"
+              style={{
+                fontSize: subtitleFontSize,
+                fontFamily: subtitleFontFamily,
+                textShadow: '0 2px 4px #000, 0 0 8px #000',
+                background: 'rgba(0, 0, 0, 0.38)',
+                borderRadius: 6,
+                padding: '4px 10px',
+              }}
+            >
+              {activeSubtitleText}
+            </div>
+          </div>
+        )}
+
         {/* ── Center Play Button ────────────────────────────────── */}
         <div
           className={`absolute top-1/2 left-1/2 z-[5] flex items-center justify-center w-[72px] h-[72px] rounded-full cursor-pointer transition-all duration-200 ${
@@ -1689,7 +2007,7 @@ export function VideoPlayer({
         </div>
 
         {/* ── Skip Intro Button ─────────────────────────────────── */}
-        {currentTime > 0 && currentTime < 90 && (
+        {!disableSeeking && currentTime > 0 && currentTime < 90 && (
           <div
             className={`absolute bottom-[100px] right-6 z-10 flex items-center gap-2 py-[10px] px-5 rounded cursor-pointer transition-all duration-150 ${
               showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -1807,10 +2125,11 @@ export function VideoPlayer({
           {/* ── Progress Bar ──────────────────────────────────── */}
           <div
             ref={progressBarRef}
-            className="relative cursor-pointer mb-[14px] group/progress select-none"
+            className={`relative mb-[14px] group/progress select-none ${disableSeeking ? 'cursor-default' : 'cursor-pointer'}`}
             style={{ height: '3px', padding: '8px 0', boxSizing: 'content-box' }}
             onMouseDown={(e) => {
               e.preventDefault()
+              if (disableSeeking) return
               setIsDragging(true)
               // Seek to clicked position immediately
               const rect = e.currentTarget.getBoundingClientRect()
@@ -1821,7 +2140,7 @@ export function VideoPlayer({
             onMouseLeave={handleProgressLeave}
             onClick={(e) => {
               e.stopPropagation()
-              if (!isDragging) handleSeek(e)
+              if (!disableSeeking && !isDragging) handleSeek(e)
             }}
           >
             {/* Background track */}
@@ -1901,6 +2220,7 @@ export function VideoPlayer({
               <button
                 className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
                 onClick={() => handleSkip('backward')}
+                disabled={disableSeeking}
                 title="Rewind 10s"
               >
                 <svg
@@ -1934,6 +2254,7 @@ export function VideoPlayer({
               <button
                 className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
                 onClick={() => handleSkip('forward')}
+                disabled={disableSeeking}
                 title="Forward 10s"
               >
                 <svg
@@ -2059,6 +2380,8 @@ export function VideoPlayer({
                   }}
                   onClick={() => {
                     setQualityMenuOpen(!qualityMenuOpen)
+                    setAudioMenuOpen(false)
+                    setSubtitleMenuOpen(false)
                     setServerMenuOpen(false)
                     setSpeedMenuOpen(false)
                   }}
@@ -2148,6 +2471,8 @@ export function VideoPlayer({
                   onClick={() => {
                     setSpeedMenuOpen(!speedMenuOpen)
                     setQualityMenuOpen(false)
+                    setAudioMenuOpen(false)
+                    setSubtitleMenuOpen(false)
                     setServerMenuOpen(false)
                   }}
                   onMouseEnter={(e) => {
@@ -2204,7 +2529,8 @@ export function VideoPlayer({
                           }}
                           onClick={() => changePlaybackSpeed(speed)}
                           onMouseEnter={(e) => {
-                            if (playerSettings.playbackSpeed !== speed) e.currentTarget.style.color = 'white'
+                            if (playerSettings.playbackSpeed !== speed)
+                              e.currentTarget.style.color = 'white'
                           }}
                           onMouseLeave={(e) => {
                             if (playerSettings.playbackSpeed !== speed) {
@@ -2229,6 +2555,205 @@ export function VideoPlayer({
                 )}
               </div>
 
+              {/* Subtitle pill */}
+              {subtitleTracks.length > 0 && (
+                <div className="ctrl-pill relative">
+                  <button
+                    className="flex items-center gap-1 py-1 px-3 rounded transition-all duration-[120ms] whitespace-nowrap"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: 'rgba(255, 255, 255, 0.85)',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                    }}
+                    onClick={() => {
+                      setSubtitleMenuOpen(!subtitleMenuOpen)
+                      setQualityMenuOpen(false)
+                      setAudioMenuOpen(false)
+                      setServerMenuOpen(false)
+                      setSpeedMenuOpen(false)
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
+                      e.currentTarget.style.color = 'white'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
+                    }}
+                  >
+                    {selectedSubtitleLabel}
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  {subtitleMenuOpen && (
+                    <div
+                      className="absolute bottom-[calc(100%+8px)] right-0 min-w-[150px] max-w-[240px] rounded-lg overflow-hidden z-50"
+                      style={{
+                        background: 'rgba(0, 0, 0, 0.92)',
+                        backdropFilter: 'blur(16px)',
+                        WebkitBackdropFilter: 'blur(16px)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                        maxHeight: 'min(360px, calc(100vh - 180px))',
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {[{ url: 'off', label: 'Off', language: 'off' }, ...subtitleTracks].map(
+                        (track) => {
+                          const selected = selectedSubtitleUrl === track.url
+                          const label =
+                            track.url === 'off'
+                              ? 'Off'
+                              : track.label || track.language || 'Subtitles'
+                          return (
+                            <button
+                              key={track.url}
+                              className="w-full text-left flex items-center justify-between gap-3 transition-all duration-[120ms] hover:bg-white/[0.08]"
+                              style={{
+                                padding: '9px 14px',
+                                fontFamily: "'Inter', sans-serif",
+                                fontSize: '0.8125rem',
+                                color: selected ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => {
+                                setSelectedSubtitleUrl(track.url)
+                                setSubtitleMenuOpen(false)
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!selected) e.currentTarget.style.color = 'white'
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!selected) {
+                                  e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)'
+                                }
+                              }}
+                            >
+                              <span className="min-w-0 truncate">{label}</span>
+                              {selected && (
+                                <span
+                                  className="w-[6px] h-[6px] rounded-full flex-shrink-0"
+                                  style={{
+                                    background: '#e50914',
+                                    boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)',
+                                  }}
+                                />
+                              )}
+                            </button>
+                          )
+                        }
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Audio pill */}
+              {audioModes.length > 1 && (
+                <div className="ctrl-pill relative">
+                  <button
+                    className="flex items-center gap-1 py-1 px-3 rounded transition-all duration-[120ms] whitespace-nowrap"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: 'rgba(255, 255, 255, 0.85)',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                    }}
+                    onClick={() => {
+                      setAudioMenuOpen(!audioMenuOpen)
+                      setQualityMenuOpen(false)
+                      setSubtitleMenuOpen(false)
+                      setServerMenuOpen(false)
+                      setSpeedMenuOpen(false)
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)'
+                      e.currentTarget.style.color = 'white'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
+                    }}
+                  >
+                    {selectedAudioMode.toUpperCase()}
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  {audioMenuOpen && (
+                    <div
+                      className="absolute bottom-[calc(100%+8px)] right-0 min-w-[96px] rounded-lg overflow-hidden z-50"
+                      style={{
+                        background: 'rgba(0, 0, 0, 0.92)',
+                        backdropFilter: 'blur(16px)',
+                        WebkitBackdropFilter: 'blur(16px)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                      }}
+                    >
+                      {audioModes.map((mode) => (
+                        <button
+                          key={mode}
+                          className="w-full text-left flex items-center justify-between transition-all duration-[120ms] hover:bg-white/[0.08]"
+                          style={{
+                            padding: '9px 14px',
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: '0.8125rem',
+                            color:
+                              selectedAudioMode === mode ? '#e50914' : 'rgba(255, 255, 255, 0.65)',
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => changeAudioMode(mode)}
+                          onMouseEnter={(e) => {
+                            if (selectedAudioMode !== mode) e.currentTarget.style.color = 'white'
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedAudioMode !== mode) {
+                              e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)'
+                            }
+                          }}
+                        >
+                          {mode.toUpperCase()}
+                          {selectedAudioMode === mode && (
+                            <span
+                              className="w-[6px] h-[6px] rounded-full"
+                              style={{
+                                background: '#e50914',
+                                boxShadow: '0 0 8px rgba(229, 9, 20, 0.5)',
+                              }}
+                            />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Server pill */}
               {servers.length > 1 && (
                 <div className="ctrl-pill relative">
@@ -2245,6 +2770,8 @@ export function VideoPlayer({
                     onClick={() => {
                       setServerMenuOpen(!serverMenuOpen)
                       setQualityMenuOpen(false)
+                      setAudioMenuOpen(false)
+                      setSubtitleMenuOpen(false)
                       setSpeedMenuOpen(false)
                     }}
                     onMouseEnter={(e) => {
@@ -2342,6 +2869,7 @@ export function VideoPlayer({
                   episodeId={episodeId}
                   animeTitle={animeTitle}
                   episodeNumber={currentEpisode}
+                  subtitles={subtitles}
                 />
               )}
 
@@ -2481,15 +3009,15 @@ export function VideoPlayer({
               border: '1px solid rgba(255, 255, 255, 0.06)',
             }}
           >
-              {[
-                { key: 'K', label: 'Play' },
-                { key: 'F', label: 'Fullscreen' },
-                { key: 'M', label: 'Mute' },
-                { keys: ['\u2190', '\u2192'], label: 'Seek' },
-                { keys: ['[', ']'], label: 'Speed' },
-                { key: 'N', label: 'Next' },
-                { key: 'I', label: 'Mini' },
-              ].map((item, i) => (
+            {[
+              { key: 'K', label: 'Play' },
+              { key: 'F', label: 'Fullscreen' },
+              { key: 'M', label: 'Mute' },
+              { keys: ['\u2190', '\u2192'], label: 'Seek' },
+              { keys: ['[', ']'], label: 'Speed' },
+              { key: 'N', label: 'Next' },
+              { key: 'I', label: 'Mini' },
+            ].map((item, i) => (
               <div
                 key={i}
                 className="flex items-center gap-[5px] text-[0.65rem] text-white/35 whitespace-nowrap"
@@ -2807,8 +3335,12 @@ export function VideoPlayer({
                     className="w-[110px] h-[62px] rounded-md overflow-hidden flex-shrink-0 relative"
                     style={{ background: '#1a1a1a' }}
                   >
-                    {(ep.thumbnail || posterUrl) ? (
-                      <img src={ep.thumbnail || posterUrl} alt="" className="w-full h-full object-cover block" />
+                    {ep.thumbnail || posterUrl ? (
+                      <img
+                        src={ep.thumbnail || posterUrl}
+                        alt=""
+                        className="w-full h-full object-cover block"
+                      />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">
                         EP {ep.number}

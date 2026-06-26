@@ -1256,11 +1256,12 @@ async fn trigger_auto_download(
                 s.source_type.clone(),
                 s.resolution,
                 s.quality.clone(),
+                s.referrer.clone(),
             )
         })
     };
 
-    let Some((url, source_type, resolution, quality)) = picked else {
+    let Some((url, source_type, resolution, quality, source_referrer)) = picked else {
         log::warn!(
             "Auto-download: no usable sources for {} ep {}",
             media.media_id, episode_id
@@ -1288,6 +1289,10 @@ async fn trigger_auto_download(
             episode_number,
             url,
             filename,
+            None,
+            source_referrer,
+            None,
+            None,
             None,
         )
         .await

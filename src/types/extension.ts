@@ -39,6 +39,10 @@ export interface SearchResult {
   media_type?: string
   /** Genres for NSFW filtering */
   genres?: string[]
+  /** Native/romaji title from providers that expose it in search results. */
+  native_name?: string
+  /** Provider-side title aliases used for cross-provider matching. */
+  title_synonyms?: string[]
   /** MAL rank (from Jikan) */
   rank?: number
   /** MAL popularity rank */
@@ -121,6 +125,8 @@ export interface VideoSource {
   // Custom Referer required by some CDNs (wixmp, fast4speed). Attached to
   // the HTTP request when fetching/downloading this source.
   referrer?: string
+  // Provider audio mode, when available. Anikoto returns "sub", "dub", or "hsub".
+  audio_type?: string
   // Per-source subtitle sidecars (not the top-level VideoSources.subtitles,
   // which are provider-wide). Rust side mirrors this as Vec<Subtitle>.
   subtitles?: Subtitle[]
