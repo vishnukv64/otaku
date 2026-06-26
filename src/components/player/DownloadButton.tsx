@@ -6,11 +6,18 @@
 
 import { useEffect, useState } from 'react'
 import { Download, Check, X, Loader2, Star } from 'lucide-react'
-import type { VideoSource } from '@/types/extension'
+import type { Subtitle, VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
-import { isAdaptive, qualityLabel, parseQualityPreference } from '@/utils/pickSource'
-import { listAdaptiveVariants, resolveAdaptiveToVariant } from '@/utils/hlsResolve'
+import {
+  audioTypeLabel,
+  buildDownloadSourceChoices,
+  choicesForAudioTab,
+  subtitleChoices,
+  subtitleKey,
+  type DownloadAudioTab,
+  type DownloadSourceChoice,
+} from '@/utils/downloadOptions'
 
 interface DownloadButtonProps {
   sources: VideoSource[]
@@ -18,8 +25,11 @@ interface DownloadButtonProps {
   episodeId: string
   animeTitle: string
   episodeNumber: number
+  subtitles?: Subtitle[]
   className?: string
 }
+
+const EMPTY_SUBTITLES: Subtitle[] = []
 
 export function DownloadButton({
   sources,
@@ -27,6 +37,7 @@ export function DownloadButton({
   episodeId,
   animeTitle,
   episodeNumber,
+  subtitles = EMPTY_SUBTITLES,
   className = '',
 }: DownloadButtonProps) {
   const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
@@ -35,7 +46,9 @@ export function DownloadButton({
   const [downloading, setDownloading] = useState<string | null>(null)
   const [completed, setCompleted] = useState(false)
   const [resolvingOptions, setResolvingOptions] = useState(false)
-  const [downloadOptions, setDownloadOptions] = useState<VideoSource[]>([])
+  const [downloadOptions, setDownloadOptions] = useState<DownloadSourceChoice[]>([])
+  const [selectedAudioTab, setSelectedAudioTab] = useState<DownloadAudioTab>('sub')
+  const [subtitleSelections, setSubtitleSelections] = useState<Record<string, string>>({})
   const hasAnySource = sources.some((s) => s.url && s.url.trim() !== '')
 
   useEffect(() => {
@@ -44,45 +57,28 @@ export function DownloadButton({
 
     const buildOptions = async () => {
       setResolvingOptions(true)
-      const seen = new Set<string>()
-      const out: VideoSource[] = []
-
-      for (const source of sources) {
-        if (!source.url || source.url.trim() === '') continue
-
-        if (isAdaptive(source)) {
-          try {
-            const variants = await listAdaptiveVariants(source)
-            for (const variant of variants) {
-              const key = `${source.server}|${variant.resolution}`
-              if (seen.has(key)) continue
-              seen.add(key)
-              out.push({
-                ...source,
-                url: variant.url,
-                resolution: variant.resolution,
-                quality: `${variant.resolution}p`,
-              })
-            }
-          } catch (err) {
-            console.warn('[DownloadButton] failed to expand adaptive variants', err)
-          }
-          continue
-        }
-
-        const key = `${source.server}|${source.resolution ?? 'adaptive'}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        out.push(source)
-      }
-
-      out.sort((a, b) => {
-        if (a.server !== b.server) return a.server.localeCompare(b.server)
-        return (b.resolution ?? 0) - (a.resolution ?? 0)
-      })
+      const out = await buildDownloadSourceChoices(sources, subtitles)
 
       if (!cancelled) {
         setDownloadOptions(out)
+        setSelectedAudioTab(choicesForAudioTab(out, 'sub').length > 0 ? 'sub' : 'dub')
+        setSubtitleSelections((current) => {
+          const next = { ...current }
+          for (const choice of out) {
+            if (next[choice.key]) continue
+            const options = subtitleChoices(choice.subtitles)
+            let englishKey: string | undefined
+            for (const option of options) {
+              const label = option.label.toLowerCase()
+              if (option.subtitle && (/english/.test(label) || option.subtitle.language?.toLowerCase() === 'en')) {
+                englishKey = option.key
+                break
+              }
+            }
+            next[choice.key] = englishKey || 'off'
+          }
+          return next
+        })
         setResolvingOptions(false)
       }
     }
@@ -98,32 +94,30 @@ export function DownloadButton({
     return () => {
       cancelled = true
     }
-  }, [showOptions, sources])
+  }, [showOptions, sources, subtitles])
 
-  const handleDownload = async (source: VideoSource) => {
-    const label = qualityLabel(source)
+  const handleDownload = async (choice: DownloadSourceChoice) => {
+    const label = `${audioTypeLabel(choice.audioType)} ${choice.quality}`
     setShowOptions(false)
     setDownloading(label)
 
     try {
-      // Adaptive HLS sources point at the master playlist - downloading that
-      // URL would save a text file, not the video. Resolve just-in-time to
-      // a concrete variant URL matching the user's preferred quality.
-      let downloadUrl = source.url
-      let resolvedLabel = label
-      if (isAdaptive(source)) {
-        const pref = parseQualityPreference(defaultDownloadQuality)
-        const resolved = await resolveAdaptiveToVariant(source, pref)
-        if (!resolved) {
-          throw new Error('Could not resolve a concrete HLS variant for download')
-        }
-        downloadUrl = resolved.url
-        resolvedLabel = `${resolved.resolution}p`
-      }
-
       const safeTitle = animeTitle.replace(/[^a-zA-Z0-9]/g, '_')
-      const filename = `${safeTitle}_EP${episodeNumber}_${resolvedLabel}.otaku`
-      await startDownload(mediaId, episodeId, episodeNumber, downloadUrl, filename, customDownloadLocation || undefined, source.referrer)
+      const filename = `${safeTitle}_EP${episodeNumber}_${audioTypeLabel(choice.audioType)}_${choice.quality}.otaku`
+      const selectedSubtitleKey = subtitleSelections[choice.key] || 'off'
+      const selectedSubtitle = choice.subtitles.find((subtitle) => subtitleKey(subtitle) === selectedSubtitleKey)
+      await startDownload(
+        mediaId,
+        episodeId,
+        episodeNumber,
+        choice.source.url,
+        filename,
+        customDownloadLocation || undefined,
+        choice.source.referrer,
+        selectedSubtitle?.url,
+        selectedSubtitle?.label,
+        selectedSubtitle?.language
+      )
 
       setCompleted(true)
       setTimeout(() => {
@@ -137,9 +131,18 @@ export function DownloadButton({
   }
   if (!hasAnySource) return null
 
+  const subOptions = choicesForAudioTab(downloadOptions, 'sub')
+  const dubOptions = choicesForAudioTab(downloadOptions, 'dub')
+  const hasBothAudioTabs = subOptions.length > 0 && dubOptions.length > 0
+  const activeAudioTab = choicesForAudioTab(downloadOptions, selectedAudioTab).length > 0
+    ? selectedAudioTab
+    : subOptions.length > 0 ? 'sub' : 'dub'
+  const visibleDownloadOptions = choicesForAudioTab(downloadOptions, activeAudioTab)
+
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={() => setShowOptions(!showOptions)}
         disabled={!!downloading}
         className={`w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
@@ -168,6 +171,7 @@ export function DownloadButton({
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold">Download Episode {episodeNumber}</h4>
               <button
+                type="button"
                 onClick={() => setShowOptions(false)}
                 className="w-6 h-6 flex items-center justify-center hover:bg-white/10 rounded transition-colors"
               >
@@ -176,6 +180,25 @@ export function DownloadButton({
             </div>
 
             <div className="space-y-1">
+              {!resolvingOptions && hasBothAudioTabs && (
+                <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/5 p-1 mb-2">
+                  {(['sub', 'dub'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setSelectedAudioTab(tab)}
+                      aria-pressed={activeAudioTab === tab}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                        activeAudioTab === tab
+                          ? 'bg-[var(--color-accent-primary)] text-white'
+                          : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      {tab === 'sub' ? 'Sub' : 'Dub'}
+                    </button>
+                  ))}
+                </div>
+              )}
               {resolvingOptions && (
                 <div className="px-3 py-4 text-sm text-[var(--color-text-muted)] flex items-center gap-2">
                   <Loader2 size={14} className="animate-spin" />
@@ -187,38 +210,62 @@ export function DownloadButton({
                   No downloadable variants available for this episode.
                 </div>
               )}
-              {downloadOptions.map((source, index) => {
-                const label = qualityLabel(source)
+              {visibleDownloadOptions.map((choice, index) => {
+                const label = choice.quality
+                const subtitleOptions = subtitleChoices(choice.subtitles)
                 // Default is preferred when:
                 //  - setting is 'auto' and source has no concrete resolution (adaptive), OR
                 //  - setting matches this source's resolution (e.g. '1080p' === `${resolution}p`).
                 const isDefault =
                   defaultDownloadQuality === 'auto'
-                    ? (source.resolution === undefined && index === 0) ||
-                      (source.resolution !== undefined && index === 0)
+                    ? index === 0
                     : label.toLowerCase() === defaultDownloadQuality;
 
                 return (
-                  <button
-                    key={index}
-                    onClick={() => handleDownload(source)}
+                  <div
+                    key={choice.key}
                     className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between group ${
                       isDefault ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30' : ''
                     }`}
                   >
-                    <div>
+                    <div className="min-w-0">
                       <div className="font-medium flex items-center gap-2">
-                        {label}
+                        {audioTypeLabel(choice.audioType)} · {label}
                         {isDefault && (
                           <Star size={12} className="text-[var(--color-accent-primary)]" fill="currentColor" />
                         )}
                       </div>
                       <div className="text-xs text-[var(--color-text-muted)]">
-                        {source.server} · {source.type.toUpperCase()}
+                        {choice.server} · {choice.source.type.toUpperCase()}
                       </div>
                     </div>
-                    <Download size={16} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </button>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={subtitleSelections[choice.key] || 'off'}
+                        onChange={(event) => setSubtitleSelections((current) => ({
+                          ...current,
+                          [choice.key]: event.target.value,
+                        }))}
+                        onClick={(event) => event.stopPropagation()}
+                        className="max-w-[120px] bg-white/10 border border-white/15 rounded px-2 py-1 text-xs text-white"
+                        title="Subtitle track"
+                      >
+                        {subtitleOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(choice)}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/15 transition-colors"
+                        title={`Download ${audioTypeLabel(choice.audioType)} ${choice.quality}`}
+                      >
+                        <Download size={16} />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>

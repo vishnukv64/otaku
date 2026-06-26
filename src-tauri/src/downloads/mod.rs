@@ -11,7 +11,7 @@
 pub mod chapter_downloads;
 pub mod obfuscation;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::fs::File;
@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use sqlx::{SqlitePool, Row};
 use tauri::{AppHandle, Emitter};
 use crate::notifications;
+use crate::extensions::Subtitle;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -44,6 +45,12 @@ pub struct DownloadProgress {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_referrer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle_language: Option<String>,
     pub file_path: String,
     pub total_bytes: u64,
     pub downloaded_bytes: u64,
@@ -51,6 +58,22 @@ pub struct DownloadProgress {
     pub speed: u64, // bytes per second
     pub status: DownloadStatus,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct HlsSegment {
+    url: String,
+    duration: Option<f32>,
+    is_map: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct HlsResumeState {
+    downloaded: u64,
+    map_bytes: u64,
+    media_bytes: u64,
+    completed_media_segments: usize,
+    next_index: usize,
 }
 
 /// Event name for download progress updates
@@ -137,36 +160,40 @@ impl DownloadManager {
                     _ => DownloadStatus::Failed,
                 };
 
-                // Get total_bytes from database, but update with actual file size if it's 0
+                // Completed downloads should report the real file size, not an
+                // earlier network estimate.
                 let mut total_bytes = row.try_get::<i64, _>("total_bytes")? as u64;
                 let mut downloaded_bytes = row.try_get::<i64, _>("downloaded_bytes")? as u64;
 
-                // Fix total_bytes for completed downloads where it's 0 (Content-Length was missing)
-                if status == DownloadStatus::Completed && total_bytes == 0 && file_exists {
-                    if let Ok(metadata) = file_metadata {
-                        let file_size = metadata.len();
-                        total_bytes = file_size;
-                        downloaded_bytes = file_size;
-                        log::debug!("Fixed total_bytes for download");
+                if status == DownloadStatus::Completed && file_exists {
+                    if let Ok(file_size) = Self::downloaded_file_size(&file_path).await {
+                        if total_bytes != file_size || downloaded_bytes != file_size {
+                            total_bytes = file_size;
+                            downloaded_bytes = file_size;
+                            log::debug!("Fixed completed download size");
 
-                        // Update database with correct size
-                        let updated_progress = DownloadProgress {
-                            id: row.try_get("id")?,
-                            media_id: row.try_get("media_id")?,
-                            episode_id: row.try_get("episode_id")?,
-                            episode_number: row.try_get("episode_number")?,
-                            filename: row.try_get("filename")?,
-                            url: row.try_get("url")?,
-                            source_referrer: row.try_get("source_referrer")?,
-                            file_path: file_path.clone(),
-                            total_bytes,
-                            downloaded_bytes,
-                            percentage: 100.0,
-                            speed: 0,
-                            status: DownloadStatus::Completed,
-                            error_message: None,
-                        };
-                        Self::save_progress_to_db(pool, &updated_progress).await.ok();
+                            // Update database with correct size
+                            let updated_progress = DownloadProgress {
+                                id: row.try_get("id")?,
+                                media_id: row.try_get("media_id")?,
+                                episode_id: row.try_get("episode_id")?,
+                                episode_number: row.try_get("episode_number")?,
+                                filename: row.try_get("filename")?,
+                                url: row.try_get("url")?,
+                                source_referrer: row.try_get("source_referrer")?,
+                                subtitle_url: None,
+                                subtitle_label: None,
+                                subtitle_language: None,
+                                file_path: file_path.clone(),
+                                total_bytes,
+                                downloaded_bytes,
+                                percentage: 100.0,
+                                speed: 0,
+                                status: DownloadStatus::Completed,
+                                error_message: None,
+                            };
+                            Self::save_progress_to_db(pool, &updated_progress).await.ok();
+                        }
                     }
                 }
 
@@ -178,6 +205,9 @@ impl DownloadManager {
                     filename: row.try_get("filename")?,
                     url: row.try_get("url")?,
                     source_referrer: row.try_get("source_referrer")?,
+                    subtitle_url: None,
+                    subtitle_label: None,
+                    subtitle_language: None,
                     file_path,
                     total_bytes,
                     downloaded_bytes,
@@ -217,6 +247,7 @@ impl DownloadManager {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     source_referrer = ?,
+                    total_bytes = ?,
                     downloaded_bytes = ?,
                     percentage = ?,
                     speed = ?,
@@ -241,6 +272,7 @@ impl DownloadManager {
             .bind(&download.error_message)
             // For UPDATE
             .bind(&download.source_referrer)
+            .bind(download.total_bytes as i64)
             .bind(download.downloaded_bytes as i64)
             .bind(download.percentage)
             .bind(download.speed as i64)
@@ -274,7 +306,16 @@ impl DownloadManager {
         filename: String,
         custom_path: Option<String>,
         source_referrer: Option<String>,
+        subtitle_url: Option<String>,
+        subtitle_label: Option<String>,
+        subtitle_language: Option<String>,
     ) -> Result<()> {
+        let filename = if Self::is_hls_url(&url) && filename.ends_with(".otaku") {
+            format!("{}.m3u8", filename.trim_end_matches(".otaku"))
+        } else {
+            filename
+        };
+
         // Use custom path if provided, otherwise use default download_dir
         let download_dir = custom_path
             .map(PathBuf::from)
@@ -293,6 +334,9 @@ impl DownloadManager {
             filename,
             url,
             source_referrer,
+            subtitle_url,
+            subtitle_label,
+            subtitle_language,
             file_path: file_path.to_string_lossy().to_string(),
             total_bytes: 0,
             downloaded_bytes: 0,
@@ -421,11 +465,10 @@ impl DownloadManager {
                             progress.status = DownloadStatus::Completed;
                             progress.percentage = 100.0;
 
-                            // Set total_bytes to actual file size if it wasn't set (Content-Length missing)
-                            if progress.total_bytes == 0 || progress.total_bytes < progress.downloaded_bytes {
-                                // Get actual file size from disk
-                                if let Ok(metadata) = tokio::fs::metadata(&progress.file_path).await {
-                                    let file_size = metadata.len();
+                            // Persist the final local size. HLS media bytes live in
+                            // a sibling segment directory, not in the playlist file.
+                            if let Ok(file_size) = Self::downloaded_file_size(&progress.file_path).await {
+                                if file_size > 0 {
                                     progress.total_bytes = file_size;
                                     progress.downloaded_bytes = file_size;
                                     log::debug!("Updated total_bytes to actual file size: {} bytes", file_size);
@@ -520,6 +563,7 @@ impl DownloadManager {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(id) DO UPDATE SET
                 source_referrer = ?,
+                total_bytes = ?,
                 downloaded_bytes = ?,
                 percentage = ?,
                 speed = ?,
@@ -544,6 +588,7 @@ impl DownloadManager {
         .bind(&progress.error_message)
         // For UPDATE
         .bind(&progress.source_referrer)
+        .bind(progress.total_bytes as i64)
         .bind(progress.downloaded_bytes as i64)
         .bind(progress.percentage)
         .bind(progress.speed as i64)
@@ -589,10 +634,11 @@ impl DownloadManager {
             .unwrap_or(0)
     }
 
-    fn parse_hls_playlist(text: &str, base_url: &str) -> Result<(Vec<(u32, String)>, Vec<String>)> {
+    fn parse_hls_playlist(text: &str, base_url: &str) -> Result<(Vec<(u32, String)>, Vec<HlsSegment>)> {
         let mut variants = Vec::new();
         let mut segments = Vec::new();
         let mut pending_variant_height: Option<u32> = None;
+        let mut pending_duration: Option<f32> = None;
 
         for raw_line in text.lines() {
             let line = raw_line.trim();
@@ -618,15 +664,32 @@ impl DownloadManager {
                 continue;
             }
 
+            if line.starts_with("#EXTINF:") {
+                pending_duration = line
+                    .trim_start_matches("#EXTINF:")
+                    .split(',')
+                    .next()
+                    .and_then(|value| value.parse::<f32>().ok());
+                continue;
+            }
+
             if line.starts_with("#EXT-X-MAP") {
                 if let Some(uri) = Self::parse_hls_attribute(line, "URI") {
-                    segments.push(Self::absolutize_hls_uri(&uri, base_url)?);
+                    segments.push(HlsSegment {
+                        url: Self::absolutize_hls_uri(&uri, base_url)?,
+                        duration: None,
+                        is_map: true,
+                    });
                 }
                 continue;
             }
 
             if !line.starts_with('#') {
-                segments.push(Self::absolutize_hls_uri(line, base_url)?);
+                segments.push(HlsSegment {
+                    url: Self::absolutize_hls_uri(line, base_url)?,
+                    duration: pending_duration.take(),
+                    is_map: false,
+                });
             }
         }
 
@@ -652,7 +715,7 @@ impl DownloadManager {
         client: &reqwest::Client,
         url: &str,
         referrer: &str,
-    ) -> Result<Vec<String>> {
+    ) -> Result<Vec<HlsSegment>> {
         let mut playlist_url = url.to_string();
 
         for _ in 0..4 {
@@ -693,6 +756,299 @@ impl DownloadManager {
         }
     }
 
+    fn sidecar_label(label: Option<&str>, language: Option<&str>) -> String {
+        let raw = label
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| language.filter(|value| !value.trim().is_empty()))
+            .unwrap_or("subtitles");
+        let sanitized: String = raw
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect();
+        let trimmed = sanitized.trim_matches('_');
+        if trimmed.is_empty() {
+            "subtitles".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    fn subtitle_sidecar_path(file_path: &str, label: Option<&str>, language: Option<&str>) -> PathBuf {
+        let path = PathBuf::from(file_path);
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("subtitle");
+        let filename = format!("{}.{}.vtt", stem, Self::sidecar_label(label, language));
+        path.with_file_name(filename)
+    }
+
+    async fn download_subtitle_sidecar(
+        client: &reqwest::Client,
+        subtitle_url: Option<&str>,
+        subtitle_label: Option<&str>,
+        subtitle_language: Option<&str>,
+        referrer: &str,
+        file_path: &str,
+    ) -> Result<()> {
+        let Some(subtitle_url) = subtitle_url.filter(|url| !url.trim().is_empty()) else {
+            return Ok(());
+        };
+
+        let response = client
+            .get(subtitle_url)
+            .header("User-Agent", "Mozilla/5.0")
+            .header("Referer", referrer)
+            .header("Origin", crate::video_server::origin_from_referrer(referrer))
+            .send()
+            .await
+            .context("Failed to fetch subtitle")?
+            .error_for_status()
+            .context("Subtitle request failed")?;
+
+        let sidecar_path = Self::subtitle_sidecar_path(file_path, subtitle_label, subtitle_language);
+        let bytes = response.bytes().await.context("Failed to read subtitle")?;
+        tokio::fs::write(&sidecar_path, bytes)
+            .await
+            .with_context(|| format!("Failed to write subtitle sidecar: {}", sidecar_path.display()))?;
+        Ok(())
+    }
+
+    async fn remove_subtitle_sidecars(file_path: &str) {
+        let path = PathBuf::from(file_path);
+        let Some(dir) = path.parent() else {
+            return;
+        };
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            return;
+        };
+        let prefix = format!("{}.", stem);
+        let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+            return;
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let entry_path = entry.path();
+            let Some(name) = entry_path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if name.starts_with(&prefix) && name.ends_with(".vtt") {
+                tokio::fs::remove_file(entry_path).await.ok();
+            }
+        }
+    }
+
+    fn hls_segment_dir(file_path: &str) -> Option<PathBuf> {
+        let path = PathBuf::from(file_path);
+        let dir = path.parent()?;
+        let stem = path.file_stem().and_then(|value| value.to_str())?;
+        Some(dir.join(format!("{}_segments", stem)))
+    }
+
+    async fn downloaded_file_size(file_path: &str) -> Result<u64> {
+        let mut size = tokio::fs::metadata(file_path).await?.len();
+
+        if let Some(dir) = Self::hls_segment_dir(file_path) {
+            if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                while let Some(entry) = entries.next_entry().await? {
+                    let metadata = entry.metadata().await?;
+                    if metadata.is_file() {
+                        size += metadata.len();
+                    }
+                }
+            }
+        }
+
+        Ok(size)
+    }
+
+    fn sum_hls_content_lengths<I>(lengths: I) -> Option<u64>
+    where
+        I: IntoIterator<Item = Option<u64>>,
+    {
+        let mut total = 0;
+        for length in lengths {
+            total += length?;
+        }
+        Some(total)
+    }
+
+    fn infer_hls_total_bytes(
+        downloaded: u64,
+        completed_segments: usize,
+        total_segments: usize,
+    ) -> Option<u64> {
+        if downloaded == 0 || completed_segments == 0 || total_segments == 0 {
+            return None;
+        }
+        let total = (downloaded as u128 * total_segments as u128)
+            .div_ceil(completed_segments as u128);
+        Some(total.min(u64::MAX as u128) as u64)
+    }
+
+    async fn estimate_hls_total_bytes(
+        client: &reqwest::Client,
+        segments: &[HlsSegment],
+        referrer: &str,
+    ) -> Option<u64> {
+        use futures_util::{stream, StreamExt};
+
+        const HEAD_CONCURRENCY: usize = 24;
+        let urls = segments
+            .iter()
+            .map(|segment| segment.url.clone())
+            .collect::<Vec<_>>();
+        let lengths: Vec<Option<u64>> = stream::iter(urls.into_iter().map(|url| {
+            let client = client.clone();
+            let referrer = referrer.to_string();
+            async move {
+                client
+                    .head(&url)
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Referer", &referrer)
+                    .header("Origin", crate::video_server::origin_from_referrer(&referrer))
+                    .send()
+                    .await
+                    .ok()?
+                    .error_for_status()
+                    .ok()?
+                    .content_length()
+            }
+        }))
+        .buffer_unordered(HEAD_CONCURRENCY)
+        .collect()
+        .await;
+
+        Self::sum_hls_content_lengths(lengths)
+    }
+
+    async fn remove_hls_segments(file_path: &str) {
+        if let Some(dir) = Self::hls_segment_dir(file_path) {
+            tokio::fs::remove_dir_all(dir).await.ok();
+        }
+    }
+
+    fn local_segment_name(index: usize, is_map: bool, source_url: &str) -> String {
+        let extension = source_url
+            .split('?')
+            .next()
+            .and_then(|value| value.rsplit('.').next())
+            .filter(|value| value.len() <= 5 && value.chars().all(|ch| ch.is_ascii_alphanumeric()))
+            .unwrap_or(if is_map { "mp4" } else { "ts" });
+        if is_map {
+            format!("init_{:05}.{}", index, extension)
+        } else {
+            format!("segment_{:05}.{}", index, extension)
+        }
+    }
+
+    async fn hls_resume_state(
+        segment_dir: &Path,
+        segment_names: &[String],
+        segments: &[HlsSegment],
+    ) -> Result<HlsResumeState> {
+        let mut state = HlsResumeState::default();
+
+        for (index, (segment, name)) in segments.iter().zip(segment_names).enumerate() {
+            let path = segment_dir.join(name);
+            let Ok(metadata) = tokio::fs::metadata(path).await else {
+                break;
+            };
+            if !metadata.is_file() || metadata.len() == 0 {
+                break;
+            }
+
+            let size = metadata.len();
+            state.downloaded += size;
+            state.next_index = index + 1;
+            if segment.is_map {
+                state.map_bytes += size;
+            } else {
+                state.media_bytes += size;
+                state.completed_media_segments += 1;
+            }
+        }
+
+        Ok(state)
+    }
+
+    async fn write_local_hls_playlist(
+        playlist_path: &str,
+        segments: &[HlsSegment],
+        segment_names: &[String],
+    ) -> Result<()> {
+        let max_duration = segments
+            .iter()
+            .filter_map(|segment| segment.duration)
+            .fold(6.0f32, f32::max)
+            .ceil() as u32;
+        let segment_dir_name = Self::hls_segment_dir(playlist_path)
+            .and_then(|path| path.file_name().map(|value| value.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "segments".to_string());
+        let mut playlist = String::from("#EXTM3U\n#EXT-X-VERSION:3\n");
+        playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:0\n", max_duration));
+
+        for (segment, name) in segments.iter().zip(segment_names.iter()) {
+            let uri = format!("{}/{}", segment_dir_name, name);
+            if segment.is_map {
+                playlist.push_str(&format!("#EXT-X-MAP:URI=\"{}\"\n", uri));
+                continue;
+            }
+            playlist.push_str(&format!("#EXTINF:{:.3},\n{}\n", segment.duration.unwrap_or(6.0), uri));
+        }
+
+        playlist.push_str("#EXT-X-ENDLIST\n");
+        tokio::fs::write(playlist_path, playlist)
+            .await
+            .with_context(|| format!("Failed to write HLS playlist: {}", playlist_path))?;
+        Ok(())
+    }
+
+    pub async fn downloaded_subtitles_for_file(
+        file_path: String,
+        port: u16,
+        token: String,
+    ) -> Vec<Subtitle> {
+        let path = PathBuf::from(&file_path);
+        let Some(dir) = path.parent() else {
+            return Vec::new();
+        };
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            return Vec::new();
+        };
+        let prefix = format!("{}.", stem);
+        let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let entry_path = entry.path();
+            let Some(name) = entry_path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if !name.starts_with(&prefix) || !name.ends_with(".vtt") {
+                continue;
+            }
+            let label = name
+                .trim_start_matches(&prefix)
+                .trim_end_matches(".vtt")
+                .replace('_', " ");
+            out.push(Subtitle {
+                url: format!(
+                    "http://127.0.0.1:{}/absolute?path={}&token={}",
+                    port,
+                    urlencoding::encode(&entry_path.to_string_lossy()),
+                    token
+                ),
+                language: label.clone(),
+                label,
+            });
+        }
+
+        out
+    }
+
     async fn perform_hls_download(
         download_id: String,
         downloads: Arc<RwLock<HashMap<String, DownloadProgress>>>,
@@ -702,50 +1058,106 @@ impl DownloadManager {
         url: String,
         referrer: String,
         file_path: String,
+        subtitle_url: Option<String>,
+        subtitle_label: Option<String>,
+        subtitle_language: Option<String>,
     ) -> Result<()> {
         let segments = Self::resolve_hls_segments(&client, &url, &referrer).await?;
         if segments.is_empty() {
             return Err(anyhow::anyhow!("HLS playlist did not contain media segments"));
         }
+        let estimated_total = Self::estimate_hls_total_bytes(&client, &segments, &referrer)
+            .await
+            .unwrap_or(0);
+        let total_media_segments = segments.iter().filter(|segment| !segment.is_map).count();
+        let segment_dir = Self::hls_segment_dir(&file_path)
+            .context("Failed to derive HLS segment directory")?;
+        tokio::fs::create_dir_all(&segment_dir)
+            .await
+            .context("Failed to create HLS segment directory")?;
+        let segment_names: Vec<String> = segments
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| Self::local_segment_name(index, segment.is_map, &segment.url))
+            .collect();
+        let resume_state = Self::hls_resume_state(&segment_dir, &segment_names, &segments)
+            .await
+            .context("Failed to inspect HLS resume state")?;
+        let mut downloaded = resume_state.downloaded;
+        let mut downloaded_map_bytes = resume_state.map_bytes;
+        let mut downloaded_media_bytes = resume_state.media_bytes;
+        let mut completed_media_segments = resume_state.completed_media_segments;
+        let mut fallback_total = if estimated_total == 0 {
+            Self::infer_hls_total_bytes(
+                downloaded_media_bytes,
+                completed_media_segments,
+                total_media_segments,
+            )
+            .map(|media_total| media_total.saturating_add(downloaded_map_bytes))
+            .unwrap_or(0)
+        } else {
+            0
+        };
+        let initial_total = if estimated_total > 0 {
+            estimated_total
+        } else {
+            fallback_total
+        };
+        let initial_percentage = if estimated_total > 0 {
+            ((downloaded as f32 / estimated_total as f32) * 100.0).min(99.9)
+        } else {
+            ((resume_state.next_index as f32 / segments.len() as f32) * 100.0).min(99.9)
+        };
 
-        {
+        let initial_progress = {
             let mut downloads_map = downloads.write().await;
             if let Some(progress) = downloads_map.get_mut(&download_id) {
-                progress.downloaded_bytes = 0;
-                progress.total_bytes = 0;
-                progress.percentage = 0.0;
+                progress.downloaded_bytes = downloaded;
+                progress.total_bytes = if initial_total > 0 {
+                    initial_total.max(downloaded)
+                } else {
+                    downloaded
+                };
+                progress.percentage = initial_percentage;
                 progress.speed = 0;
+                Some(progress.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(progress) = initial_progress {
+            if let Some(ref handle) = app_handle {
+                let _ = handle.emit(DOWNLOAD_PROGRESS_EVENT, progress.clone());
+            }
+            if let Some(pool) = &db_pool {
+                Self::save_progress_to_db(pool, &progress).await.ok();
             }
         }
 
-        let mut file = File::create(&file_path)
-            .await
-            .context("Failed to create HLS download file")?;
-        let is_obfuscated = file_path.ends_with(".otaku");
         let start_time = std::time::Instant::now();
-        let mut downloaded: u64 = 0;
+        let session_start_downloaded = downloaded;
         let mut last_event_time = std::time::Instant::now();
-        let mut last_db_save: u64 = 0;
+        let mut last_db_save = downloaded;
         const DB_SAVE_INTERVAL: u64 = 5 * 1024 * 1024;
         const EVENT_THROTTLE_MS: u128 = 500;
 
-        for (index, segment_url) in segments.iter().enumerate() {
+        for (index, segment) in segments.iter().enumerate().skip(resume_state.next_index) {
             {
                 let downloads_map = downloads.read().await;
                 if let Some(progress) = downloads_map.get(&download_id) {
                     if progress.status == DownloadStatus::Cancelled {
                         tokio::fs::remove_file(&file_path).await.ok();
+                        tokio::fs::remove_dir_all(&segment_dir).await.ok();
                         return Err(anyhow::anyhow!("Download cancelled"));
                     }
                     if progress.status == DownloadStatus::Paused {
-                        file.flush().await.ok();
                         return Err(anyhow::anyhow!("Download paused"));
                     }
                 }
             }
 
             let response = client
-                .get(segment_url)
+                .get(&segment.url)
                 .header("User-Agent", "Mozilla/5.0")
                 .header("Referer", &referrer)
                 .header("Origin", crate::video_server::origin_from_referrer(&referrer))
@@ -755,7 +1167,7 @@ impl DownloadManager {
                 .error_for_status()
                 .with_context(|| format!("HLS segment {} request failed", index + 1))?;
 
-            let mut data = Self::normalize_hls_segment(
+            let data = Self::normalize_hls_segment(
                 response
                     .bytes()
                     .await
@@ -764,17 +1176,43 @@ impl DownloadManager {
             );
 
             let write_len = data.len() as u64;
-            if is_obfuscated {
-                obfuscation::xor_transform(&mut data, downloaded);
-            }
-            file.write_all(&data)
+            let segment_path = segment_dir.join(&segment_names[index]);
+            tokio::fs::write(&segment_path, &data)
                 .await
                 .with_context(|| format!("Failed to write HLS segment {}", index + 1))?;
             downloaded += write_len;
+            if segment.is_map {
+                downloaded_map_bytes += write_len;
+            } else {
+                downloaded_media_bytes += write_len;
+                completed_media_segments += 1;
+                if estimated_total == 0 && fallback_total == 0 {
+                    fallback_total = Self::infer_hls_total_bytes(
+                        downloaded_media_bytes,
+                        completed_media_segments,
+                        total_media_segments,
+                    )
+                    .map(|media_total| media_total.saturating_add(downloaded_map_bytes))
+                    .unwrap_or(0);
+                }
+            }
 
             let elapsed = start_time.elapsed().as_secs();
-            let speed = if elapsed > 0 { downloaded / elapsed } else { 0 };
-            let percentage = ((index + 1) as f32 / segments.len() as f32) * 100.0;
+            let speed = if elapsed > 0 {
+                (downloaded - session_start_downloaded) / elapsed
+            } else {
+                0
+            };
+            let total_bytes = if estimated_total > 0 {
+                estimated_total
+            } else {
+                fallback_total
+            };
+            let percentage = if estimated_total > 0 {
+                ((downloaded as f32 / estimated_total as f32) * 100.0).min(99.9)
+            } else {
+                ((index + 1) as f32 / segments.len() as f32) * 100.0
+            };
             let should_save_db = downloaded - last_db_save >= DB_SAVE_INTERVAL;
             let should_emit_event = last_event_time.elapsed().as_millis() >= EVENT_THROTTLE_MS;
 
@@ -782,7 +1220,11 @@ impl DownloadManager {
                 let mut downloads_map = downloads.write().await;
                 downloads_map.get_mut(&download_id).map(|progress| {
                     progress.downloaded_bytes = downloaded;
-                    progress.total_bytes = downloaded;
+                    progress.total_bytes = if total_bytes > 0 {
+                        total_bytes.max(downloaded)
+                    } else {
+                        downloaded
+                    };
                     progress.percentage = percentage;
                     progress.speed = speed;
                     progress.clone()
@@ -806,7 +1248,16 @@ impl DownloadManager {
             }
         }
 
-        file.flush().await.context("Failed to flush HLS download file")?;
+        Self::write_local_hls_playlist(&file_path, &segments, &segment_names).await?;
+        Self::download_subtitle_sidecar(
+            &client,
+            subtitle_url.as_deref(),
+            subtitle_label.as_deref(),
+            subtitle_language.as_deref(),
+            &referrer,
+            &file_path,
+        )
+        .await?;
         Ok(())
     }
 
@@ -818,7 +1269,16 @@ impl DownloadManager {
         app_handle: Option<AppHandle>,
     ) -> Result<()> {
         // Get download info, check if cancelled, and get resume offset
-        let (url, source_referrer, file_path, resume_from, existing_total) = {
+        let (
+            url,
+            source_referrer,
+            subtitle_url,
+            subtitle_label,
+            subtitle_language,
+            file_path,
+            resume_from,
+            existing_total,
+        ) = {
             let downloads_map = downloads.read().await;
             let progress = downloads_map
                 .get(&download_id)
@@ -832,6 +1292,9 @@ impl DownloadManager {
             (
                 progress.url.clone(),
                 progress.source_referrer.clone(),
+                progress.subtitle_url.clone(),
+                progress.subtitle_label.clone(),
+                progress.subtitle_language.clone(),
                 progress.file_path.clone(),
                 progress.downloaded_bytes,
                 progress.total_bytes,
@@ -870,6 +1333,9 @@ impl DownloadManager {
                 url,
                 referrer.to_string(),
                 file_path,
+                subtitle_url,
+                subtitle_label,
+                subtitle_language,
             )
             .await;
         }
@@ -1026,6 +1492,15 @@ impl DownloadManager {
         }
 
         file.flush().await.context("Failed to flush file")?;
+        Self::download_subtitle_sidecar(
+            &client,
+            subtitle_url.as_deref(),
+            subtitle_label.as_deref(),
+            subtitle_language.as_deref(),
+            referrer,
+            &file_path,
+        )
+        .await?;
 
         Ok(())
     }
@@ -1283,6 +1758,8 @@ impl DownloadManager {
                     return Err(e).with_context(|| format!("Failed to delete file: {}", path));
                 }
             }
+            Self::remove_subtitle_sidecars(&path).await;
+            Self::remove_hls_segments(&path).await;
         }
 
         // Remove from list and database
@@ -1330,6 +1807,8 @@ impl DownloadManager {
                     tokio::fs::remove_file(&file_path).await.ok();
                     log::debug!("Deleted file: {}", file_path);
                 }
+                Self::remove_subtitle_sidecars(&file_path).await;
+                Self::remove_hls_segments(&file_path).await;
 
                 // Remove from database
                 sqlx::query("DELETE FROM downloads WHERE id = ?")
@@ -1413,6 +1892,9 @@ mod tests {
             status,
             error_message: None,
             source_referrer: None,
+            subtitle_url: None,
+            subtitle_label: None,
+            subtitle_language: None,
         }
     }
 
@@ -1506,5 +1988,113 @@ mod tests {
 
         assert_eq!(progress.status, DownloadStatus::Failed);
         assert_eq!(persisted_status, "failed");
+    }
+
+    #[tokio::test]
+    async fn load_from_database_counts_hls_segment_files_for_completed_size() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let playlist = temp_dir.path().join("episode-7.m3u8");
+        tokio::fs::write(&playlist, b"playlist").await.expect("playlist");
+
+        let segment_dir = DownloadManager::hls_segment_dir(&playlist.to_string_lossy())
+            .expect("segment dir");
+        tokio::fs::create_dir_all(&segment_dir).await.expect("segment dir");
+        tokio::fs::write(segment_dir.join("segment_00000.ts"), vec![1_u8; 300])
+            .await
+            .expect("segment 1");
+        tokio::fs::write(segment_dir.join("segment_00001.ts"), vec![2_u8; 700])
+            .await
+            .expect("segment 2");
+
+        let pool = setup_downloads_pool().await;
+        sqlx::query(
+            r#"
+            INSERT INTO downloads (
+                id, media_id, episode_id, episode_number, filename, url, file_path,
+                total_bytes, downloaded_bytes, percentage, speed, status
+            )
+            VALUES ('download-1', 'media-1', 'episode-7', 7, 'Episode_7.m3u8',
+                'https://example.test/master.m3u8', ?, 8, 8, 100.0, 0, 'completed')
+            "#,
+        )
+        .bind(playlist.to_string_lossy().to_string())
+        .execute(&pool)
+        .await
+        .expect("insert completed hls download");
+
+        let manager = DownloadManager::new(temp_dir.path().to_path_buf())
+            .with_database(Arc::new(pool.clone()));
+
+        manager.load_from_database().await.expect("load downloads");
+
+        let progress = manager.get_progress("download-1").await.expect("download loaded");
+        let persisted_total: i64 = sqlx::query_scalar(
+            "SELECT total_bytes FROM downloads WHERE id = 'download-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("persisted total");
+
+        assert_eq!(progress.total_bytes, 1008);
+        assert_eq!(progress.downloaded_bytes, 1008);
+        assert_eq!(persisted_total, 1008);
+    }
+
+    #[tokio::test]
+    async fn hls_resume_state_counts_existing_segments_until_first_gap() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let segment_dir = temp_dir.path();
+        let segments = vec![
+            HlsSegment { url: "https://example.test/init.mp4".to_string(), duration: None, is_map: true },
+            HlsSegment { url: "https://example.test/one.ts".to_string(), duration: Some(6.0), is_map: false },
+            HlsSegment { url: "https://example.test/two.ts".to_string(), duration: Some(6.0), is_map: false },
+            HlsSegment { url: "https://example.test/three.ts".to_string(), duration: Some(6.0), is_map: false },
+        ];
+        let names = segments
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| DownloadManager::local_segment_name(index, segment.is_map, &segment.url))
+            .collect::<Vec<_>>();
+
+        tokio::fs::write(segment_dir.join(&names[0]), vec![0_u8; 8]).await.expect("init");
+        tokio::fs::write(segment_dir.join(&names[1]), vec![1_u8; 300]).await.expect("segment one");
+        tokio::fs::write(segment_dir.join(&names[3]), vec![3_u8; 900]).await.expect("later gap segment");
+
+        let state = DownloadManager::hls_resume_state(segment_dir, &names, &segments)
+            .await
+            .expect("resume state");
+
+        assert_eq!(
+            state,
+            HlsResumeState {
+                downloaded: 308,
+                map_bytes: 8,
+                media_bytes: 300,
+                completed_media_segments: 1,
+                next_index: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn hls_total_requires_every_segment_length() {
+        assert_eq!(
+            DownloadManager::sum_hls_content_lengths([Some(300), Some(700), Some(8)]),
+            Some(1008)
+        );
+        assert_eq!(
+            DownloadManager::sum_hls_content_lengths([Some(300), None, Some(8)]),
+            None
+        );
+    }
+
+    #[test]
+    fn hls_progress_total_estimate_is_pinned_from_downloaded_segments() {
+        assert_eq!(
+            DownloadManager::infer_hls_total_bytes(117, 23, 100),
+            Some(509)
+        );
+        assert_eq!(DownloadManager::infer_hls_total_bytes(0, 1, 100), None);
+        assert_eq!(DownloadManager::infer_hls_total_bytes(117, 0, 100), None);
     }
 }

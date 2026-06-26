@@ -12,6 +12,7 @@ import type {
   SearchResults,
   MediaDetails,
   VideoSources,
+  Subtitle,
   MangaDetails,
   ChapterImages,
 } from '@/types/extension'
@@ -560,9 +561,23 @@ export async function startDownload(
   url: string,
   filename: string,
   customPath?: string,
-  sourceReferrer?: string
+  sourceReferrer?: string,
+  subtitleUrl?: string,
+  subtitleLabel?: string,
+  subtitleLanguage?: string
 ): Promise<string> {
-  return await invoke('start_download', { mediaId, episodeId, episodeNumber, url, filename, customPath, sourceReferrer })
+  return await invoke('start_download', {
+    mediaId,
+    episodeId,
+    episodeNumber,
+    url,
+    filename,
+    customPath,
+    sourceReferrer,
+    subtitleUrl,
+    subtitleLabel,
+    subtitleLanguage,
+  })
 }
 
 /**
@@ -572,6 +587,13 @@ export async function startDownload(
  */
 export async function getDownloadProgress(downloadId: string): Promise<DownloadProgress> {
   return await invoke('get_download_progress', { downloadId })
+}
+
+/**
+ * Get downloaded subtitle sidecars for a local video path
+ */
+export async function getDownloadedSubtitles(path: string): Promise<Subtitle[]> {
+  return await invoke('get_downloaded_subtitles', { path })
 }
 
 /**
@@ -701,6 +723,9 @@ export interface DownloadProgress {
   filename: string
   url: string
   source_referrer?: string
+  subtitle_url?: string
+  subtitle_label?: string
+  subtitle_language?: string
   file_path: string
   total_bytes: number
   downloaded_bytes: number
@@ -1433,6 +1458,10 @@ export async function getLocalVideoUrl(filename: string): Promise<string> {
 
 export async function getLocalFileSize(path: string): Promise<number> {
   return await invoke('get_local_file_size', { path })
+}
+
+export async function isLegacyTsDownload(path: string): Promise<boolean> {
+  return await invoke('is_legacy_ts_download', { path })
 }
 
 /**

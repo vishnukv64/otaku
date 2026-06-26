@@ -24,6 +24,8 @@ import {
   getWatchProgress,
   getLocalVideoUrl,
   getLocalFileSize,
+  isLegacyTsDownload,
+  getDownloadedSubtitles,
   getVideoServerInfo,
   type MediaEntry,
   type EpisodeEntry,
@@ -37,6 +39,12 @@ import { isAndroid } from '@/utils/platform'
 import { usePipStore } from '@/store/pipStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { buildAnikotoSearchQueries, resolveAnikotoSlug } from '@/utils/anikotoResolver'
+import {
+  canSeekLocalDownload,
+  getInitialPlaybackTime,
+  isLocalHlsPlaylist,
+  shouldUseLocalDownload,
+} from '@/utils/downloadedPlayback'
 
 interface WatchSearch {
   malId: string
@@ -62,6 +70,7 @@ function WatchPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resumeTime, setResumeTime] = useState<number>(0)
+  const [isLegacyLocalTsDownload, setIsLegacyLocalTsDownload] = useState(false)
   const [videoServerInfo, setVideoServerInfo] = useState<VideoServerUrls | null>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
   const [allanimeId, setAllanimeId] = useState<string | null>(null)
@@ -386,6 +395,7 @@ function WatchPage() {
       setLoading(true)
       setError(null)
       setSources(null)
+      setIsLegacyLocalTsDownload(false)
 
       let didComplete = false
       try {
@@ -427,13 +437,14 @@ function WatchPage() {
           filePath = null
         }
         let localSourceLoaded = false
+        let localIsLegacyTsDownload = false
 
         if (filePath) {
           try {
             const fileSize = await getLocalFileSize(filePath)
             // Guard against earlier buggy downloads that saved only the HLS
             // playlist text (~tens of KB) instead of the actual media.
-            if (fileSize < 1_000_000) {
+            if (!shouldUseLocalDownload(filePath, fileSize)) {
               console.warn('[Watch] Local download too small to be valid video, ignoring', {
                 filePath,
                 fileSize,
@@ -446,20 +457,37 @@ function WatchPage() {
           }
         }
 
+        if (filePath) {
+          try {
+            localIsLegacyTsDownload = await isLegacyTsDownload(filePath)
+          } catch (legacyErr) {
+            console.warn('[Watch] Failed to inspect local download container', legacyErr)
+          }
+        }
+
+        const downloadedSubtitles = filePath
+          ? await getDownloadedSubtitles(filePath).catch((err) => {
+              console.warn('[Watch] Failed to load downloaded subtitles', err)
+              return []
+            })
+          : []
+        const localSourceType = filePath && isLocalHlsPlaylist(filePath) ? 'hls' : 'video/mp4'
+
         if (filePath && isAndroid()) {
           // Android: Use convertFileSrc to serve via https://asset.localhost/
           // This avoids mixed content issues (HTTPS page loading HTTP video server)
           const localUrl = convertFileSrc(filePath)
+          setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
           setSources({
             sources: [
               {
                 url: localUrl,
                 quality: 'Downloaded',
-                type: 'video/mp4',
+                type: localSourceType,
                 server: 'Local',
               },
             ],
-            subtitles: [],
+            subtitles: downloadedSubtitles,
           })
           localSourceLoaded = true
           if (shownOfflineToastRef.current !== currentEpisodeId) {
@@ -469,16 +497,17 @@ function WatchPage() {
         } else if (filePath && videoServerInfo) {
           // Desktop/iOS: Use video server for local file (proper Range request support for large files)
           const localUrl = `http://127.0.0.1:${videoServerInfo.port}/absolute?path=${encodeURIComponent(filePath)}&token=${videoServerInfo.token}`
+          setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
           setSources({
             sources: [
               {
                 url: localUrl,
                 quality: 'Downloaded',
-                type: 'video/mp4',
+                type: localSourceType,
                 server: 'Local',
               },
             ],
-            subtitles: [],
+            subtitles: downloadedSubtitles,
           })
           localSourceLoaded = true
           if (shownOfflineToastRef.current !== currentEpisodeId) {
@@ -489,16 +518,17 @@ function WatchPage() {
           // Fallback: Try getLocalVideoUrl command with full path
           try {
             const localUrl = await getLocalVideoUrl(filePath)
+            setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
             setSources({
               sources: [
                 {
                   url: localUrl,
                   quality: 'Downloaded',
-                  type: 'video/mp4',
+                  type: localSourceType,
                   server: 'Local',
                 },
               ],
-              subtitles: [],
+              subtitles: downloadedSubtitles,
             })
             localSourceLoaded = true
             if (shownOfflineToastRef.current !== currentEpisodeId) {
@@ -513,6 +543,7 @@ function WatchPage() {
 
         // Fetch streaming sources if no local source was loaded
         if (!localSourceLoaded) {
+          setIsLegacyLocalTsDownload(false)
           const canUseAllAnime = streamingProvider === 'allanime' && !!allanimeExtId && !!allanimeId
           const canUseAnikoto = streamingProvider === 'anikoto' && !!anikotoExtId && !!anikotoSlug
 
@@ -663,6 +694,12 @@ function WatchPage() {
       Try {alternateProviderLabel}
     </button>
   )
+  const initialPlaybackTime = getInitialPlaybackTime(resumeTime, {
+    isLegacyTsDownload: isLegacyLocalTsDownload,
+  })
+  const canSeekCurrentSource = canSeekLocalDownload({
+    isLegacyTsDownload: isLegacyLocalTsDownload,
+  })
 
   // Mobile portrait: video top + episode list below (scrollable page)
   if (mobilePortrait) {
@@ -713,7 +750,8 @@ function WatchPage() {
               onEpisodeSelect={handleEpisodeSelect}
               onNextEpisode={handleNextEpisode}
               onPreviousEpisode={handlePreviousEpisode}
-              initialTime={resumeTime}
+              initialTime={initialPlaybackTime}
+              disableSeeking={!canSeekCurrentSource}
               autoPlay
               posterUrl={currentEpisode?.thumbnail || details?.cover_url}
             />
@@ -804,7 +842,8 @@ function WatchPage() {
           onNextEpisode={handleNextEpisode}
           onPreviousEpisode={handlePreviousEpisode}
           onGoBack={handleGoBack}
-          initialTime={resumeTime}
+          initialTime={initialPlaybackTime}
+          disableSeeking={!canSeekCurrentSource}
           autoPlay
           posterUrl={currentEpisode?.thumbnail || details?.cover_url}
         />

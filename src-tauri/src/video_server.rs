@@ -196,6 +196,7 @@ async fn serve_absolute_path(
     Query(query): Query<AbsolutePathQuery>,
     request: Request<Body>,
 ) -> Response {
+    let token = query.token.clone().unwrap_or_default();
     let file_path = match query.path {
         Some(p) => {
             // URL decode the path
@@ -240,22 +241,52 @@ async fn serve_absolute_path(
     };
 
     // Determine content type from extension
-    // .otaku files are obfuscated MP4s — report as video/mp4 after decryption
+    // .otaku files are obfuscated media; old HLS downloads may contain TS bytes.
     let is_obfuscated = file_path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.eq_ignore_ascii_case("otaku"))
         .unwrap_or(false);
 
-    let content_type = file_path.extension()
+    let mut content_type = file_path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| match ext.to_lowercase().as_str() {
             "mp4" | "otaku" => "video/mp4",
+            "m3u8" => "application/vnd.apple.mpegurl",
+            "ts" => "video/mp2t",
+            "m4s" => "video/iso.segment",
             "mkv" => "video/x-matroska",
             "webm" => "video/webm",
             "avi" => "video/x-msvideo",
             _ => "application/octet-stream",
         })
         .unwrap_or("application/octet-stream");
+
+    if is_obfuscated {
+        content_type = sniff_obfuscated_file_type(&file_path).await;
+    }
+
+    if file_path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("m3u8"))
+        .unwrap_or(false)
+    {
+        match tokio::fs::read_to_string(&file_path).await {
+            Ok(text) => {
+                let body = rewrite_local_hls_playlist(&text, &file_path, &token);
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::CONTENT_LENGTH, body.len().to_string())
+                    .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .body(Body::from(body))
+                    .unwrap();
+            }
+            Err(e) => {
+                log::error!("Failed to read HLS playlist: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read playlist").into_response();
+            }
+        }
+    }
 
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -347,6 +378,50 @@ async fn serve_absolute_path(
             .body(body)
             .unwrap()
     }
+}
+
+fn local_absolute_url(path: &std::path::Path, token: &str) -> String {
+    format!(
+        "/absolute?path={}&token={}",
+        urlencoding::encode(&path.to_string_lossy()),
+        urlencoding::encode(token)
+    )
+}
+
+fn rewrite_hls_map_line(line: &str, playlist_dir: &std::path::Path, token: &str) -> String {
+    let Some(uri_start) = line.find("URI=\"") else {
+        return line.to_string();
+    };
+    let value_start = uri_start + 5;
+    let Some(relative_end) = line[value_start..].find('"') else {
+        return line.to_string();
+    };
+    let value_end = value_start + relative_end;
+    let uri = &line[value_start..value_end];
+    if uri.starts_with("http://") || uri.starts_with("https://") || uri.starts_with("/absolute?") {
+        return line.to_string();
+    }
+    let rewritten = local_absolute_url(&playlist_dir.join(uri), token);
+    format!("{}{}{}", &line[..value_start], rewritten, &line[value_end..])
+}
+
+fn rewrite_local_hls_playlist(text: &str, playlist_path: &std::path::Path, token: &str) -> String {
+    let playlist_dir = playlist_path.parent().unwrap_or_else(|| std::path::Path::new(""));
+    let mut out = String::new();
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.starts_with("#EXT-X-MAP") {
+            out.push_str(&rewrite_hls_map_line(line, playlist_dir, token));
+        } else if line.is_empty() || line.starts_with('#') || line.starts_with("http://") || line.starts_with("https://") {
+            out.push_str(line);
+        } else {
+            out.push_str(&local_absolute_url(&playlist_dir.join(line), token));
+        }
+        out.push('\n');
+    }
+
+    out
 }
 
 // Parse HTTP Range header
@@ -691,6 +766,40 @@ fn normalize_hls_segment(bytes: Vec<u8>) -> Vec<u8> {
     }
 }
 
+fn sniff_decrypted_video_type(header: &[u8]) -> &'static str {
+    if header.first() == Some(&0x47) {
+        return "video/mp2t";
+    }
+    if header.len() >= 8 && &header[4..8] == b"ftyp" {
+        return "video/mp4";
+    }
+    "video/mp4"
+}
+
+pub(crate) async fn is_obfuscated_mpeg_ts_file(file_path: &std::path::Path) -> bool {
+    file_path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("otaku"))
+        .unwrap_or(false)
+        && sniff_obfuscated_file_type(file_path).await == "video/mp2t"
+}
+
+async fn sniff_obfuscated_file_type(file_path: &std::path::Path) -> &'static str {
+    use tokio::io::AsyncReadExt;
+
+    let mut file = match tokio::fs::File::open(file_path).await {
+        Ok(file) => file,
+        Err(_) => return "video/mp4",
+    };
+    let mut header = [0u8; 16];
+    let read = match file.read(&mut header).await {
+        Ok(read) => read,
+        Err(_) => return "video/mp4",
+    };
+    obfuscation::xor_transform(&mut header[..read], 0);
+    sniff_decrypted_video_type(&header[..read])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,5 +833,27 @@ mod tests {
             "https://cdn.test/anime/id/hash/seg-2-f2-v1-a1.html",
             "text/html"
         ));
+    }
+
+    #[test]
+    fn sniff_obfuscated_video_type_detects_legacy_ts_downloads() {
+        assert_eq!(sniff_decrypted_video_type(&[0x47, 0x40, 0x00, 0x10]), "video/mp2t");
+        assert_eq!(sniff_decrypted_video_type(&[0, 0, 0, 32, b'f', b't', b'y', b'p']), "video/mp4");
+    }
+
+    #[tokio::test]
+    async fn detects_obfuscated_mpeg_ts_files() {
+        let mut bytes = vec![0x47, 0x40, 0x00, 0x10, 0x00, 0x00];
+        obfuscation::xor_transform(&mut bytes, 0);
+
+        let path = std::env::temp_dir().join(format!(
+            "otaku-legacy-ts-{}.otaku",
+            std::process::id()
+        ));
+        tokio::fs::write(&path, bytes).await.unwrap();
+
+        assert!(is_obfuscated_mpeg_ts_file(&path).await);
+
+        let _ = tokio::fs::remove_file(path).await;
     }
 }

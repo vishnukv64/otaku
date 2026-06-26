@@ -34,7 +34,7 @@ import {
   DownloadCloud,
 } from 'lucide-react'
 import { notifySuccess, notifyError, notifyInfo, toastSuccess } from '@/utils/notify'
-import type { SearchResult, MediaDetails } from '@/types/extension'
+import type { SearchResult, MediaDetails, Episode } from '@/types/extension'
 import {
   jikanAnimeDetails,
   jikanSearchAnime,
@@ -103,6 +103,17 @@ import { DetailTabBar } from './DetailTabBar'
 import { CharacterGrid } from './CharacterGrid'
 import { ReviewList } from './ReviewCard'
 import { LibraryDropdown } from './LibraryDropdown'
+import {
+  audioTypeLabel,
+  buildDownloadSourceChoices,
+  choicesForAudioTab,
+  findMatchingDownloadChoice,
+  findMatchingSubtitle,
+  subtitleChoices,
+  subtitleKey,
+  type DownloadAudioTab,
+  type DownloadSourceChoice,
+} from '@/utils/downloadOptions'
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
 
@@ -163,6 +174,11 @@ function isAiring(status?: string): boolean {
 
 const EPISODES_PER_PAGE = 50
 
+interface DownloadPickerState {
+  episodes: Episode[]
+  mode: 'single' | 'selected' | 'all'
+}
+
 interface MediaDetailModalProps {
   media: SearchResult
   extensionId?: string
@@ -200,6 +216,13 @@ export function MediaDetailModal({
   const [downloadedEpisodes, setDownloadedEpisodes] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<string>>(new Set())
+  const [downloadPicker, setDownloadPicker] = useState<DownloadPickerState | null>(null)
+  const [downloadChoices, setDownloadChoices] = useState<DownloadSourceChoice[]>([])
+  const [selectedDownloadAudioTab, setSelectedDownloadAudioTab] = useState<DownloadAudioTab>('sub')
+  const [selectedDownloadChoiceKey, setSelectedDownloadChoiceKey] = useState('')
+  const [selectedDownloadSubtitleKey, setSelectedDownloadSubtitleKey] = useState('off')
+  const [downloadPickerLoading, setDownloadPickerLoading] = useState(false)
+  const [downloadStarting, setDownloadStarting] = useState(false)
   const [relatedAnime, setRelatedAnime] = useState<SearchResult[]>([])
   const [relatedLoading, setRelatedLoading] = useState(false)
   const [episodeWatchHistory, setEpisodeWatchHistory] = useState<Map<string, WatchHistory>>(
@@ -497,7 +520,7 @@ export function MediaDetailModal({
     }
   }
 
-  const handleDownloadEpisode = async (episodeId: string, episodeNumber: number) => {
+  const ensureDownloadProviderReady = () => {
     if (!details || !downloadExtId || !downloadProviderMediaId) {
       if (!downloadProviderMediaId) {
         notifyError(
@@ -507,203 +530,125 @@ export function MediaDetailModal({
             : `Could not resolve anime on ${downloadProviderLabel}. Switch provider in Settings and try again.`
         )
       }
-      return
+      return false
     }
+    return true
+  }
 
-    // Skip if already downloaded or downloading
-    if (downloadedEpisodes.has(episodeNumber) || downloadingEpisodes.has(episodeNumber)) {
-      return
-    }
+  const openDownloadPicker = async (episodes: Episode[], mode: DownloadPickerState['mode']) => {
+    if (!ensureDownloadProviderReady() || !details || !downloadExtId || !downloadProviderMediaId) return
 
-    try {
-      const providerEpisodeId = `${downloadProviderMediaId}::${episodeNumber}`
-      // Get video sources
-      const videoSources = await getVideoSources(downloadExtId, providerEpisodeId)
-      if (!videoSources || !videoSources.sources || videoSources.sources.length === 0) {
-        notifyError('Download Failed', `No video sources found for Episode ${episodeNumber}`)
-        return
-      }
+    const eligibleEpisodes = episodes.filter(
+      (episode) =>
+        !downloadedEpisodes.has(episode.number) && !downloadingEpisodes.has(episode.number)
+    )
 
-      // Find best quality source
-      const source = videoSources.sources[0]
-      const videoUrl = source.url
-      if (!videoUrl) {
-        notifyError('Download Failed', `No video URL found for Episode ${episodeNumber}`)
-        return
-      }
-
-      // Generate filename
-      const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episodeNumber}.otaku`
-
-      // Start download with custom path if set
-      await startDownload(
-        media.id,
-        episodeId,
-        episodeNumber,
-        videoUrl,
-        filename,
-        customDownloadLocation || undefined,
-        source.referrer
-      )
-      notifySuccess(media.title, `Started downloading Episode ${episodeNumber}`, {
+    if (eligibleEpisodes.length === 0) {
+      notifyInfo(details.title, 'Selected episodes are already downloaded or downloading', {
         source: 'download',
         metadata: { media_id: media.id },
       })
-    } catch (error) {
-      console.error(`Failed to download episode ${episodeNumber}:`, error)
-      notifyError('Download Failed', `Failed to download Episode ${episodeNumber}`)
-    }
-  }
-
-  const handleDownloadAll = async () => {
-    if (!details || !downloadExtId || !downloadProviderMediaId) {
-      if (!downloadProviderMediaId) {
-        notifyError(
-          'Download Failed',
-          downloadProviderResolving
-            ? `${downloadProviderLabel} is still resolving this anime. Try again in a moment.`
-            : `Could not resolve anime on ${downloadProviderLabel}. Switch provider in Settings and try again.`
-        )
-      }
       return
     }
 
+    setDownloadPicker({ episodes: eligibleEpisodes, mode })
+    setDownloadChoices([])
+    setSelectedDownloadAudioTab('sub')
+    setSelectedDownloadChoiceKey('')
+    setSelectedDownloadSubtitleKey('off')
+    setDownloadPickerLoading(true)
+
+    try {
+      const firstEpisode = eligibleEpisodes[0]!
+      const providerEpisodeId = `${downloadProviderMediaId}::${firstEpisode.number}`
+      const videoSources = await getVideoSources(downloadExtId, providerEpisodeId)
+      if (!videoSources || !videoSources.sources || videoSources.sources.length === 0) {
+        notifyError('Download Failed', `No video sources found for Episode ${firstEpisode.number}`)
+        setDownloadPicker(null)
+        return
+      }
+
+      const choices = await buildDownloadSourceChoices(videoSources.sources, videoSources.subtitles || [])
+      if (choices.length === 0) {
+        notifyError('Download Failed', `No downloadable variants found for Episode ${firstEpisode.number}`)
+        setDownloadPicker(null)
+        return
+      }
+
+      const defaultTab = choicesForAudioTab(choices, 'sub').length > 0 ? 'sub' : 'dub'
+      const defaultChoice = choicesForAudioTab(choices, defaultTab)[0] || choices[0]!
+      const subtitleOptions = subtitleChoices(defaultChoice.subtitles)
+      const englishSubtitle = subtitleOptions.find((option) => {
+        const label = option.label.toLowerCase()
+        return option.subtitle && (label.includes('english') || option.subtitle.language?.toLowerCase() === 'en')
+      })
+      setDownloadChoices(choices)
+      setSelectedDownloadAudioTab(defaultTab)
+      setSelectedDownloadChoiceKey(defaultChoice.key)
+      setSelectedDownloadSubtitleKey(englishSubtitle?.key || 'off')
+    } catch (error) {
+      console.error('Failed to prepare download choices:', error)
+      notifyError('Download Failed', 'Failed to prepare download choices')
+      setDownloadPicker(null)
+    } finally {
+      setDownloadPickerLoading(false)
+    }
+  }
+
+  const startPickerDownloads = async () => {
+    if (!downloadPicker || !details || !downloadExtId || !downloadProviderMediaId) return
+    const selectedChoice = downloadChoices.find((choice) => choice.key === selectedDownloadChoiceKey)
+    if (!selectedChoice) {
+      notifyError('Download Failed', 'Choose a video source before downloading')
+      return
+    }
+    const selectedSubtitle = selectedChoice.subtitles.find(
+      (subtitle) => subtitleKey(subtitle) === selectedDownloadSubtitleKey
+    )
+
+    setDownloadStarting(true)
     try {
       let successCount = 0
       let failCount = 0
       let skippedCount = 0
 
-      for (const episode of details.episodes) {
+      for (const episode of downloadPicker.episodes) {
         try {
-          // Check if already downloaded
-          const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
-          if (isDownloaded) {
+          if (await isEpisodeDownloaded(media.id, episode.number)) {
             skippedCount++
             continue
           }
 
           const providerEpisodeId = `${downloadProviderMediaId}::${episode.number}`
-          // Get video sources
           const sources = await getVideoSources(downloadExtId, providerEpisodeId)
-          if (!sources.sources || sources.sources.length === 0) {
-            console.error(`No sources found for episode ${episode.number}`)
+          const choices = await buildDownloadSourceChoices(sources.sources || [], sources.subtitles || [])
+          const choice = findMatchingDownloadChoice(choices, selectedChoice)
+          if (!choice) {
             failCount++
             continue
           }
 
-          // Pick the best quality source (first one is usually highest quality)
-          const source = sources.sources[0]
-          const videoUrl = source.url
-
-          // Generate filename
-          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.otaku`
-
-          // Start download with custom path if set
-          await startDownload(
-            media.id,
-            episode.id,
-            episode.number,
-            videoUrl,
-            filename,
-            customDownloadLocation || undefined,
-            source.referrer
-          )
-          successCount++
-        } catch (err) {
-          console.error(`Failed to download episode ${episode.number}:`, err)
-          failCount++
-        }
-      }
-
-      if (successCount > 0) {
-        notifySuccess(
-          details.title,
-          `Started downloading ${successCount} episode${successCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} already downloaded)` : ''}`,
-          { source: 'download', metadata: { media_id: media.id } }
-        )
-      } else if (skippedCount > 0) {
-        notifyInfo(details.title, `All ${skippedCount} episodes are already downloaded`, {
-          source: 'download',
-          metadata: { media_id: media.id },
-        })
-      }
-      if (failCount > 0) {
-        notifyError(
-          details.title,
-          `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`
-        )
-      }
-
-      // Refresh downloaded episodes after a short delay
-      setTimeout(refreshDownloadedEpisodes, 2000)
-    } catch (error) {
-      notifyError(
-        'Download Failed',
-        `Failed to start downloads for "${details?.title || media.title}"`
-      )
-      console.error('Download all error:', error)
-    }
-  }
-
-  const handleDownloadSelected = async () => {
-    if (selectedEpisodes.size === 0) {
-      notifyError('No Selection', 'Please select episodes to download')
-      return
-    }
-
-    if (!details || !downloadExtId || !downloadProviderMediaId) {
-      if (!downloadProviderMediaId) {
-        notifyError(
-          'Download Failed',
-          downloadProviderResolving
-            ? `${downloadProviderLabel} is still resolving this anime. Try again in a moment.`
-            : `Could not resolve anime on ${downloadProviderLabel}. Switch provider in Settings and try again.`
-        )
-      }
-      return
-    }
-
-    const selectedEpisodesList = details.episodes.filter((ep) => selectedEpisodes.has(ep.id))
-
-    try {
-      let successCount = 0
-      let failCount = 0
-      let skippedCount = 0
-
-      for (const episode of selectedEpisodesList) {
-        try {
-          // Check if already downloaded
-          const isDownloaded = await isEpisodeDownloaded(media.id, episode.number)
-          if (isDownloaded) {
-            skippedCount++
-            continue
-          }
-
-          const providerEpisodeId = `${downloadProviderMediaId}::${episode.number}`
-          // Get video sources
-          const sources = await getVideoSources(downloadExtId, providerEpisodeId)
-          if (!sources.sources || sources.sources.length === 0) {
-            console.error(`No sources found for episode ${episode.number}`)
+          const subtitle = selectedSubtitle
+            ? findMatchingSubtitle(choice.subtitles, selectedSubtitle)
+            : undefined
+          if (selectedSubtitle && !subtitle) {
             failCount++
             continue
           }
 
-          // Pick the best quality source
-          const source = sources.sources[0]
-          const videoUrl = source.url
-
-          // Generate filename
-          const filename = `${details.title.replace(/[^a-z0-9]/gi, '_')}_EP${episode.number}.otaku`
-
-          // Start download with custom path if set
+          const safeTitle = details.title.replace(/[^a-z0-9]/gi, '_')
+          const filename = `${safeTitle}_EP${episode.number}_${audioTypeLabel(choice.audioType)}_${choice.quality}.otaku`
           await startDownload(
             media.id,
             episode.id,
             episode.number,
-            videoUrl,
+            choice.source.url,
             filename,
             customDownloadLocation || undefined,
-            source.referrer
+            choice.source.referrer,
+            subtitle?.url,
+            subtitle?.label,
+            subtitle?.language
           )
           successCount++
         } catch (err) {
@@ -725,22 +670,40 @@ export function MediaDetailModal({
         })
       }
       if (failCount > 0) {
-        notifyError(
-          details.title,
-          `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`
-        )
+        notifyError(details.title, `Failed to start ${failCount} download${failCount > 1 ? 's' : ''}`)
       }
 
-      // Exit selection mode and clear selection
+      setDownloadPicker(null)
       setSelectionMode(false)
       setSelectedEpisodes(new Set())
-
-      // Refresh downloaded episodes after a short delay
       setTimeout(refreshDownloadedEpisodes, 2000)
-    } catch (error) {
-      notifyError('Download Failed', `Failed to start downloads for "${details.title}"`)
-      console.error('Download selected error:', error)
+    } finally {
+      setDownloadStarting(false)
     }
+  }
+
+  const handleDownloadEpisode = async (episodeId: string, episodeNumber: number) => {
+    const episode = details?.episodes.find((ep) => ep.id === episodeId) || {
+      id: episodeId,
+      number: episodeNumber,
+    }
+    await openDownloadPicker([episode], 'single')
+  }
+
+  const handleDownloadAll = async () => {
+    if (!details) return
+    await openDownloadPicker(details.episodes, 'all')
+  }
+
+  const handleDownloadSelected = async () => {
+    if (!details) return
+    if (selectedEpisodes.size === 0) {
+      notifyError('No Selection', 'Please select episodes to download')
+      return
+    }
+
+    const selectedEpisodesList = details.episodes.filter((ep) => selectedEpisodes.has(ep.id))
+    await openDownloadPicker(selectedEpisodesList, 'selected')
   }
 
   const handleAddToLibrary = async (status: LibraryStatus) => {
@@ -1420,8 +1383,153 @@ export function MediaDetailModal({
 
   const mobile = isMobile()
 
+  const subDownloadChoices = choicesForAudioTab(downloadChoices, 'sub')
+  const dubDownloadChoices = choicesForAudioTab(downloadChoices, 'dub')
+  const hasBothDownloadAudioTabs = subDownloadChoices.length > 0 && dubDownloadChoices.length > 0
+  const activeDownloadAudioTab = choicesForAudioTab(downloadChoices, selectedDownloadAudioTab).length > 0
+    ? selectedDownloadAudioTab
+    : subDownloadChoices.length > 0 ? 'sub' : 'dub'
+  const visibleDownloadChoices = choicesForAudioTab(downloadChoices, activeDownloadAudioTab)
+  const activeDownloadChoice = downloadChoices.find(
+    (choice) => choice.key === selectedDownloadChoiceKey
+  )
+  const activeSubtitleOptions = subtitleChoices(activeDownloadChoice?.subtitles || [])
+  const selectDownloadChoice = (choice: DownloadSourceChoice) => {
+    setSelectedDownloadChoiceKey(choice.key)
+    const options = subtitleChoices(choice.subtitles)
+    const english = options.find((option) => {
+      const label = option.label.toLowerCase()
+      return option.subtitle && (label.includes('english') || option.subtitle.language?.toLowerCase() === 'en')
+    })
+    setSelectedDownloadSubtitleKey(english?.key || 'off')
+  }
+
   const modalContent = (
     <>
+      {downloadPicker && (
+        <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-[560px] rounded-xl border border-[var(--color-glass-border)] bg-[var(--color-panel)] shadow-2xl">
+            <div className="flex items-start justify-between gap-4 p-5 border-b border-[var(--color-glass-border)]">
+              <div>
+                <h3 className="text-xl font-bold text-white">Download Options</h3>
+                <p className="text-sm text-[var(--color-text-muted)] mt-1">
+                  {downloadPicker.episodes.length} episode{downloadPicker.episodes.length === 1 ? '' : 's'} selected
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDownloadPicker(null)}
+                className="w-9 h-9 rounded-full hover:bg-white/10 flex items-center justify-center"
+                disabled={downloadStarting}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {downloadPickerLoading ? (
+                <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)] py-8">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Resolving downloadable variants...
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <div className="block text-xs uppercase tracking-[0.16em] text-[var(--color-text-muted)] mb-2">
+                      Video
+                    </div>
+                    {hasBothDownloadAudioTabs && (
+                      <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/5 p-1 mb-3">
+                        {(['sub', 'dub'] as const).map((tab) => (
+                          <button
+                            key={tab}
+                            type="button"
+                            aria-pressed={activeDownloadAudioTab === tab}
+                            onClick={() => {
+                              setSelectedDownloadAudioTab(tab)
+                              const nextChoice = choicesForAudioTab(downloadChoices, tab)[0]
+                              if (nextChoice) selectDownloadChoice(nextChoice)
+                            }}
+                            className={`px-3 py-2 rounded-md text-sm font-semibold transition-colors ${
+                              activeDownloadAudioTab === tab
+                                ? 'bg-[var(--color-accent-primary)] text-white'
+                                : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/10'
+                            }`}
+                          >
+                            {tab === 'sub' ? 'Sub' : 'Dub'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="max-h-[260px] overflow-y-auto space-y-2 pr-1">
+                      {visibleDownloadChoices.map((choice) => (
+                        <button
+                          key={choice.key}
+                          type="button"
+                          onClick={() => selectDownloadChoice(choice)}
+                          className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
+                            selectedDownloadChoiceKey === choice.key
+                              ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/12'
+                              : 'border-[var(--color-glass-border)] bg-white/[0.03] hover:bg-white/[0.07]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-semibold text-white">
+                              {audioTypeLabel(choice.audioType)} · {choice.quality}
+                            </span>
+                            <span className="text-xs text-[var(--color-text-muted)]">{choice.server}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="download-subtitle-select"
+                      className="block text-xs uppercase tracking-[0.16em] text-[var(--color-text-muted)] mb-2"
+                    >
+                      Subtitles
+                    </label>
+                    <select
+                      id="download-subtitle-select"
+                      value={selectedDownloadSubtitleKey}
+                      onChange={(event) => setSelectedDownloadSubtitleKey(event.target.value)}
+                      className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-glass-border)] rounded-lg px-3 py-2 text-sm text-white"
+                    >
+                      {activeSubtitleOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-[var(--color-glass-border)]">
+              <button
+                type="button"
+                onClick={() => setDownloadPicker(null)}
+                disabled={downloadStarting}
+                className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={startPickerDownloads}
+                disabled={downloadPickerLoading || downloadStarting || !activeDownloadChoice}
+                className="px-4 py-2 rounded-lg bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-secondary)] disabled:opacity-50 flex items-center gap-2"
+              >
+                {downloadStarting && <Loader2 className="w-4 h-4 animate-spin" />}
+                Start Download
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {loading ? (
         <div className="flex items-center justify-center py-32">
           <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />

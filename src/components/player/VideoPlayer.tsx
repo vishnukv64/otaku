@@ -14,7 +14,7 @@
  * - Keyboard shortcuts hint (auto-fades)
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
 import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
@@ -79,6 +79,17 @@ function createHlsProxyUrl(
   return `${baseUrl}/hls?token=${videoServer.token}&url=${encodeURIComponent(m3u8Url)}${referrerParam}`
 }
 
+function createPlayableHlsUrl(
+  videoServer: VideoServerUrls,
+  m3u8Url: string,
+  referrer?: string
+): string {
+  if (m3u8Url.startsWith(`http://127.0.0.1:${videoServer.port}/`)) {
+    return m3u8Url
+  }
+  return createHlsProxyUrl(videoServer, m3u8Url, referrer)
+}
+
 function sourceAudioMode(source: VideoSource): AudioMode | null {
   if (!source.audio_type) return null
   return source.audio_type.toLowerCase().includes('dub') ? 'dub' : 'sub'
@@ -93,10 +104,39 @@ function parseSubtitleTime(value: string): number {
 }
 
 function cleanSubtitleText(value: string): string {
-  const withoutTags = value.replace(/<[^>]+>/g, '')
-  const textarea = document.createElement('textarea')
-  textarea.innerHTML = withoutTags
-  return textarea.value.trim()
+  let withoutTags = ''
+  let insideTag = false
+
+  for (const char of value) {
+    if (char === '<') {
+      insideTag = true
+      continue
+    }
+    if (char === '>') {
+      insideTag = false
+      continue
+    }
+    if (!insideTag) {
+      withoutTags += char
+    }
+  }
+
+  return withoutTags
+    .replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (entity, value) => {
+      const normalized = value.toLowerCase()
+      if (normalized === 'amp') return '&'
+      if (normalized === 'lt') return '<'
+      if (normalized === 'gt') return '>'
+      if (normalized === 'quot') return '"'
+      if (normalized === 'apos') return "'"
+      if (normalized === 'nbsp') return ' '
+
+      const codePoint = normalized.startsWith('#x')
+        ? Number.parseInt(normalized.slice(2), 16)
+        : Number.parseInt(normalized.slice(1), 10)
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity
+    })
+    .trim()
 }
 
 function parseVtt(text: string): ParsedSubtitleCue[] {
@@ -140,6 +180,7 @@ interface VideoPlayerProps {
   onGoBack?: () => void
   onProgress?: (time: number) => void
   initialTime?: number
+  disableSeeking?: boolean
   autoPlay?: boolean
   posterUrl?: string
 }
@@ -159,6 +200,7 @@ export function VideoPlayer({
   onGoBack,
   onProgress,
   initialTime = 0,
+  disableSeeking = false,
   autoPlay = true,
   posterUrl,
 }: VideoPlayerProps) {
@@ -362,12 +404,15 @@ export function VideoPlayer({
       const key = label.toLowerCase().trim() || sub.url
       if (seen.has(key)) continue
       seen.add(key)
+      const shouldProxySubtitle =
+        videoServer &&
+        /^https?:\/\//i.test(sub.url) &&
+        !sub.url.startsWith(`http://127.0.0.1:${videoServer.port}/`)
       out.push({
         ...sub,
-        url:
-          videoServer && /^https?:\/\//i.test(sub.url)
-            ? createProxyUrl(videoServer, sub.url, currentSource?.referrer)
-            : sub.url,
+        url: shouldProxySubtitle
+          ? createProxyUrl(videoServer, sub.url, currentSource?.referrer)
+          : sub.url,
       })
     }
     return out
@@ -544,7 +589,7 @@ export function VideoPlayer({
 
           // Load the local rewritten manifest so relative variant playlists are
           // resolved against the upstream CDN before requests hit /proxy.
-          hls.loadSource(createHlsProxyUrl(videoServer, currentSource.url, currentSource.referrer))
+          hls.loadSource(createPlayableHlsUrl(videoServer, currentSource.url, currentSource.referrer))
           hls.attachMedia(video)
 
           hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
@@ -605,7 +650,7 @@ export function VideoPlayer({
                     hls.destroy()
                     hlsRef.current = null
 
-                    video.src = createHlsProxyUrl(
+                    video.src = createPlayableHlsUrl(
                       videoServer,
                       currentSource.url,
                       currentSource.referrer
@@ -634,7 +679,7 @@ export function VideoPlayer({
                     hls.destroy()
                     hlsRef.current = null
 
-                    const hlsUrl = createHlsProxyUrl(
+                    const hlsUrl = createPlayableHlsUrl(
                       videoServer,
                       currentSource.url,
                       currentSource.referrer
@@ -668,7 +713,7 @@ export function VideoPlayer({
                     hls.destroy()
                     hlsRef.current = null
 
-                    const hlsUrl2 = createHlsProxyUrl(
+                    const hlsUrl2 = createPlayableHlsUrl(
                       videoServer,
                       currentSource.url,
                       currentSource.referrer
@@ -704,7 +749,7 @@ export function VideoPlayer({
           // so segment URLs go through our proxy (which adds Referer headers).
           // Note: On Android, this branch is only reached if Hls.isSupported() is false
           // (rare). The primary Android path is HLS.js with error-handler fallback above.
-          video.src = createHlsProxyUrl(videoServer, currentSource.url, currentSource.referrer)
+          video.src = createPlayableHlsUrl(videoServer, currentSource.url, currentSource.referrer)
 
           // Seek to initial time when metadata is loaded
           const handleLoadedMetadata = () => {
@@ -832,12 +877,18 @@ export function VideoPlayer({
 
     navigator.mediaSession.setActionHandler('play', () => video?.play().catch(() => {}))
     navigator.mediaSession.setActionHandler('pause', () => video?.pause())
-    navigator.mediaSession.setActionHandler('seekbackward', () => {
-      if (video) video.currentTime = Math.max(0, video.currentTime - 10)
-    })
-    navigator.mediaSession.setActionHandler('seekforward', () => {
-      if (video) video.currentTime = Math.min(video.duration || 0, video.currentTime + 10)
-    })
+    navigator.mediaSession.setActionHandler(
+      'seekbackward',
+      disableSeeking || !video ? null : () => {
+        video.currentTime = Math.max(0, video.currentTime - 10)
+      }
+    )
+    navigator.mediaSession.setActionHandler(
+      'seekforward',
+      disableSeeking || !video ? null : () => {
+        video.currentTime = Math.min(video.duration || 0, video.currentTime + 10)
+      }
+    )
     navigator.mediaSession.setActionHandler('previoustrack', () => onPreviousEpisode?.())
     navigator.mediaSession.setActionHandler('nexttrack', () => onNextEpisode?.())
 
@@ -850,7 +901,7 @@ export function VideoPlayer({
       navigator.mediaSession.setActionHandler('previoustrack', null)
       navigator.mediaSession.setActionHandler('nexttrack', null)
     }
-  }, [animeTitle, currentEpisode, onNextEpisode, onPreviousEpisode])
+  }, [animeTitle, currentEpisode, disableSeeking, onNextEpisode, onPreviousEpisode])
 
   // Video event handlers
   useEffect(() => {
@@ -1405,7 +1456,8 @@ export function VideoPlayer({
   }
 
   // Helper function to seek with proper audio sync
-  const seekToTime = (time: number) => {
+  const seekToTime = useCallback((time: number) => {
+    if (disableSeeking) return
     const video = videoRef.current
     if (!video) return
 
@@ -1431,10 +1483,11 @@ export function VideoPlayer({
     }
 
     video.addEventListener('seeked', handleSeeked)
-  }
+  }, [disableSeeking])
 
   // Handle skip with stacking - clicking multiple times accumulates the skip amount
   const handleSkip = (direction: 'forward' | 'backward') => {
+    if (disableSeeking) return
     const video = videoRef.current
     if (!video) return
 
@@ -1573,6 +1626,7 @@ export function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     duration,
+    disableSeeking,
     onNextEpisode,
     onPreviousEpisode,
     playerSettings.playbackSpeed,
@@ -1580,6 +1634,7 @@ export function VideoPlayer({
   ])
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (disableSeeking) return
     const video = videoRef.current
     if (!video) return
 
@@ -1770,7 +1825,7 @@ export function VideoPlayer({
 
   // Progress bar drag handling
   useEffect(() => {
-    if (!isDragging) return
+    if (!isDragging || disableSeeking) return
 
     const handleMouseMove = (e: MouseEvent) => {
       const progressBar = progressBarRef.current
@@ -1800,7 +1855,7 @@ export function VideoPlayer({
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, duration])
+  }, [isDragging, duration, disableSeeking, seekToTime])
 
   const mobile = isMobile()
   const subtitleScale = Math.max(0.75, Math.min(2, (playerSettings.subtitleFontScale ?? 100) / 100))
@@ -1952,7 +2007,7 @@ export function VideoPlayer({
         </div>
 
         {/* ── Skip Intro Button ─────────────────────────────────── */}
-        {currentTime > 0 && currentTime < 90 && (
+        {!disableSeeking && currentTime > 0 && currentTime < 90 && (
           <div
             className={`absolute bottom-[100px] right-6 z-10 flex items-center gap-2 py-[10px] px-5 rounded cursor-pointer transition-all duration-150 ${
               showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -2070,10 +2125,11 @@ export function VideoPlayer({
           {/* ── Progress Bar ──────────────────────────────────── */}
           <div
             ref={progressBarRef}
-            className="relative cursor-pointer mb-[14px] group/progress select-none"
+            className={`relative mb-[14px] group/progress select-none ${disableSeeking ? 'cursor-default' : 'cursor-pointer'}`}
             style={{ height: '3px', padding: '8px 0', boxSizing: 'content-box' }}
             onMouseDown={(e) => {
               e.preventDefault()
+              if (disableSeeking) return
               setIsDragging(true)
               // Seek to clicked position immediately
               const rect = e.currentTarget.getBoundingClientRect()
@@ -2084,7 +2140,7 @@ export function VideoPlayer({
             onMouseLeave={handleProgressLeave}
             onClick={(e) => {
               e.stopPropagation()
-              if (!isDragging) handleSeek(e)
+              if (!disableSeeking && !isDragging) handleSeek(e)
             }}
           >
             {/* Background track */}
@@ -2164,6 +2220,7 @@ export function VideoPlayer({
               <button
                 className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
                 onClick={() => handleSkip('backward')}
+                disabled={disableSeeking}
                 title="Rewind 10s"
               >
                 <svg
@@ -2197,6 +2254,7 @@ export function VideoPlayer({
               <button
                 className="flex items-center justify-center w-9 h-9 rounded-full text-white/85 hover:text-white hover:bg-white/[0.08] transition-all duration-[120ms]"
                 onClick={() => handleSkip('forward')}
+                disabled={disableSeeking}
                 title="Forward 10s"
               >
                 <svg
@@ -2811,6 +2869,7 @@ export function VideoPlayer({
                   episodeId={episodeId}
                   animeTitle={animeTitle}
                   episodeNumber={currentEpisode}
+                  subtitles={subtitles}
                 />
               )}
 

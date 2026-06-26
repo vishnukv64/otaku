@@ -98,4 +98,29 @@ describe('DownloadPageContent group delete controls', () => {
     })
     expect(mockDeleteDownload).not.toHaveBeenCalled()
   })
+
+  it('shows a pinned estimated HLS total while only segment progress is known', async () => {
+    mockListDownloads.mockResolvedValue([
+      {
+        id: 'anime-episode-6',
+        media_id: '53516',
+        episode_id: 'episode-6',
+        episode_number: 6,
+        filename: 'Tensei_EP6_1080p.m3u8',
+        url: 'https://example.test/master.m3u8',
+        file_path: '/tmp/Tensei_EP6_1080p.m3u8',
+        total_bytes: 47_752_151,
+        downloaded_bytes: 47_752_151,
+        percentage: 11,
+        speed: 1_000_000,
+        status: 'downloading',
+      },
+    ])
+
+    render(<DownloadPageContent />)
+
+    expect(await screen.findAllByText('~414.00 MB')).not.toHaveLength(0)
+    expect(screen.getByText('45.54 MB / ~414.00 MB')).toBeInTheDocument()
+    expect(screen.getByText('976.56 KB/s')).toBeInTheDocument()
+  })
 })

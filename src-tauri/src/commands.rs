@@ -7,7 +7,7 @@
 // due to QuickJS's thread-safety limitations. In production, we'd use a thread-local
 // runtime pool.
 
-use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, TagsResult, VideoSources};
+use crate::extensions::{ChapterImages, Extension, ExtensionMetadata, ExtensionRuntime, HomeCategory, HomeContent, MangaDetails, MediaDetails, SearchResult, SearchResults, Subtitle, TagsResult, VideoSources};
 use crate::database::Database;
 use crate::downloads::{DownloadManager, DownloadProgress, chapter_downloads};
 use crate::request_headers::build_image_request;
@@ -1083,6 +1083,9 @@ pub async fn start_download(
     filename: String,
     custom_path: Option<String>,
     source_referrer: Option<String>,
+    subtitle_url: Option<String>,
+    subtitle_label: Option<String>,
+    subtitle_language: Option<String>,
 ) -> Result<String, String> {
     let download_id = format!("{}_{}", media_id, episode_number);
 
@@ -1098,6 +1101,9 @@ pub async fn start_download(
             filename,
             custom_path,
             source_referrer,
+            subtitle_url,
+            subtitle_label,
+            subtitle_language,
         )
         .await
         .map_err(|e| format!("Failed to queue download: {}", e))?;
@@ -1179,6 +1185,19 @@ pub async fn get_episode_file_path(
     episode_number: i32,
 ) -> Result<Option<String>, String> {
     Ok(download_manager.get_episode_file_path(&media_id, episode_number).await)
+}
+
+/// Get downloaded subtitle sidecars for a local video file.
+#[tauri::command]
+pub async fn get_downloaded_subtitles(
+    video_server: State<'_, VideoServerInfo>,
+    path: String,
+) -> Result<Vec<Subtitle>, String> {
+    Ok(DownloadManager::downloaded_subtitles_for_file(
+        path,
+        video_server.port,
+        video_server.access_token.clone(),
+    ).await)
 }
 
 /// Get total storage used by downloads
@@ -2084,6 +2103,12 @@ pub async fn get_local_file_size(path: String) -> Result<u64, String> {
         .await
         .map(|m| m.len())
         .map_err(|e| format!("Failed to stat file: {}", e))
+}
+
+/// Detect older single-file MPEG-TS downloads stored in obfuscated .otaku files.
+#[tauri::command]
+pub async fn is_legacy_ts_download(path: String) -> Result<bool, String> {
+    Ok(crate::video_server::is_obfuscated_mpeg_ts_file(&PathBuf::from(path)).await)
 }
 
 /// Get proxy URL for a remote video

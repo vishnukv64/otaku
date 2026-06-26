@@ -1291,6 +1291,9 @@ async fn trigger_auto_download(
             filename,
             None,
             source_referrer,
+            None,
+            None,
+            None,
         )
         .await
     {
