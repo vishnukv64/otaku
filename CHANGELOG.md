@@ -5,6 +5,15 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-07-26
+
+### Fixed
+- Updated frontend and build dependencies to patched releases for Seroval deserialization, PostCSS source-map disclosure, YAML merge-chain CPU exhaustion, and brace-expansion denial-of-service advisories.
+- Kept the remaining brace-expansion advisory isolated to ESLint's developer-authored glob processing because the patched major release is API-incompatible with ESLint 9.
+
+### Changed
+- Updated the security workflow to Node.js 22, pnpm 10, and an explicit documented exception for the incompatible ESLint-only advisory.
+
 ## [1.6.1] - 2026-07-26
 
 ### Fixed
