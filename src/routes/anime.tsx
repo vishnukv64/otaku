@@ -31,7 +31,7 @@ import { consumePendingReturn } from '@/utils/return-media'
 import { getDefaultMediaSortDirection, sortMediaResults } from '@/utils/mediaSort'
 
 // Debounce delay for instant search (ms)
-const SEARCH_DEBOUNCE_MS = 300
+const SEARCH_DEBOUNCE_MS = 600
 
 /**
  * Calculate the current anime season based on date.
@@ -248,6 +248,9 @@ function AnimeScreen() {
     sidebarFilters.orderBy,
     sidebarFilters.sort === 'asc' ? 'asc' : 'desc'
   )
+  const normalizedSearchInput = searchInput.trim()
+  const isSearchStateForInput = searchQuery === normalizedSearchInput
+  const visibleSearchError = isSearchStateForInput ? searchError : null
 
   // Load AllAnime extension lazily in background (for modal downloads)
   useEffect(() => {
@@ -646,20 +649,17 @@ function AnimeScreen() {
 
   // Debounced instant search
   useEffect(() => {
-    if (!searchInput.trim()) {
-      if (searchQuery) {
-        clearSearch()
-      }
+    if (!normalizedSearchInput) {
+      clearSearch()
       return
     }
 
     const timer = setTimeout(() => {
-      search(searchInput, 1, nsfwFilter)
+      search(normalizedSearchInput, 1, nsfwFilter)
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchInput, nsfwFilter])
+  }, [clearSearch, normalizedSearchInput, nsfwFilter, search])
 
   // Keyboard shortcuts
   useKeyboardShortcut(
@@ -737,10 +737,12 @@ function AnimeScreen() {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search for anime..."
+            aria-label="Search anime"
             className="w-full pl-10 pr-10 py-2.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-md)] text-sm text-white placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)] transition-colors"
           />
           {searchInput && (
             <button
+              type="button"
               onClick={() => { setSearchInput(''); clearSearch() }}
               className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-white transition-colors"
               aria-label="Clear search"
@@ -777,15 +779,15 @@ function AnimeScreen() {
             )}
 
             {/* Error State */}
-            {searchError && (
+            {visibleSearchError && (
               <div className="text-center py-8">
                 <AlertCircle className="w-12 h-12 text-[var(--color-accent-primary)] mx-auto mb-3" />
-                <p className="text-[var(--color-text-secondary)]">{searchError}</p>
+                <p className="text-[var(--color-text-secondary)]">{visibleSearchError}</p>
               </div>
             )}
 
             {/* No Results */}
-            {!searchLoading && searchResults.length === 0 && !searchError && searchQuery && (
+            {!searchLoading && searchResults.length === 0 && !visibleSearchError && isSearchStateForInput && searchQuery && (
               <div className="text-center py-12">
                 <p className="text-lg text-[var(--color-text-secondary)]">
                   No results found for "{searchQuery}"

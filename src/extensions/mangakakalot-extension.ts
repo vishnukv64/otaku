@@ -131,13 +131,20 @@ const extensionObject = {
       var imageMatch = block.match(/<(?:img)[^>]+(?:data-src|src)="([^"]+)"/i);
       var chapterMatch = block.match(/(?:list-story-item-wrap-chapter|chapter-item|item_chapter)"[^>]*>([\s\S]*?)</i);
       var descriptionMatch = block.match(/<p[^>]*class="[^"]*(?:description|content|story_item_description)[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
+      var viewsMatch = block.match(/aye_icon[^>]*>\s*([\d,]+)/i);
+      var chapterText = chapterMatch ? extensionObject._stripTags(chapterMatch[1]) : '';
+      var chapterNumberMatch = chapterText.match(/chapter\s+([\d.]+)/i);
+      var views = viewsMatch ? parseInt(viewsMatch[1].replace(/,/g, ''), 10) : null;
+      var availableEpisodes = chapterNumberMatch ? parseInt(chapterNumberMatch[1], 10) : null;
 
       results.push({
         id: slug,
         title: title,
         coverUrl: imageMatch ? extensionObject._absoluteUrl(imageMatch[1]) : null,
         description: descriptionMatch ? extensionObject._stripTags(descriptionMatch[1]) : undefined,
-        status: chapterMatch ? extensionObject._stripTags(chapterMatch[1]) : undefined,
+        status: chapterText || undefined,
+        views: isNaN(views) ? null : views,
+        availableEpisodes: isNaN(availableEpisodes) ? null : availableEpisodes,
         genres: []
       });
     }
@@ -191,6 +198,17 @@ const extensionObject = {
     return '';
   },
 
+  _datePartsFromIso: function(value) {
+    if (!value) return null;
+    var date = new Date(String(value));
+    if (isNaN(date.getTime())) return null;
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth(),
+      date: date.getUTCDate()
+    };
+  },
+
   _extractChapterRows: function(html) {
     var rows = [];
     var rowRegex = /<(?:div[^>]*class="[^"]*row[^"]*"|li[^>]*class="[^"]*row-content-chapter[^"]*")[^>]*>([\s\S]*?)(?=<div[^>]*class="[^"]*row[^"]*"|<li[^>]*class="[^"]*row-content-chapter[^"]*"|$)/gi;
@@ -237,8 +255,32 @@ const extensionObject = {
 
     try {
       var html = extensionObject._get(path);
+      var results = extensionObject._extractSearchResults(html);
+      if (genreList.length > 0 && sort === 'update') {
+        results.forEach(function(item) {
+          try {
+            var api = extensionObject._getJson('/api/manga/' + item.id + '/chapters?limit=1');
+            var chapter = api && api.data && api.data.chapters && api.data.chapters[0];
+            if (!chapter) return;
+
+            var chapterNum = parseInt(chapter.chapter_num, 10);
+            var latestDate = extensionObject._datePartsFromIso(chapter.updated_at);
+            if (!isNaN(chapterNum)) item.availableEpisodes = chapterNum;
+            if (latestDate) item.latestEpisodeDate = latestDate;
+          } catch (_) {}
+        });
+        results.sort(function(a, b) {
+          var aDate = a.latestEpisodeDate
+            ? Date.UTC(a.latestEpisodeDate.year, a.latestEpisodeDate.month, a.latestEpisodeDate.date)
+            : 0;
+          var bDate = b.latestEpisodeDate
+            ? Date.UTC(b.latestEpisodeDate.year, b.latestEpisodeDate.month, b.latestEpisodeDate.date)
+            : 0;
+          return bDate - aDate;
+        });
+      }
       return {
-        results: extensionObject._extractSearchResults(html),
+        results: results,
         hasNextPage: extensionObject._hasNextPage(html)
       };
     } catch (error) {

@@ -10,6 +10,11 @@ const RETRY_DELAY_MS: u64 = 1000;
 const MAX_RETRIES: u32 = 5;
 const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
+fn is_mal_unavailable_body(body: &str) -> bool {
+    let lower = body.to_lowercase();
+    lower.contains("jikan failed to connect") && lower.contains("myanimelist")
+}
+
 struct CacheEntry {
     etag: String,
     body: String,
@@ -153,6 +158,9 @@ impl JikanClient {
                     if code == 404 {
                         return Err(last_error);
                     }
+                    if code == 504 && is_mal_unavailable_body(&body) {
+                        return Err(last_error);
+                    }
                     // Retry on 400 (Jikan sometimes returns 400 under rate limiting)
                     // and on 5xx server errors
                     if code == 400 || code >= 500 {
@@ -201,4 +209,16 @@ impl JikanClient {
 
 lazy_static::lazy_static! {
     pub static ref JIKAN: JikanClient = JikanClient::new();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_mal_unavailable_body;
+
+    #[test]
+    fn detects_myanimelist_upstream_outage_body() {
+        assert!(is_mal_unavailable_body(
+            r#"{"status":504,"message":"Jikan failed to connect to MyAnimeList. MyAnimeList may be down\/unavailable or refuses to connect"}"#
+        ));
+    }
 }

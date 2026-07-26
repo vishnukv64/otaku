@@ -103,12 +103,9 @@ const extensionObject = {
   },
 
   sourceRank: function(source) {
-    const value = String((source && source.server) || '') + ' ' +
-      String((source && source.m3u8) || '') + ' ' +
-      String((source && source.referer) || '');
-    const lower = value.toLowerCase();
-    if (lower.includes('vidcloud') || lower.includes('vidwish') || lower.includes('watching.onl')) return 0;
-    if (lower.includes('mewstream') || lower.includes('megaplay')) return 10;
+    const url = String((source && source.m3u8) || '').toLowerCase();
+    if (url.includes('kotocdn') || url.includes('mewstream') || url.includes('megaplay')) return 0;
+    if (url.includes('watching.onl') || url.includes('vidwish.live')) return 10;
     return 5;
   },
 

@@ -473,9 +473,9 @@ function WatchPage() {
           : []
         const localSourceType = filePath && isLocalHlsPlaylist(filePath) ? 'hls' : 'video/mp4'
 
-        if (filePath && isAndroid()) {
-          // Android: Use convertFileSrc to serve via https://asset.localhost/
-          // This avoids mixed content issues (HTTPS page loading HTTP video server)
+        if (filePath && isAndroid() && !localIsLegacyTsDownload) {
+          // Android: Use convertFileSrc for directly playable downloads. Legacy
+          // .otaku TS files must use the video server so bytes are decrypted.
           const localUrl = convertFileSrc(filePath)
           setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
           setSources({
@@ -752,6 +752,7 @@ function WatchPage() {
               onPreviousEpisode={handlePreviousEpisode}
               initialTime={initialPlaybackTime}
               disableSeeking={!canSeekCurrentSource}
+              isLegacyTsDownload={isLegacyLocalTsDownload}
               autoPlay
               posterUrl={currentEpisode?.thumbnail || details?.cover_url}
             />
@@ -844,6 +845,7 @@ function WatchPage() {
           onGoBack={handleGoBack}
           initialTime={initialPlaybackTime}
           disableSeeking={!canSeekCurrentSource}
+          isLegacyTsDownload={isLegacyLocalTsDownload}
           autoPlay
           posterUrl={currentEpisode?.thumbnail || details?.cover_url}
         />

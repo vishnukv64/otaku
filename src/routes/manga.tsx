@@ -6,13 +6,9 @@
  */
 
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { Search, Loader2, X, Tag as TagIcon } from 'lucide-react'
-import {
-  discoverManga,
-  jikanTopManga,
-  searchManga,
-} from '@/utils/tauri-commands'
+import { discoverManga, jikanTopManga, searchManga } from '@/utils/tauri-commands'
 import type { Tag } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
@@ -29,10 +25,29 @@ import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { consumePendingReturn } from '@/utils/return-media'
-import { loadBundledMangaExtensions, resolveJikanToMangakakalot, MANGAKAKALOT_GENRES, type MangaExtensionIds } from '@/utils/manga-extensions'
+import {
+  loadBundledMangaExtensions,
+  resolveJikanToMangakakalot,
+  MANGAKAKALOT_GENRES,
+  type MangaExtensionIds,
+} from '@/utils/manga-extensions'
+import {
+  getDefaultMediaSortDirection,
+  getMangaDiscoverSortType,
+  sortMediaResults,
+} from '@/utils/mediaSort'
 
 // Debounce delay for instant search (ms)
 const SEARCH_DEBOUNCE_MS = 300
+
+const defaultMangaFilters: BrowseFilters = {
+  types: [],
+  statuses: [],
+  minScore: 0,
+  genres: new Set(),
+  orderBy: 'popularity',
+  sort: getDefaultMediaSortDirection('popularity'),
+}
 
 export const Route = createFileRoute('/manga')({
   component: MangaScreen,
@@ -71,26 +86,20 @@ function MangaScreen() {
   const [activeNav, setActiveNav] = useState<NavItem>('browse')
   const currentYear = new Date().getFullYear()
   const yearOptions = Array.from({ length: currentYear - 1999 }, (_, i) => currentYear - i)
-  const [browseFilters, setBrowseFilters] = useState<BrowseFilters>({
-    types: [],
-    statuses: [],
-    minScore: 0,
-    genres: new Set(),
-    orderBy: 'popularity',
-    sort: 'desc',
-  })
-  const [sortBy, setSortBy] = useState('popularity')
+  const [browseFilters, setBrowseFilters] = useState<BrowseFilters>(defaultMangaFilters)
 
   // When 18+ toggle is active in sidebar, override SFW filter to show adult content
   const effectiveSfw = browseFilters.nsfw ? false : nsfwFilter
 
   // Detect when sidebar filters are active
+  const isBrowseSortActive = browseFilters.orderBy !== defaultMangaFilters.orderBy
   const hasActiveFilters =
     browseFilters.types.length > 0 ||
     browseFilters.statuses.length > 0 ||
     browseFilters.genres.size > 0 ||
     browseFilters.minScore > 0 ||
-    browseFilters.nsfw
+    browseFilters.nsfw ||
+    isBrowseSortActive
 
   // Filtered browse state (used when hasActiveFilters on browse tab)
   const filteredBrowseLoadMoreRef = useRef<HTMLDivElement>(null)
@@ -141,6 +150,28 @@ function MangaScreen() {
   const [publishingLoadingMore, setPublishingLoadingMore] = useState(false)
   const publishingSeenRef = useRef<Set<string>>(new Set())
 
+  const sortDirection = browseFilters.sort === 'asc' ? 'asc' : 'desc'
+  const sortedSearchResults = useMemo(
+    () => sortMediaResults(searchResults, browseFilters.orderBy, sortDirection),
+    [searchResults, browseFilters.orderBy, sortDirection]
+  )
+  const sortedFilteredBrowseItems = useMemo(
+    () => sortMediaResults(filteredBrowseItems, browseFilters.orderBy, sortDirection),
+    [filteredBrowseItems, browseFilters.orderBy, sortDirection]
+  )
+  const sortedGenreResults = useMemo(
+    () => sortMediaResults(genreResults, browseFilters.orderBy, sortDirection),
+    [genreResults, browseFilters.orderBy, sortDirection]
+  )
+  const sortedTopRatedItems = useMemo(
+    () => sortMediaResults(topRatedItems, browseFilters.orderBy, sortDirection),
+    [topRatedItems, browseFilters.orderBy, sortDirection]
+  )
+  const sortedPublishingItems = useMemo(
+    () => sortMediaResults(publishingItems, browseFilters.orderBy, sortDirection),
+    [publishingItems, browseFilters.orderBy, sortDirection]
+  )
+
   // Load bundled manga extensions lazily
   useEffect(() => {
     loadBundledMangaExtensions()
@@ -188,7 +219,12 @@ function MangaScreen() {
     const timer = setTimeout(async () => {
       try {
         if (mangaExtensionIds.mangakakalot) {
-          const results = await searchManga(mangaExtensionIds.mangakakalot, searchInput, 1, !effectiveSfw)
+          const results = await searchManga(
+            mangaExtensionIds.mangakakalot,
+            searchInput,
+            1,
+            !effectiveSfw
+          )
           const filtered = filterNsfwContent(
             results.results,
             (item) => item.genres,
@@ -212,6 +248,14 @@ function MangaScreen() {
     setSearchInput('')
     setSearchResults([])
     searchInputRef.current?.focus()
+  }, [])
+
+  const handleHeaderSortChange = useCallback((orderBy: string) => {
+    setBrowseFilters((filters) => ({
+      ...filters,
+      orderBy,
+      sort: getDefaultMediaSortDirection(orderBy),
+    }))
   }, [])
 
   const handleMediaClick = async (item: SearchResult, extensionId?: string) => {
@@ -252,7 +296,7 @@ function MangaScreen() {
     discoverManga(
       mangaExtensionIds.mangakakalot,
       1,
-      browseFilters.orderBy === 'score' ? 'score' : 'update',
+      getMangaDiscoverSortType(browseFilters.orderBy),
       genreSlugs,
       !effectiveSfw
     )
@@ -284,7 +328,7 @@ function MangaScreen() {
       const result = await discoverManga(
         mangaExtensionIds.mangakakalot,
         nextPage,
-        browseFilters.orderBy === 'score' ? 'score' : 'update',
+        getMangaDiscoverSortType(browseFilters.orderBy),
         genreSlugs,
         !effectiveSfw
       )
@@ -347,7 +391,7 @@ function MangaScreen() {
   // === GENRE: Fetch genres list ===
   useEffect(() => {
     if (mangaGenres.length > 0) return
-    setMangaGenres(MANGAKAKALOT_GENRES.map(g => ({ ...g, count: 0 })))
+    setMangaGenres(MANGAKAKALOT_GENRES.map((g) => ({ ...g, count: 0 })))
   }, [mangaGenres.length])
 
   // Genre: fetch results when genres/filters change
@@ -376,7 +420,7 @@ function MangaScreen() {
         const result = await discoverManga(
           mangaExtensionIds.mangakakalot,
           1,
-          genreFilters.orderBy === 'score' ? 'score' : 'update',
+          getMangaDiscoverSortType(genreFilters.orderBy),
           genreSlugs,
           !effectiveSfw
         )
@@ -413,7 +457,7 @@ function MangaScreen() {
       const result = await discoverManga(
         mangaExtensionIds.mangakakalot,
         nextPage,
-        genreFilters.orderBy === 'score' ? 'score' : 'update',
+        getMangaDiscoverSortType(genreFilters.orderBy),
         genreSlugs,
         !effectiveSfw
       )
@@ -439,7 +483,16 @@ function MangaScreen() {
     } finally {
       setGenreLoadingMore(false)
     }
-  }, [genrePage, genreHasNextPage, genreLoadingMore, selectedGenreIds, genreFilters, effectiveSfw, genreSlugById, mangaExtensionIds])
+  }, [
+    genrePage,
+    genreHasNextPage,
+    genreLoadingMore,
+    selectedGenreIds,
+    genreFilters,
+    effectiveSfw,
+    genreSlugById,
+    mangaExtensionIds,
+  ])
 
   // Intersection observer for genre tab infinite scroll
   useEffect(() => {
@@ -642,8 +695,8 @@ function MangaScreen() {
       statuses: [],
       minScore: 0,
       genres: new Set(),
-      orderBy: 'popularity',
-      sort: 'desc',
+      orderBy: defaultMangaFilters.orderBy,
+      sort: defaultMangaFilters.sort,
       nsfw: false,
     })
   }
@@ -711,8 +764,8 @@ function MangaScreen() {
         <BrowseHeader
           title={headerTitle}
           resultCount={resultCount}
-          sortBy={sortBy}
-          onSortChange={setSortBy}
+          sortBy={browseFilters.orderBy || defaultMangaFilters.orderBy}
+          onSortChange={handleHeaderSortChange}
         />
 
         {/* Active Filter Chips */}
@@ -741,11 +794,13 @@ function MangaScreen() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Search manga"
               placeholder="Search for manga..."
               className="w-full pl-10 pr-10 py-2.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-md)] text-sm text-white placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)] transition-colors"
             />
             {searchInput && (
               <button
+                type="button"
                 onClick={handleClearSearch}
                 className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-white transition-colors"
                 aria-label="Clear search"
@@ -754,7 +809,6 @@ function MangaScreen() {
               </button>
             )}
           </div>
-
         </div>
 
         {/* Search Results / Genre Browse / Carousels */}
@@ -763,13 +817,13 @@ function MangaScreen() {
             {searchResults.length > 0 && (
               <div className="overflow-visible">
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
-                  {searchResults.map((item) => (
+                  {sortedSearchResults.map((item) => (
                     <MediaCard
                       key={item.id}
                       media={item}
-                        onClick={() => handleMediaClick(item, mangaExtensionIds.mangakakalot)}
-                        status={getStatus(item.id)}
-                      />
+                      onClick={() => handleMediaClick(item, mangaExtensionIds.mangakakalot)}
+                      status={getStatus(item.id)}
+                    />
                   ))}
                 </div>
               </div>
@@ -811,10 +865,10 @@ function MangaScreen() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
                 </div>
-              ) : genreResults.length > 0 ? (
+              ) : sortedGenreResults.length > 0 ? (
                 <div className="overflow-visible">
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
-                    {genreResults.map((item) => (
+                    {sortedGenreResults.map((item) => (
                       <MediaCard
                         key={item.id}
                         media={item}
@@ -861,10 +915,10 @@ function MangaScreen() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
               </div>
-            ) : topRatedItems.length > 0 ? (
+            ) : sortedTopRatedItems.length > 0 ? (
               <div className="overflow-visible">
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
-                  {topRatedItems.map((item) => (
+                  {sortedTopRatedItems.map((item) => (
                     <MediaCard
                       key={item.id}
                       media={item}
@@ -896,10 +950,10 @@ function MangaScreen() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
               </div>
-            ) : publishingItems.length > 0 ? (
+            ) : sortedPublishingItems.length > 0 ? (
               <div className="overflow-visible">
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
-                  {publishingItems.map((item) => (
+                  {sortedPublishingItems.map((item) => (
                     <MediaCard
                       key={item.id}
                       media={item}
@@ -931,10 +985,10 @@ function MangaScreen() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
               </div>
-            ) : filteredBrowseItems.length > 0 ? (
+            ) : sortedFilteredBrowseItems.length > 0 ? (
               <div className="overflow-visible">
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
-                  {filteredBrowseItems.map((item) => (
+                  {sortedFilteredBrowseItems.map((item) => (
                     <MediaCard
                       key={item.id}
                       media={item}

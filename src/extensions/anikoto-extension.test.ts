@@ -76,18 +76,18 @@ describe('Anikoto extension', () => {
             data: {
               sources: [
                 {
-                  server: 'HD-1',
-                  type: 'sub',
-                  m3u8: 'https://cdn.mewstream.buzz/master.m3u8',
-                  referer: 'https://megaplay.buzz/',
-                  tracks: [],
-                },
-                {
                   server: 'VidCloud-1',
                   type: 'sub',
                   m3u8: 'https://fxpy7.watching.onl/master.m3u8',
                   referer: 'https://vidwish.live/',
                   tracks: [{ file: 'https://subs.test/en.vtt', label: 'English' }],
+                },
+                {
+                  server: 'HD-1',
+                  type: 'sub',
+                  m3u8: 'https://cdn.mewstream.buzz/master.m3u8',
+                  referer: 'https://megaplay.buzz/',
+                  tracks: [],
                 },
               ],
             },
@@ -136,6 +136,14 @@ describe('Anikoto extension', () => {
 
     expect(extension.getSources('naruto-xyz::1')).toEqual({
       sources: [{
+        url: 'https://cdn.mewstream.buzz/master.m3u8',
+        quality: 'Auto',
+        type: 'hls',
+        server: 'HD-1',
+        referrer: 'https://megaplay.buzz/',
+        audio_type: 'sub',
+        subtitles: [],
+      }, {
         url: 'https://fxpy7.watching.onl/master.m3u8',
         quality: 'Auto',
         type: 'hls',
@@ -147,14 +155,6 @@ describe('Anikoto extension', () => {
           language: 'English',
           label: 'English',
         }],
-      }, {
-        url: 'https://cdn.mewstream.buzz/master.m3u8',
-        quality: 'Auto',
-        type: 'hls',
-        server: 'HD-1',
-        referrer: 'https://megaplay.buzz/',
-        audio_type: 'sub',
-        subtitles: [],
       }],
       subtitles: [{
         url: 'https://subs.test/en.vtt',

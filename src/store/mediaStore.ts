@@ -33,6 +33,28 @@ interface MediaState {
   clearSearch: () => void
 }
 
+const MIN_SEARCH_QUERY_LENGTH = 3
+let searchRequestId = 0
+
+function formatSearchError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (!message) return 'Search failed'
+
+  if (message.includes('429') || message.toLowerCase().includes('rate limited')) {
+    return 'Jikan is rate limiting searches. Wait a moment and try again.'
+  }
+
+  if (
+    message.includes('504')
+    || message.toLowerCase().includes('myanimelist')
+    || message.toLowerCase().includes('temporarily unavailable')
+  ) {
+    return 'Jikan is temporarily unavailable because MyAnimeList is not responding. Try again in a moment.'
+  }
+
+  return message
+}
+
 export const useMediaStore = create<MediaState>((set, get) => ({
   // Initial state
   searchQuery: '',
@@ -48,10 +70,18 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   search: async (query, page = 1, sfw = true) => {
-    set({ searchLoading: true, searchError: null, searchQuery: query })
+    const normalizedQuery = query.trim()
+    if (normalizedQuery.length < MIN_SEARCH_QUERY_LENGTH) {
+      get().clearSearch()
+      return
+    }
+
+    const requestId = ++searchRequestId
+    set({ searchLoading: true, searchError: null, searchQuery: normalizedQuery })
 
     try {
-      const results = await tauri.jikanSearchAnime(query, page, sfw)
+      const results = await tauri.jikanSearchAnime(normalizedQuery, page, sfw)
+      if (requestId !== searchRequestId) return
 
       // Deduplicate results to avoid React key warnings
       const existingResults = page === 1 ? [] : get().searchResults
@@ -71,8 +101,10 @@ export const useMediaStore = create<MediaState>((set, get) => ({
         searchLoading: false,
       })
     } catch (error) {
+      if (requestId !== searchRequestId) return
+
       set({
-        searchError: error instanceof Error ? error.message : 'Search failed',
+        searchError: formatSearchError(error),
         searchLoading: false,
       })
     }
@@ -98,12 +130,15 @@ export const useMediaStore = create<MediaState>((set, get) => ({
     }
   },
 
-  clearSearch: () =>
+  clearSearch: () => {
+    searchRequestId++
     set({
       searchQuery: '',
       searchResults: [],
+      searchLoading: false,
       searchError: null,
       hasNextPage: false,
       currentPage: 1,
-    }),
+    })
+  },
 }))

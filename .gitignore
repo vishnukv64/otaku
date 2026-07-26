@@ -65,3 +65,10 @@ src/routeTree.gen.ts
 src-tauri/gen/
 
 .serena/
+
+# flow-managed agent worktrees
+/.codex/worktrees/
+
+# Local Claude settings and managed worktrees
+/.claude/settings.local.json
+/.claude/worktrees/

@@ -9,7 +9,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, CheckCircle2, XCircle, AlertCircle, Circle } from 'lucide-react'
-import { jikanTopAnime, jikanTopManga, subscribeToApiStatus } from '@/utils/tauri-commands'
+import { createAnikotoExtension } from '@/extensions/anikoto-extension'
+import { MANGAKAKALOT_EXTENSION } from '@/extensions/mangakakalot-extension'
+import { useSettingsStore } from '@/store/settingsStore'
+import { loadExtension, searchAnime, searchManga, subscribeToApiStatus } from '@/utils/tauri-commands'
 
 type ApiStatus = 'checking' | 'online' | 'offline' | 'error'
 
@@ -35,7 +38,31 @@ const initialEndpointStatus: EndpointStatus = {
   error: null,
 }
 
+const ANIME_HEALTH_QUERY = 'naruto'
+const MANGA_HEALTH_QUERY = 'one piece'
+
+function getStatusIcon(s: ApiStatus) {
+  switch (s) {
+    case 'online':
+      return <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+    case 'offline':
+      return <XCircle className="w-3.5 h-3.5 text-red-500" />
+    case 'error':
+      return <AlertCircle className="w-3.5 h-3.5 text-yellow-500" />
+    case 'checking':
+      return <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />
+  }
+}
+
+function formatTime(date: Date | null) {
+  if (!date) return 'Never'
+  return date.toLocaleTimeString()
+}
+
 export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
+  const anikotoApiBaseUrl = useSettingsStore((state) => state.anikotoApiBaseUrl)
+  const anikotoSiteBaseUrl = useSettingsStore((state) => state.anikotoSiteBaseUrl)
+  const anikotoYotochanBaseUrl = useSettingsStore((state) => state.anikotoYotochanBaseUrl)
   const [status, setStatus] = useState<ApiStatusState>({
     anime: initialEndpointStatus,
     manga: initialEndpointStatus,
@@ -97,8 +124,18 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
     }))
 
     const [animeStatus, mangaStatus] = await Promise.all([
-      checkEndpoint(() => jikanTopAnime(1, undefined, 'airing')),
-      checkEndpoint(() => jikanTopManga(1, undefined, 'publishing')),
+      checkEndpoint(async () => {
+        const metadata = await loadExtension(createAnikotoExtension({
+          apiBaseUrl: anikotoApiBaseUrl,
+          siteBaseUrl: anikotoSiteBaseUrl,
+          yotochanBaseUrl: anikotoYotochanBaseUrl,
+        }))
+        return searchAnime(metadata.id, ANIME_HEALTH_QUERY, 1, false)
+      }),
+      checkEndpoint(async () => {
+        const metadata = await loadExtension(MANGAKAKALOT_EXTENSION)
+        return searchManga(metadata.id, MANGA_HEALTH_QUERY, 1, false)
+      }),
     ])
 
     setStatus(prev => ({
@@ -106,7 +143,12 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
       anime: animeStatus,
       manga: mangaStatus,
     }))
-  }, [checkEndpoint])
+  }, [
+    anikotoApiBaseUrl,
+    anikotoSiteBaseUrl,
+    anikotoYotochanBaseUrl,
+    checkEndpoint,
+  ])
 
   // Listen for network online/offline events
   useEffect(() => {
@@ -237,24 +279,6 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
     }
   }
 
-  const getStatusIcon = (s: ApiStatus) => {
-    switch (s) {
-      case 'online':
-        return <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-      case 'offline':
-        return <XCircle className="w-3.5 h-3.5 text-red-500" />
-      case 'error':
-        return <AlertCircle className="w-3.5 h-3.5 text-yellow-500" />
-      case 'checking':
-        return <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />
-    }
-  }
-
-  const formatTime = (date: Date | null) => {
-    if (!date) return 'Never'
-    return date.toLocaleTimeString()
-  }
-
   const getStatusLabel = () => {
     switch (overallStatus) {
       case 'online':
@@ -290,7 +314,7 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
         <div className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-[var(--color-bg-hover)]/50">
           <div className="flex items-center gap-2">
             {getStatusIcon(status.anime.status)}
-            <span className="text-sm">Anime</span>
+            <span className="text-sm">Anikoto</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             {status.anime.responseTime !== null && (
@@ -306,7 +330,7 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
         <div className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-[var(--color-bg-hover)]/50">
           <div className="flex items-center gap-2">
             {getStatusIcon(status.manga.status)}
-            <span className="text-sm">Manga</span>
+            <span className="text-sm">Mangakakalot</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             {status.manga.responseTime !== null && (
@@ -340,6 +364,7 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
           <span className={`w-2.5 h-2.5 rounded-full ${getStatusColor()}`} />
           <span className="text-sm font-medium">{getStatusLabel()}</span>
           <button
+            type="button"
             onClick={checkAllApis}
             className="ml-auto text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
           >
@@ -351,7 +376,7 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
         <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)]">
           <div className="flex items-center gap-2.5">
             {getStatusIcon(status.anime.status)}
-            <span className="text-sm">Anime API</span>
+            <span className="text-sm">Anikoto API</span>
           </div>
           <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
             {status.anime.responseTime !== null && (
@@ -367,7 +392,7 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
         <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)]">
           <div className="flex items-center gap-2.5">
             {getStatusIcon(status.manga.status)}
-            <span className="text-sm">Manga API</span>
+            <span className="text-sm">Mangakakalot API</span>
           </div>
           <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
             {status.manga.responseTime !== null && (
@@ -398,6 +423,7 @@ export function ApiStatusIndicator({ inline = false }: { inline?: boolean }) {
     <>
       {/* Subtle dot indicator */}
       <button
+        type="button"
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 group"

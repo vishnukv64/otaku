@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
+import mpegts from 'mpegts.js'
 import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
 import type { Subtitle, VideoSource } from '@/types/extension'
 import {
@@ -181,6 +182,7 @@ interface VideoPlayerProps {
   onProgress?: (time: number) => void
   initialTime?: number
   disableSeeking?: boolean
+  isLegacyTsDownload?: boolean
   autoPlay?: boolean
   posterUrl?: string
 }
@@ -201,12 +203,14 @@ export function VideoPlayer({
   onProgress,
   initialTime = 0,
   disableSeeking = false,
+  isLegacyTsDownload = false,
   autoPlay = true,
   posterUrl,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const mpegtsRef = useRef<ReturnType<typeof mpegts.createPlayer> | null>(null)
   const sidebarEpisodeRef = useRef<HTMLDivElement>(null)
   // Tracks when the episode first hit the completion threshold (for auto-delete cooldown)
   const completedAtRef = useRef<number | null>(null)
@@ -338,10 +342,21 @@ export function VideoPlayer({
         : sources,
     [sources, audioModes, selectedAudioMode]
   )
+  const availableSourceSetKey = useMemo(
+    () => sources.map((source) => `${source.server}:${source.url}`).join('|'),
+    [sources]
+  )
   const sourceSetKey = useMemo(
     () => playbackSources.map((source) => `${source.server}:${source.url}`).join('|'),
     [playbackSources]
   )
+
+  useEffect(() => {
+    const defaultMode = audioModes.includes('sub') ? 'sub' : audioModes[0]
+    if (defaultMode) setSelectedAudioMode(defaultMode)
+    // Reset to the preferred audio mode only when the episode/source set changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [episodeId, availableSourceSetKey])
 
   useEffect(() => {
     if (audioModes.length > 0 && !audioModes.includes(selectedAudioMode)) {
@@ -436,6 +451,21 @@ export function VideoPlayer({
       video.textTracks.removeEventListener?.('change', disable)
     }
   }, [currentSource?.url, selectedSubtitleUrl])
+
+  useEffect(() => {
+    const englishTrack = subtitleTracks.find((track) => {
+      const language = (track.language || '').toLowerCase().trim()
+      const label = (track.label || '').toLowerCase()
+      return (
+        language === 'en' ||
+        language === 'eng' ||
+        language.startsWith('en-') ||
+        language.includes('english') ||
+        label.includes('english')
+      )
+    })
+    setSelectedSubtitleUrl(englishTrack?.url || 'off')
+  }, [currentSource?.url, subtitleTracks])
 
   useEffect(() => {
     if (
@@ -538,6 +568,12 @@ export function VideoPlayer({
       return () => clearTimeout(timeoutId)
     }
 
+    const videoListenerCleanups: Array<() => void> = []
+    const addVideoListener = (type: string, listener: EventListener) => {
+      video.addEventListener(type, listener)
+      videoListenerCleanups.push(() => video.removeEventListener(type, listener))
+    }
+
     const loadVideo = async () => {
       setLoading(true)
       setError(null)
@@ -549,6 +585,10 @@ export function VideoPlayer({
         if (hlsRef.current) {
           hlsRef.current.destroy()
           hlsRef.current = null
+        }
+        if (mpegtsRef.current) {
+          mpegtsRef.current.destroy()
+          mpegtsRef.current = null
         }
         video.removeAttribute('src')
         video.load() // Reset the video element
@@ -563,8 +603,34 @@ export function VideoPlayer({
         const isActuallyHls =
           currentSource.url.toLowerCase().includes('.m3u8') ||
           currentSource.url.toLowerCase().includes('m3u8')
+        if (isLegacyTsDownload && !mpegts.isSupported()) {
+          setError('Downloaded MPEG-TS playback is not supported on this device')
+          setLoading(false)
+          return
+        }
 
-        if (isActuallyHls && Hls.isSupported()) {
+        if (isLegacyTsDownload) {
+          const player = mpegts.createPlayer({
+            type: 'mpegts',
+            isLive: false,
+            url: currentSource.url,
+          })
+          mpegtsRef.current = player
+
+          player.on(mpegts.Events.ERROR, (errorType, errorDetail) => {
+            console.error('[VideoPlayer] MPEG-TS playback error:', errorType, errorDetail)
+            setError(`Downloaded video error: ${errorDetail || errorType}`)
+            setLoading(false)
+          })
+          player.attachMediaElement(video)
+          player.load()
+
+          if (autoPlay) {
+            Promise.resolve(player.play()).catch((playError: unknown) => {
+              console.warn('[VideoPlayer] MPEG-TS autoplay failed:', playError)
+            })
+          }
+        } else if (isActuallyHls && Hls.isSupported()) {
           // HLS.js already cleaned up at the start of loadVideo, create new instance
           const hls = new Hls({
             enableWorker: true,
@@ -670,11 +736,16 @@ export function VideoPlayer({
                   }
                   break
                 case Hls.ErrorTypes.MEDIA_ERROR:
-                  // On Android, MSE codec support can be buggy (bufferAppendError).
-                  // Fall back to native HLS playback with rewritten manifest.
-                  if (isAndroid() && videoServer) {
+                  // bufferAddCodecError means MediaSource rejected the codec tuple.
+                  // Native HLS bypasses MSE and uses WebKit's media pipeline instead.
+                  if (
+                    videoServer &&
+                    (isAndroid() ||
+                      (data.details === 'bufferAddCodecError' &&
+                        video.canPlayType('application/vnd.apple.mpegurl') !== ''))
+                  ) {
                     console.log(
-                      '[VideoPlayer] HLS.js media error on Android, falling back to native HLS'
+                      '[VideoPlayer] HLS.js media codec error, falling back to native HLS'
                     )
                     hls.destroy()
                     hlsRef.current = null
@@ -684,7 +755,6 @@ export function VideoPlayer({
                       currentSource.url,
                       currentSource.referrer
                     )
-                    video.src = hlsUrl
                     setError(null)
 
                     const handleNativeLoaded = () => {
@@ -697,7 +767,8 @@ export function VideoPlayer({
                       }
                       video.removeEventListener('loadedmetadata', handleNativeLoaded)
                     }
-                    video.addEventListener('loadedmetadata', handleNativeLoaded)
+                    addVideoListener('loadedmetadata', handleNativeLoaded)
+                    video.src = hlsUrl
                   } else {
                     setError(`Media error: ${data.details}`)
                     hls.recoverMediaError()
@@ -731,7 +802,7 @@ export function VideoPlayer({
                       }
                       video.removeEventListener('loadedmetadata', handleNativeLoaded2)
                     }
-                    video.addEventListener('loadedmetadata', handleNativeLoaded2)
+                    addVideoListener('loadedmetadata', handleNativeLoaded2)
                   } else {
                     setError(`Fatal error: ${data.details}`)
                     setLoading(false)
@@ -765,7 +836,7 @@ export function VideoPlayer({
             video.removeEventListener('loadedmetadata', handleLoadedMetadata)
           }
 
-          video.addEventListener('loadedmetadata', handleLoadedMetadata)
+          addVideoListener('loadedmetadata', handleLoadedMetadata)
         } else {
           // Direct MP4 playback (including downloaded videos and remote non-HLS)
           let videoUrl = currentSource.url
@@ -788,13 +859,13 @@ export function VideoPlayer({
               setError(`Video error: ${error.message || 'Unknown error'}`)
             }
           }
-          video.addEventListener('error', handleError)
+          addVideoListener('error', handleError)
 
           // Handle successful loading
           const handleCanPlay = () => {
             setLoading(false)
           }
-          video.addEventListener('canplay', handleCanPlay)
+          addVideoListener('canplay', handleCanPlay)
 
           setLoading(false)
 
@@ -811,7 +882,7 @@ export function VideoPlayer({
             video.removeEventListener('loadedmetadata', handleLoadedMetadata)
           }
 
-          video.addEventListener('loadedmetadata', handleLoadedMetadata)
+          addVideoListener('loadedmetadata', handleLoadedMetadata)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load video')
@@ -827,6 +898,11 @@ export function VideoPlayer({
         hlsRef.current.destroy()
         hlsRef.current = null
       }
+      if (mpegtsRef.current) {
+        mpegtsRef.current.destroy()
+        mpegtsRef.current = null
+      }
+      for (const cleanup of videoListenerCleanups) cleanup()
       // Also clean up direct video sources
       if (video) {
         video.pause()
@@ -837,7 +913,14 @@ export function VideoPlayer({
     // currentSource fields as primitive deps avoid re-running when the
     // memoized object reference changes but playback inputs do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServer, sources, videoServer, currentSource?.url, currentSource?.referrer])
+  }, [
+    selectedServer,
+    sources,
+    videoServer,
+    currentSource?.url,
+    currentSource?.referrer,
+    isLegacyTsDownload,
+  ])
 
   // Close MiniPlayer when VideoPlayer starts playing (user navigated to /watch manually)
   useEffect(() => {

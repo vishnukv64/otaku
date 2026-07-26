@@ -74,6 +74,9 @@ pub struct SearchResult {
     /// MAL popularity rank
     #[serde(default)]
     pub popularity: Option<i32>,
+    /// Provider-side view count, when a source exposes it.
+    #[serde(default)]
+    pub views: Option<i32>,
     /// Studios (from Jikan anime data)
     #[serde(default)]
     pub studios: Option<Vec<String>>,

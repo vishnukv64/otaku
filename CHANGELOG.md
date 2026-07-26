@@ -5,6 +5,20 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-07-26
+
+### Fixed
+- Recovered WKWebView HLS playback from unsupported MSE codecs by falling back to native HLS while preserving referrer, resume position, and autoplay.
+- Preferred reliable direct Anikoto media URLs over unstable Watching and Vidwish sources.
+- Played legacy `.otaku` MPEG-TS downloads through `mpegts.js`, with streamed decryption, range support, Android routing, and lifecycle cleanup.
+- Defaulted each episode to sub audio and English subtitles when available.
+- Prevented stale anime search responses and errors from replacing newer queries, with clearer Jikan rate-limit and upstream outage messages.
+
+### Changed
+- API status checks now probe the active Anikoto and Mangakakalot providers instead of unrelated Jikan top-list endpoints.
+- Manga sorting now uses provider views, chapter counts, and full update dates where available.
+- Increased anime search debounce to reduce avoidable provider requests.
+
 ## [1.6.0] - 2026-06-26
 
 ### Added

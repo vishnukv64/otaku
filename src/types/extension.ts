@@ -47,6 +47,8 @@ export interface SearchResult {
   rank?: number
   /** MAL popularity rank */
   popularity?: number
+  /** Provider-side view count, when a source exposes it. */
+  views?: number
   /** Studios (from Jikan anime data) */
   studios?: string[]
   /** Broadcast day (e.g., "Mondays") — from Jikan schedule data */

@@ -18,6 +18,7 @@ use axum::{
     routing::get,
     Router,
 };
+use futures_util::StreamExt;
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -191,6 +192,12 @@ struct AbsolutePathQuery {
     path: Option<String>,
 }
 
+fn decrypt_obfuscated_chunk(mut chunk: Vec<u8>, offset: &mut u64) -> Vec<u8> {
+    obfuscation::xor_transform(&mut chunk, *offset);
+    *offset += chunk.len() as u64;
+    chunk
+}
+
 // Serve a file from an absolute path (for custom download locations)
 async fn serve_absolute_path(
     Query(query): Query<AbsolutePathQuery>,
@@ -291,32 +298,25 @@ async fn serve_absolute_path(
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     if is_obfuscated {
-        // For obfuscated files: read into memory, XOR-decrypt, then serve
         let mut file = file;
-
         let (start, length, is_range) = if let Some((s, e)) = range {
             (s, e - s + 1, true)
         } else {
             (0, file_size, false)
         };
 
-        // Seek to start position
         if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
             log::error!("Failed to seek file: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to seek file").into_response();
         }
 
-        // Read the requested range into memory
-        let mut buf = vec![0u8; length as usize];
-        if let Err(e) = file.read_exact(&mut buf).await {
-            log::error!("Failed to read file: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response();
-        }
-
-        // XOR-decrypt using the file offset so position-aware key alignment is correct
-        obfuscation::xor_transform(&mut buf, start);
-
-        let body = Body::from(buf);
+        // Decrypt each streamed chunk at its absolute file offset. This keeps
+        // startup memory bounded even when mpegts.js requests the full file.
+        let mut decrypt_offset = start;
+        let stream = tokio_util::io::ReaderStream::new(file.take(length)).map(move |result| {
+            result.map(|chunk| decrypt_obfuscated_chunk(chunk.to_vec(), &mut decrypt_offset))
+        });
+        let body = Body::from_stream(stream);
 
         if is_range {
             Response::builder()
@@ -839,6 +839,72 @@ mod tests {
     fn sniff_obfuscated_video_type_detects_legacy_ts_downloads() {
         assert_eq!(sniff_decrypted_video_type(&[0x47, 0x40, 0x00, 0x10]), "video/mp2t");
         assert_eq!(sniff_decrypted_video_type(&[0, 0, 0, 32, b'f', b't', b'y', b'p']), "video/mp4");
+    }
+
+    #[test]
+    fn decrypts_obfuscated_stream_chunks_with_continuous_key_offsets() {
+        let original = b"a transport stream split across arbitrary response chunks";
+        let mut encrypted = original.to_vec();
+        obfuscation::xor_transform(&mut encrypted, 0);
+
+        let mut offset = 0;
+        let mut decrypted = decrypt_obfuscated_chunk(encrypted[..13].to_vec(), &mut offset);
+        decrypted.extend(decrypt_obfuscated_chunk(encrypted[13..].to_vec(), &mut offset));
+
+        assert_eq!(decrypted, original);
+        assert_eq!(offset, original.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn streams_decrypted_obfuscated_files_for_full_and_range_requests() {
+        let mut original = vec![0u8; 32 * 1024];
+        for (index, byte) in original.iter_mut().enumerate() {
+            *byte = (index % 251) as u8;
+        }
+        original[0] = 0x47;
+        let mut encrypted = original.clone();
+        obfuscation::xor_transform(&mut encrypted, 0);
+
+        let path = std::env::temp_dir().join(format!(
+            "otaku-obfuscated-stream-{}.otaku",
+            std::process::id()
+        ));
+        tokio::fs::write(&path, encrypted).await.unwrap();
+        let path_string = path.to_string_lossy().to_string();
+
+        let response = serve_absolute_path(
+            Query(AbsolutePathQuery {
+                token: None,
+                path: Some(path_string.clone()),
+            }),
+            Request::builder().body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "video/mp2t");
+        let full_body = axum::body::to_bytes(response.into_body(), original.len())
+            .await
+            .unwrap();
+        assert_eq!(full_body.as_ref(), original.as_slice());
+
+        let response = serve_absolute_path(
+            Query(AbsolutePathQuery {
+                token: None,
+                path: Some(path_string),
+            }),
+            Request::builder()
+                .header(header::RANGE, "bytes=123-9000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        let range_body = axum::body::to_bytes(response.into_body(), 9000 - 123 + 1)
+            .await
+            .unwrap();
+        assert_eq!(range_body.as_ref(), &original[123..=9000]);
+
+        let _ = tokio::fs::remove_file(path).await;
     }
 
     #[tokio::test]
