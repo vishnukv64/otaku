@@ -232,6 +232,25 @@ pub fn run() {
       #[cfg(desktop)]
       app_handle.manage(tray::TrayLifecycleState::default());
 
+      // Dev-build only: OTAKU_DEV_EVAL=<js> runs that script in the main webview a few
+      // seconds after launch. Used to drive screens on a real iPhone for screenshot
+      // checks (`devicectl device process launch --environment-variables`). Not in
+      // release builds.
+      #[cfg(debug_assertions)]
+      if let Ok(script) = std::env::var("OTAKU_DEV_EVAL") {
+        let handle = app_handle.clone();
+        std::thread::spawn(move || {
+          let delay = std::env::var("OTAKU_DEV_EVAL_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4000);
+          std::thread::sleep(std::time::Duration::from_millis(delay));
+          if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.eval(&script);
+          }
+        });
+      }
+
       // If launched with --hidden (e.g. by the autostart LaunchAgent), start
       // straight into the tray instead of showing the window.
       if std::env::args().any(|a| a == "--hidden") {
