@@ -9,6 +9,10 @@ const MAX_PER_MINUTE: usize = 60;
 const RETRY_DELAY_MS: u64 = 1000;
 const MAX_RETRIES: u32 = 5;
 const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+// Without these, ureq waits 30s to connect and forever to read, and a dead
+// Jikan host stalled every call for minutes before callers could fall back.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 
 fn is_mal_unavailable_body(body: &str) -> bool {
     let lower = body.to_lowercase();
@@ -22,6 +26,7 @@ struct CacheEntry {
 }
 
 pub struct JikanClient {
+    agent: ureq::Agent,
     request_times: Mutex<VecDeque<Instant>>,
     cache: Mutex<HashMap<String, CacheEntry>>,
 }
@@ -29,6 +34,10 @@ pub struct JikanClient {
 impl JikanClient {
     pub fn new() -> Self {
         Self {
+            agent: ureq::AgentBuilder::new()
+                .timeout_connect(CONNECT_TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
+                .build(),
             request_times: Mutex::new(VecDeque::new()),
             cache: Mutex::new(HashMap::new()),
         }
@@ -110,7 +119,7 @@ impl JikanClient {
 
             log::debug!("Jikan request: {} (attempt {})", url, attempt + 1);
 
-            let mut request = ureq::get(&url).set("Accept", "application/json");
+            let mut request = self.agent.get(&url).set("Accept", "application/json");
             if let Some(ref etag) = cached_etag {
                 request = request.set("If-None-Match", etag);
             }
@@ -177,10 +186,9 @@ impl JikanClient {
                     }
                     return Err(last_error);
                 }
-                Err(e) => {
-                    last_error = format!("Jikan request failed: {}", e);
-                    std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
-                }
+                // Transport failure (DNS, connect, timeout): the host is unreachable,
+                // and retrying only delays the caller's fallback.
+                Err(e) => return Err(format!("Jikan request failed: {}", e)),
             }
         }
 
