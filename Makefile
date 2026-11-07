@@ -10,6 +10,7 @@
 #   make ios            — Build iOS IPA (requires Xcode + signing)
 #   make ios-dev        — Run iOS dev in simulator
 #   make ios-init       — (Re)generate iOS project scaffolding
+#   make ios-device     — Build, sign and install on a connected iPhone (Xcode 27)
 #   make setup          — Install all build prerequisites
 #   make clean          — Remove build artifacts
 
@@ -131,7 +132,7 @@ android-install-debug:
 	adb install "$$APK"
 
 # ─── iOS ─────────────────────────────────────────────────────────
-.PHONY: ios ios-dev ios-init ios-debug
+.PHONY: ios ios-dev ios-init ios-debug ios-device
 
 ## Build iOS release archive (requires Apple Developer signing)
 ios:
@@ -164,6 +165,38 @@ ios-dev:
 ios-init:
 	rm -rf src-tauri/gen/apple
 	$(TAURI) ios init
+
+## Build, sign and install on a connected iPhone, without the Tauri CLI.
+## `tauri ios build` does not work with Xcode 27 yet (tauri-apps/tauri#16121), so
+## this builds the Rust staticlib itself, puts it where the Xcode project links
+## it, disables the project's "Build Rust Code" phase (gen/ is untracked) and
+## signs with Xcode automatic signing (Xcode must be signed in to the team).
+## The Rust lib uses the dev profile: Xcode 27's ld writes release proc-macro
+## dylibs that dyld rejects with rustc 1.93. llvm-tools keeps plugin @_cdecl
+## symbols exported (swift-rs).
+## Override: make ios-device APPLE_DEVELOPMENT_TEAM=... IOS_DEVICE=<udid>
+APPLE_DEVELOPMENT_TEAM ?= 5DU9UJ39CG
+IOS_DEVICE ?= $(shell xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && /physical/ {for (i = 2; i <= NF; i++) if ($$i == "(UDID)") {print $$(i-1); exit}}')
+IOS_APPLE   := src-tauri/gen/apple
+IOS_APP     := $(IOS_APPLE)/build/dd/Build/Products/release-iphoneos/otaku.app
+
+ios-device: install
+	@test -n "$(IOS_DEVICE)" || (echo "No connected iPhone found (set IOS_DEVICE=<udid>)" && exit 1)
+	@test -d $(IOS_APPLE)/app.xcodeproj || (APPLE_DEVELOPMENT_TEAM=$(APPLE_DEVELOPMENT_TEAM) CI=true $(TAURI) ios init --ci)
+	rustup component add llvm-tools
+	pnpm build
+	cd src-tauri && IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo rustc --target aarch64-apple-ios --lib \
+		--crate-type staticlib --features tauri/custom-protocol
+	mkdir -p $(IOS_APPLE)/Externals/arm64/release
+	cp src-tauri/target/aarch64-apple-ios/debug/libapp_lib.a $(IOS_APPLE)/Externals/arm64/release/libapp.a
+	sed -i '' -E 's/shellScript = "[^"]*tauri ios xcode-script.*";/shellScript = "exit 0";/' \
+		$(IOS_APPLE)/app.xcodeproj/project.pbxproj
+	cd $(IOS_APPLE) && xcodebuild -project app.xcodeproj -scheme app_iOS -configuration release \
+		-destination 'generic/platform=iOS' -derivedDataPath build/dd -allowProvisioningUpdates \
+		DEVELOPMENT_TEAM=$(APPLE_DEVELOPMENT_TEAM) CODE_SIGN_STYLE=Automatic build
+	xcrun devicectl device install app --device $(IOS_DEVICE) $(IOS_APP)
+	xcrun devicectl device process launch --device $(IOS_DEVICE) com.otaku.player \
+		|| echo "Installed. Unlock the iPhone and open Otaku."
 
 # ─── Setup ───────────────────────────────────────────────────────
 .PHONY: setup setup-rust-targets setup-check
