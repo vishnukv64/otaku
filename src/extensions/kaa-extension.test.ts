@@ -98,7 +98,7 @@ describe('KAA extension', () => {
         url: 'https://hls.krussdomi.com/manifest/abc123/master.m3u8',
         type: 'hls',
         server: 'VidStreaming',
-        referrer: 'https://kaa.lt/',
+        referrer: 'https://krussdomi.com/',
       }),
     ])
     expect(subtitles).toEqual([{ url: 'https://subst.test/en.vtt', language: 'en', label: 'English' }])

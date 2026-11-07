@@ -649,13 +649,6 @@ async fn proxy_hls_manifest(
         }
     };
 
-    // Determine the base URL of the manifest for resolving relative URLs
-    let base_url = if let Some(last_slash) = url.rfind('/') {
-        format!("{}/", &url[..last_slash])
-    } else {
-        String::new()
-    };
-
     // Rewrite each line: non-comment lines that are URLs get proxied
     let rewritten = manifest_text
         .lines()
@@ -664,18 +657,13 @@ async fn proxy_hls_manifest(
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 // Check for URI= attributes in EXT-X-MAP or EXT-X-MEDIA tags
                 if trimmed.contains("URI=\"") {
-                    rewrite_uri_attribute(trimmed, &base_url, &token, Some(referrer))
+                    rewrite_uri_attribute(trimmed, &url, &token, Some(referrer))
                 } else {
                     line.to_string()
                 }
             } else {
                 // This is a URL line (segment or sub-playlist)
-                let full_url = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                    trimmed.to_string()
-                } else {
-                    // Relative URL — resolve against manifest base
-                    format!("{}{}", base_url, trimmed)
-                };
+                let full_url = resolve_hls_url(&url, trimmed);
 
                 // Check if this is a sub-playlist (.m3u8) — route through /hls for recursive rewriting
                 if full_url.contains(".m3u8") {
@@ -698,17 +686,13 @@ async fn proxy_hls_manifest(
 }
 
 /// Rewrite URI="..." attributes inside HLS tags (e.g., EXT-X-MAP, EXT-X-MEDIA)
-fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str, referrer: Option<&str>) -> String {
+fn rewrite_uri_attribute(line: &str, manifest_url: &str, token: &str, referrer: Option<&str>) -> String {
     // Find URI="..." and rewrite the URL inside
     if let Some(start) = line.find("URI=\"") {
         let uri_start = start + 5; // skip URI="
         if let Some(end) = line[uri_start..].find('"') {
             let original_uri = &line[uri_start..uri_start + end];
-            let full_url = if original_uri.starts_with("http://") || original_uri.starts_with("https://") {
-                original_uri.to_string()
-            } else {
-                format!("{}{}", base_url, original_uri)
-            };
+            let full_url = resolve_hls_url(manifest_url, original_uri);
             let proxied = proxied_path("proxy", token, &full_url, referrer);
             return format!("{}URI=\"{}\"{}",
                 &line[..start],
@@ -718,6 +702,16 @@ fn rewrite_uri_attribute(line: &str, base_url: &str, token: &str, referrer: Opti
         }
     }
     line.to_string()
+}
+
+/// Resolve a playlist entry against its manifest per RFC 3986, so absolute,
+/// root-relative ("/seg.ts") and scheme-relative ("//cdn/seg.ts") entries
+/// all land on the right host.
+fn resolve_hls_url(manifest_url: &str, entry: &str) -> String {
+    reqwest::Url::parse(manifest_url)
+        .and_then(|base| base.join(entry))
+        .map(String::from)
+        .unwrap_or_else(|_| entry.to_string())
 }
 
 pub(crate) fn origin_from_referrer(referrer: &str) -> String {
@@ -824,6 +818,15 @@ mod tests {
     }
 
     #[test]
+    fn resolves_hls_entries_like_a_browser() {
+        let m = "https://hls.test/manifest/abc/master.m3u8";
+        assert_eq!(resolve_hls_url(m, "v1/playlist.m3u8"), "https://hls.test/manifest/abc/v1/playlist.m3u8");
+        assert_eq!(resolve_hls_url(m, "//st1.cdn.test/a/000.jpg"), "https://st1.cdn.test/a/000.jpg");
+        assert_eq!(resolve_hls_url(m, "/root/seg.ts"), "https://hls.test/root/seg.ts");
+        assert_eq!(resolve_hls_url(m, "https://other.test/x.ts"), "https://other.test/x.ts");
+    }
+
+    #[test]
     fn should_normalize_anikoto_fake_segment_extensions() {
         assert!(should_normalize_hls_segment(
             "https://cdn.test/anime/id/hash/seg-1-f2-v1-a1.jpg",
@@ -921,5 +924,45 @@ mod tests {
         assert!(is_obfuscated_mpeg_ts_file(&path).await);
 
         let _ = tokio::fs::remove_file(path).await;
+    }
+}
+
+#[cfg(test)]
+mod live_kaa_playback {
+    use super::*;
+
+    /// Walks a KAA stream through the real proxy the player uses:
+    /// master -> variant -> first segment, each fetched from /hls or /proxy.
+    #[tokio::test]
+    #[ignore = "hits hls.krussdomi.com and its segment CDN"]
+    async fn kaa_stream_plays_through_proxy() {
+        let server = VideoServer::new(std::env::temp_dir());
+        let (port, token) = (server.port(), server.access_token().to_string());
+        tokio::spawn(server.start());
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let base = format!("http://127.0.0.1:{}", port);
+        let master = "https://hls.krussdomi.com/manifest/67d0c07a169c31976b8d79b8/master.m3u8";
+        let first = proxied_path("hls", &token, master, Some("https://krussdomi.com/"));
+
+        let get = |path: String| {
+            let url = format!("{}{}", base, path);
+            async move {
+                let r = reqwest::get(&url).await.unwrap();
+                let status = r.status();
+                (status, r.bytes().await.unwrap())
+            }
+        };
+        let next = |body: &[u8]| {
+            String::from_utf8_lossy(body).lines().find(|l| l.starts_with('/')).unwrap().to_string()
+        };
+
+        let (s, master_body) = get(first).await;
+        assert!(s.is_success(), "master {}", s);
+        let (s, variant_body) = get(next(&master_body)).await;
+        assert!(s.is_success(), "variant {}", s);
+        let (s, segment) = get(next(&variant_body)).await;
+        println!("segment {} {} bytes, first byte {:#x}", s, segment.len(), segment[0]);
+        assert!(s.is_success());
+        assert_eq!(segment[0], 0x47, "expected MPEG-TS sync byte");
     }
 }

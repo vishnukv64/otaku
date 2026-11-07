@@ -1,5 +1,5 @@
 // KickAssAnime (kaa.lt) extension. Plain JSON API; streams are HLS on
-// hls.krussdomi.com and need a kaa.lt Referer. Subtitles live in the player
+// hls.krussdomi.com, played with a krussdomi.com Referer/Origin. Subtitles live in the player
 // page's serialized props, so getSources fetches that page once per server.
 //
 // Episode ids are "{showSlug}::{episodeNumber}", the same shape Anikoto uses,
@@ -14,7 +14,10 @@ const extensionObject = {
   language: "en",
   baseUrl: "https://kaa.lt",
   hlsBaseUrl: "https://hls.krussdomi.com/manifest",
+  // API calls need a kaa.lt Referer; the stream CDN only serves segments to
+  // its player's origin (krussdomi.com), which the manifest host also accepts.
   referer: "https://kaa.lt/",
+  streamReferer: "https://krussdomi.com/",
 
   request: function(url, options) {
     const opts = options || {};
@@ -195,7 +198,7 @@ const extensionObject = {
           quality: 'Auto',
           type: 'hls',
           server: server.name || 'KAA',
-          referrer: extensionObject.referer,
+          referrer: extensionObject.streamReferer,
           audio_type: 'sub',
           subtitles: subs
         });
