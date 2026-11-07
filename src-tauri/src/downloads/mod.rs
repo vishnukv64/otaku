@@ -634,6 +634,23 @@ impl DownloadManager {
             .unwrap_or(0)
     }
 
+    /// Separate audio rendition (EXT-X-MEDIA TYPE=AUDIO with URI); DEFAULT=YES wins, else first.
+    fn parse_hls_audio_uri(text: &str, base_url: &str) -> Option<String> {
+        let mut first = None;
+        for line in text.lines().map(str::trim).filter(|l| l.starts_with("#EXT-X-MEDIA")) {
+            if Self::parse_hls_attribute(line, "TYPE").as_deref() != Some("AUDIO") {
+                continue;
+            }
+            let Some(uri) = Self::parse_hls_attribute(line, "URI") else { continue };
+            let Ok(url) = Self::absolutize_hls_uri(&uri, base_url) else { continue };
+            if Self::parse_hls_attribute(line, "DEFAULT").as_deref() == Some("YES") {
+                return Some(url);
+            }
+            first.get_or_insert(url);
+        }
+        first
+    }
+
     fn parse_hls_playlist(text: &str, base_url: &str) -> Result<(Vec<(u32, String)>, Vec<HlsSegment>)> {
         let mut variants = Vec::new();
         let mut segments = Vec::new();
@@ -711,11 +728,16 @@ impl DownloadManager {
         response.text().await.context("Failed to read HLS playlist")
     }
 
+    /// Returns (video segments, audio segments). The audio list is empty for muxed streams.
+    /// A `#otaku-audio=<encoded url>` fragment on `url` names the audio playlist when the
+    /// caller already resolved a video-only variant.
     async fn resolve_hls_segments(
         client: &reqwest::Client,
         url: &str,
         referrer: &str,
-    ) -> Result<Vec<HlsSegment>> {
+    ) -> Result<(Vec<HlsSegment>, Vec<HlsSegment>)> {
+        let (url, frag) = url.split_once("#otaku-audio=").unwrap_or((url, ""));
+        let mut audio_url = urlencoding::decode(frag).ok().map(|v| v.into_owned()).filter(|v| !v.is_empty());
         let mut playlist_url = url.to_string();
 
         for _ in 0..4 {
@@ -723,10 +745,16 @@ impl DownloadManager {
             let (variants, segments) = Self::parse_hls_playlist(&text, &playlist_url)?;
 
             if !segments.is_empty() {
-                return Ok(segments);
+                let mut audio = Vec::new();
+                if let Some(audio_url) = audio_url {
+                    let text = Self::fetch_hls_text(client, &audio_url, referrer).await?;
+                    audio = Self::parse_hls_playlist(&text, &audio_url)?.1;
+                }
+                return Ok((segments, audio));
             }
 
             if let Some((_, next_url)) = variants.into_iter().max_by_key(|(height, _)| *height) {
+                audio_url = audio_url.or_else(|| Self::parse_hls_audio_uri(&text, &playlist_url));
                 playlist_url = next_url;
                 continue;
             }
@@ -976,20 +1004,18 @@ impl DownloadManager {
         playlist_path: &str,
         segments: &[HlsSegment],
         segment_names: &[String],
+        uri_prefix: &str,
     ) -> Result<()> {
         let max_duration = segments
             .iter()
             .filter_map(|segment| segment.duration)
             .fold(6.0f32, f32::max)
             .ceil() as u32;
-        let segment_dir_name = Self::hls_segment_dir(playlist_path)
-            .and_then(|path| path.file_name().map(|value| value.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "segments".to_string());
         let mut playlist = String::from("#EXTM3U\n#EXT-X-VERSION:3\n");
         playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:0\n", max_duration));
 
         for (segment, name) in segments.iter().zip(segment_names.iter()) {
-            let uri = format!("{}/{}", segment_dir_name, name);
+            let uri = format!("{}{}", uri_prefix, name);
             if segment.is_map {
                 playlist.push_str(&format!("#EXT-X-MAP:URI=\"{}\"\n", uri));
                 continue;
@@ -1062,7 +1088,10 @@ impl DownloadManager {
         subtitle_label: Option<String>,
         subtitle_language: Option<String>,
     ) -> Result<()> {
-        let segments = Self::resolve_hls_segments(&client, &url, &referrer).await?;
+        let (video_segments, audio_segments) = Self::resolve_hls_segments(&client, &url, &referrer).await?;
+        let video_len = video_segments.len();
+        let mut segments = video_segments;
+        segments.extend(audio_segments);
         if segments.is_empty() {
             return Err(anyhow::anyhow!("HLS playlist did not contain media segments"));
         }
@@ -1248,7 +1277,26 @@ impl DownloadManager {
             }
         }
 
-        Self::write_local_hls_playlist(&file_path, &segments, &segment_names).await?;
+        if segments.len() == video_len {
+            let dir_name = segment_dir.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or_default();
+            Self::write_local_hls_playlist(&file_path, &segments, &segment_names, &format!("{}/", dir_name)).await?;
+        } else {
+            // Video-only variant + separate audio rendition: master at file_path points at both.
+            let video_pl = segment_dir.join("video.m3u8");
+            let audio_pl = segment_dir.join("audio.m3u8");
+            Self::write_local_hls_playlist(&video_pl.to_string_lossy(), &segments[..video_len], &segment_names[..video_len], "").await?;
+            Self::write_local_hls_playlist(&audio_pl.to_string_lossy(), &segments[video_len..], &segment_names[video_len..], "").await?;
+            let dir_name = segment_dir.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or_default();
+            let master = format!(
+                r#"#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="{d}/audio.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=1000000,AUDIO="a"
+{d}/video.m3u8
+"#,
+                d = dir_name
+            );
+            tokio::fs::write(&file_path, master).await.context("Failed to write HLS master playlist")?;
+        }
         Self::download_subtitle_sidecar(
             &client,
             subtitle_url.as_deref(),
@@ -2096,5 +2144,52 @@ mod tests {
         );
         assert_eq!(DownloadManager::infer_hls_total_bytes(0, 1, 100), None);
         assert_eq!(DownloadManager::infer_hls_total_bytes(117, 0, 100), None);
+    }
+
+    #[test]
+    fn hls_audio_rendition_is_found_and_scheme_relative_uris_resolve() {
+        let master = r#"#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="x",DEFAULT=YES,URI="//cdn.test/a/audio.m3u8"
+#EXT-X-STREAM-INF:RESOLUTION=1280x720,AUDIO="a"
+v/720.m3u8
+"#;
+        assert_eq!(
+            DownloadManager::parse_hls_audio_uri(master, "https://hls.test/m/master.m3u8").as_deref(),
+            Some("https://cdn.test/a/audio.m3u8")
+        );
+        assert_eq!(DownloadManager::parse_hls_audio_uri("#EXTM3U
+", "https://x.test/a.m3u8"), None);
+    }
+
+    /// Real KAA episode: master -> video + audio segments, first of each fetchable.
+    /// Run: cargo test --lib kaa_network -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn kaa_network_download_resolves_audio() {
+        let client = reqwest::Client::new();
+        let get = |u: &str| client.get(u.to_string()).header("Referer", "https://kaa.lt/").header("User-Agent", "Mozilla/5.0");
+        let eps: serde_json::Value = get("https://kaa.lt/api/show/sousou-no-frieren-2d15/episodes?lang=ja-JP&ep=1")
+            .send().await.unwrap().json().await.unwrap();
+        let e = &eps["result"][0];
+        let ep = format!("ep-{}-{}", e["episode_string"].as_str().unwrap(), e["slug"].as_str().unwrap());
+        let data: serde_json::Value = get(&format!("https://kaa.lt/api/show/sousou-no-frieren-2d15/episode/{}", ep))
+            .send().await.unwrap().json().await.unwrap();
+        let src = data["servers"][0]["src"].as_str().unwrap().to_string();
+        let html = get(&src).send().await.unwrap().text().await.unwrap().replace("&quot;", "\"").replace("&amp;", "&");
+        let start = html.find(r#""manifest":[0,""#).unwrap() + 15;
+        let mut manifest = html[start..start + html[start..].find('"').unwrap()].to_string();
+        if manifest.starts_with("//") { manifest = format!("https:{}", manifest); }
+        println!("manifest {}", manifest);
+
+        let (video, audio) = DownloadManager::resolve_hls_segments(&client, &manifest, "https://krussdomi.com/").await.unwrap();
+        println!("video segs {} audio segs {}", video.len(), audio.len());
+        assert!(!video.is_empty());
+        assert!(!audio.is_empty(), "audio rendition dropped");
+        for seg in [&video[0], &audio[0]] {
+            let r = client.get(&seg.url).header("Referer", "https://krussdomi.com/").header("Origin", "https://krussdomi.com").header("User-Agent", "Mozilla/5.0").send().await.unwrap();
+            assert!(r.status().is_success(), "{} -> {}", seg.url, r.status());
+            let b = DownloadManager::normalize_hls_segment(r.bytes().await.unwrap().to_vec());
+            assert_eq!(b[0], 0x47, "not TS");
+        }
     }
 }

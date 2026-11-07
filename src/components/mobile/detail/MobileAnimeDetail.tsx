@@ -10,7 +10,6 @@ import {
   Check,
   CheckCircle,
   ChevronDown,
-  Clock,
   Database,
   Download,
   DownloadCloud,
@@ -997,7 +996,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
         {primary && (
           <button
             onClick={() => watch(primary.ep.id)}
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-gradient)] text-sm font-semibold text-white"
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent-gradient)] text-sm font-semibold text-white"
           >
             <Play size={18} className="fill-current" aria-hidden="true" />
             {primary.text}
@@ -1078,7 +1077,6 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
         />
         {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
           <div className="flex items-center gap-2 rounded-xl bg-[var(--color-bg-secondary)] px-3 py-2.5">
-            <Clock size={16} className="text-[var(--color-text-muted)]" aria-hidden="true" />
             <NextEpisodeCountdown
               latestEpisodeDate={media.latest_episode_date}
               lastUpdateEnd={details.last_update_end}
@@ -1224,8 +1222,14 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
                         onContextMenu={(ev) => ev.preventDefault()}
                       >
                         <span className="relative block h-[54px] w-24 shrink-0 overflow-hidden rounded-lg bg-black/40">
-                          {e.thumbnail && (
-                            <img src={e.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
+                          {/* KAA episodes carry no stills; fall back to the show art. */}
+                          {(e.thumbnail || cover()) && (
+                            <img
+                              src={e.thumbnail || cover()}
+                              alt=""
+                              loading="lazy"
+                              className={`h-full w-full object-cover ${e.thumbnail ? '' : 'opacity-70'}`}
+                            />
                           )}
                           {(partial || watched) && (
                             <span className="absolute inset-x-0 bottom-0 h-1 bg-white/20">

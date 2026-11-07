@@ -197,11 +197,14 @@ function YouHub() {
       </nav>
 
       <SectionHead>Connectivity</SectionHead>
-      <div className="mx-4 flex min-h-[56px] items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] px-3.5 py-2.5">
-        <span className="inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-surface)] text-white">
-          <Activity size={18} />
-        </span>
-        <span className="flex-1 text-[15px] font-medium text-white">API status</span>
+      {/* Stacked: the inline status is a multi-row block, so it can't share a row with the title. */}
+      <div className="mx-4 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] px-3.5 py-3">
+        <div className="mb-3 flex items-center gap-3">
+          <span className="inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-surface)] text-white">
+            <Activity size={18} />
+          </span>
+          <span className="text-[15px] font-medium text-white">API status</span>
+        </div>
         <ApiStatusIndicator inline />
       </div>
     </div>

@@ -5,9 +5,9 @@
  * Mangakakalot for search, details, chapters, and reading.
  */
 
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { Search, Loader2, X, Tag as TagIcon } from 'lucide-react'
+import { Search, Loader2, X, Tag as TagIcon, Download, RefreshCw, CircleAlert } from 'lucide-react'
 import { discoverManga, jikanTopManga, searchManga } from '@/utils/tauri-commands'
 import type { Tag } from '@/utils/tauri-commands'
 import { MediaCard } from '@/components/media/MediaCard'
@@ -842,7 +842,7 @@ function MangaScreen() {
           <div>
             {searchResults.length > 0 && (
               <div className="overflow-visible">
-                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
+                <div className={`grid overflow-visible ${mobile ? 'grid-cols-3 gap-x-2.5 gap-y-4' : ''}`}>
                   {sortedSearchResults.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -856,11 +856,22 @@ function MangaScreen() {
             )}
 
             {!searchLoading && searchInput && searchResults.length === 0 && (
+              mobile ? (
+                <div className="flex flex-col items-center px-6 py-12 text-center">
+                  <Search size={40} className="mb-3 text-[var(--color-text-muted)]" aria-hidden="true" />
+                  <h3 className="font-display text-lg font-bold text-white">No manga found for “{searchInput}”</h3>
+                  <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Try a different spelling or a shorter title.</p>
+                  <button type="button" onClick={handleClearSearch} className="mt-4 min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-glass-border-hover)] px-5 text-sm font-semibold text-white">
+                    Clear search
+                  </button>
+                </div>
+              ) : (
               <div className="text-center py-12">
                 <p className="text-[var(--color-text-secondary)]">
                   No manga found for "{searchInput}"
                 </p>
               </div>
+              )
             )}
           </div>
         ) : activeNav === 'genres' ? (
@@ -893,7 +904,7 @@ function MangaScreen() {
                 </div>
               ) : sortedGenreResults.length > 0 ? (
                 <div className="overflow-visible">
-                  <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
+                  <div className={`grid overflow-visible ${mobile ? 'grid-cols-3 gap-x-2.5 gap-y-4' : ''}`}>
                     {sortedGenreResults.map((item) => (
                       <MediaCard
                         key={item.id}
@@ -943,7 +954,7 @@ function MangaScreen() {
               </div>
             ) : sortedTopRatedItems.length > 0 ? (
               <div className="overflow-visible">
-                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
+                <div className={`grid overflow-visible ${mobile ? 'grid-cols-3 gap-x-2.5 gap-y-4' : ''}`}>
                   {sortedTopRatedItems.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -978,7 +989,7 @@ function MangaScreen() {
               </div>
             ) : sortedPublishingItems.length > 0 ? (
               <div className="overflow-visible">
-                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
+                <div className={`grid overflow-visible ${mobile ? 'grid-cols-3 gap-x-2.5 gap-y-4' : ''}`}>
                   {sortedPublishingItems.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -1013,7 +1024,7 @@ function MangaScreen() {
               </div>
             ) : sortedFilteredBrowseItems.length > 0 ? (
               <div className="overflow-visible">
-                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
+                <div className={`grid overflow-visible ${mobile ? 'grid-cols-3 gap-x-2.5 gap-y-4' : ''}`}>
                   {sortedFilteredBrowseItems.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -1070,6 +1081,22 @@ function MangaScreen() {
               />
             )}
 
+            {/* Phone: whole feed failed (mock "Error · nothing loaded") */}
+            {mobile && isOnline && carousels.every((c) => c.hook.error && c.hook.data.length === 0) && (
+              <div role="alert" className="flex flex-col items-center px-6 py-16 text-center">
+                <CircleAlert size={40} className="mb-3 text-[var(--color-text-muted)]" aria-hidden="true" />
+                <h3 className="font-display text-lg font-bold text-white">Couldn’t load manga</h3>
+                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Check your connection and try again.</p>
+                <button
+                  type="button"
+                  onClick={() => carousels.forEach((c) => void c.hook.refetch())}
+                  className="mt-4 flex min-h-[44px] items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-glass-border-hover)] px-5 text-sm font-semibold text-white"
+                >
+                  <RefreshCw size={16} /> Retry
+                </button>
+              </div>
+            )}
+
             {/* Content Carousels */}
             <div className="space-y-8 overflow-visible">
               {carousels.map(({ title, hook }) => (
@@ -1085,6 +1112,14 @@ function MangaScreen() {
                 />
               ))}
             </div>
+            {mobile && !isOnline && (
+              <Link
+                to="/downloads"
+                className="mt-5 flex min-h-[48px] items-center justify-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] text-sm font-semibold text-white"
+              >
+                <Download size={16} /> Open Offline Hub
+              </Link>
+            )}
           </>
         )}
       </main>

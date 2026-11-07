@@ -6,8 +6,19 @@
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
-import { Captions, List, Loader2, Share2, SkipForward } from 'lucide-react'
+import {
+  Captions,
+  Check,
+  Download,
+  ChevronRight,
+  List,
+  Repeat,
+  Loader2,
+  Share2,
+  SkipForward,
+} from 'lucide-react'
 import { DownloadButton } from '@/components/player/DownloadButton'
+import { SettingToggle } from '@/components/settings/SettingToggle'
 import { BottomSheet } from '@/components/ui/BottomSheet'
 import { usePlayerStore } from '@/store/playerStore'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -33,6 +44,9 @@ import {
   type MediaEntry,
   type EpisodeEntry,
   type VideoServerUrls,
+  type WatchHistory,
+  getBatchWatchProgress,
+  isEpisodeDownloaded,
 } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
@@ -57,6 +71,9 @@ interface WatchSearch {
   malId: string
   episodeId?: string
 }
+
+const fmtMmSs = (t: number) =>
+  `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`
 
 export const Route = createFileRoute('/watch')({
   component: WatchPage,
@@ -314,7 +331,9 @@ function WatchPage() {
               setAnikotoResolveError(`No ${providerName} match found for: ${queries.join(', ')}`)
               console.warn(`[Watch] Could not resolve ${providerName} slug from queries:`, queries)
             } else if (!queries.length) {
-              setAnikotoResolveError(`No ${providerName} search query available for ${result.title}`)
+              setAnikotoResolveError(
+                `No ${providerName} search query available for ${result.title}`
+              )
               console.warn(`[Watch] No ${providerName} search queries for:`, result.title)
             }
           } catch (err) {
@@ -557,7 +576,9 @@ function WatchPage() {
           if (!canUseAllAnime && !canUseAnikoto) {
             if (providersResolved) {
               if (anikotoResolveError && streamingProvider !== 'allanime') {
-                throw new Error(`${streamingProviderLabel(streamingProvider)} provider failed: ${anikotoResolveError}`)
+                throw new Error(
+                  `${streamingProviderLabel(streamingProvider)} provider failed: ${anikotoResolveError}`
+                )
               }
               const providerName = streamingProviderLabel(streamingProvider)
               throw new Error(
@@ -686,6 +707,29 @@ function WatchPage() {
   const { isMobile, isPortrait } = useMobileLayout()
   const mobilePortrait = isMobile && isPortrait
   const [audioSubsOpen, setAudioSubsOpen] = useState(false)
+  // Per-episode progress + downloaded state for the phone episode rows
+  const [progress, setProgress] = useState<Map<string, WatchHistory>>(new Map())
+  const [downloaded, setDownloaded] = useState<Set<number>>(new Set())
+  useEffect(() => {
+    if (!mobilePortrait || !malId) return
+    getBatchWatchProgress(malId)
+      .then((all) => setProgress(new Map(all.map((h) => [h.episode_id, h]))))
+      .catch(() => {})
+  }, [mobilePortrait, malId, currentEpisodeId])
+  const episodeNumbers = details?.episodes.map((e) => e.number).join(',')
+  useEffect(() => {
+    if (!mobilePortrait || !malId || !details) return
+    let live = true
+    Promise.all(
+      details.episodes.map(async (e) =>
+        (await isEpisodeDownloaded(malId, e.number).catch(() => false)) ? e.number : -1
+      )
+    ).then((ns) => live && setDownloaded(new Set(ns.filter((n) => n >= 0))))
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobilePortrait, malId, episodeNumbers])
   const autoPlayNext = usePlayerStore((s) => s.settings.autoPlayNext)
   const updatePlayerSettings = usePlayerStore((s) => s.updateSettings)
   const currentIdx = details?.episodes.findIndex((e) => e.id === currentEpisodeId) ?? -1
@@ -716,27 +760,12 @@ function WatchPage() {
   // Mobile portrait: video top + episode list below (scrollable page)
   if (mobilePortrait) {
     return (
-      <div className="min-h-screen bg-black" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        {/* Back header */}
-        <div className="flex items-center px-3 py-2">
-          <button
-            onClick={handleGoBack}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-white/80 active:text-white text-sm"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10 19l-7-7m0 0l7-7m-7 7h18"
-              />
-            </svg>
-            Back
-          </button>
-        </div>
-
+      // Fixed column: the video stays on top and only the details/episode list scroll.
+      // (Document scrolling is unreliable in the iOS WebView, so the list could not be
+      // scrolled while a video was playing.)
+      <div className="fixed inset-0 flex flex-col bg-black" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         {/* Video area — 16:9 */}
-        <div className="w-full aspect-video bg-black">
+        <div className="w-full aspect-video shrink-0 bg-black">
           {loading && (
             <div className="w-full h-full flex items-center justify-center">
               <Loader2 className="w-10 h-10 animate-spin text-[var(--color-accent-primary)]" />
@@ -783,20 +812,32 @@ function WatchPage() {
         </div>
 
         {/* Episode info + list below video (mock: design/files/player.html, portrait) */}
-        <div className="p-4 pb-8">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+          style={{ paddingBottom: 'calc(var(--sab) + 2rem)', WebkitOverflowScrolling: 'touch' }}
+        >
           {details && (
             <div className="mb-3">
-              <h2 className="text-lg font-bold text-white">{details.title}</h2>
+              <h1 className="font-display text-xl font-bold text-white">{details.title}</h1>
               {currentEpisode && (
                 <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
                   EP {currentEpisode.number}
                   {currentEpisode.title ? ` · ${currentEpisode.title}` : ''}
                 </p>
               )}
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                {streamingProviderLabel(streamingProvider)}
-                {sources?.sources[0]?.server ? ` · ${sources.sources[0].server}` : ''}
-              </p>
+              <button
+                type="button"
+                onClick={() => setAudioSubsOpen(true)}
+                className="mt-3 flex min-h-[48px] w-full items-center justify-between rounded-xl bg-white/10 px-4 text-left text-sm text-white"
+              >
+                <span className="truncate">
+                  {streamingProviderLabel(streamingProvider)}
+                  {sources?.sources[0]
+                    ? ` · ${[sources.sources[0].server, sources.sources[0].audio_type && (sources.sources[0].audio_type === 'dub' ? 'Dub' : 'Sub'), sources.sources[0].type.toUpperCase()].filter(Boolean).join(' · ')}`
+                    : ''}
+                </span>
+                <ChevronRight size={18} className="shrink-0 text-white/50" />
+              </button>
             </div>
           )}
 
@@ -804,7 +845,9 @@ function WatchPage() {
           <div className="mb-4 grid grid-cols-4 gap-2 text-xs text-white/80">
             <button
               type="button"
-              onClick={() => document.getElementById('watch-episodes')?.scrollIntoView({ behavior: 'smooth' })}
+              onClick={() =>
+                document.getElementById('watch-episodes')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
               className="flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-xl bg-white/10 active:bg-white/20"
             >
               <List size={20} /> Episodes
@@ -817,7 +860,8 @@ function WatchPage() {
                 episodeId={currentEpisodeId}
                 animeTitle={details.title}
                 episodeNumber={currentEpisode.number}
-                className="!min-h-[56px] !w-full !rounded-xl"
+                label="Download"
+                className="!h-auto !min-h-[56px] !w-full flex-col gap-1 !rounded-xl bg-white/10 text-xs active:bg-white/20"
               />
             ) : (
               <span />
@@ -834,7 +878,10 @@ function WatchPage() {
               onClick={() => {
                 const title = details?.title ?? 'Otaku'
                 if (navigator.share) navigator.share({ title, text: title }).catch(() => {})
-                else navigator.clipboard?.writeText(title).then(() => toastInfo('Copied', 'Title copied to clipboard'))
+                else
+                  navigator.clipboard
+                    ?.writeText(title)
+                    .then(() => toastInfo('Copied', 'Title copied to clipboard'))
               }}
               className="flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-xl bg-white/10 active:bg-white/20"
             >
@@ -844,56 +891,138 @@ function WatchPage() {
 
           {/* Up next + autoplay */}
           {nextEpisode && (
-            <button
-              type="button"
-              onClick={handleNextEpisode}
-              className="mb-3 flex w-full items-center gap-3 rounded-xl bg-white/10 p-3 text-left active:bg-white/20"
-            >
-              <SkipForward size={22} className="text-white/70" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[11px] uppercase tracking-wide text-white/50">Up next</span>
-                <span className="block truncate text-sm text-white">
-                  EP {nextEpisode.number}
-                  {nextEpisode.title ? ` · ${nextEpisode.title}` : ''}
-                </span>
-              </span>
-            </button>
+            <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/10 p-3">
+              <div className="aspect-video w-[104px] shrink-0 overflow-hidden rounded-lg bg-white/10">
+                {(nextEpisode.thumbnail || details?.cover_url) && (
+                  <img
+                    src={nextEpisode.thumbnail || details?.cover_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <small className="block text-[11px] text-white/50">
+                  Up next · EP {nextEpisode.number}
+                </small>
+                <b className="block truncate text-sm font-semibold text-white">
+                  {nextEpisode.title || `Episode ${nextEpisode.number}`}
+                </b>
+              </div>
+              <button
+                type="button"
+                onClick={handleNextEpisode}
+                aria-label="Play next episode"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-primary)] text-white"
+              >
+                <SkipForward size={20} />
+              </button>
+            </div>
           )}
-          <label className="mb-5 flex min-h-[48px] items-center justify-between rounded-xl bg-white/10 px-4 text-sm text-white">
-            Autoplay next episode
-            <input
-              type="checkbox"
-              role="switch"
-              checked={autoPlayNext}
-              onChange={(e) => updatePlayerSettings({ autoPlayNext: e.target.checked })}
-              className="h-5 w-5 accent-[var(--color-accent-primary)]"
+          <div className="mb-5 flex min-h-[56px] items-center gap-3 rounded-xl bg-white/10 px-4 text-white">
+            <Repeat size={20} className="text-white/60" />
+            <span className="min-w-0 flex-1">
+              <b className="block text-sm font-semibold">Autoplay next episode</b>
+              {nextEpisode && (
+                <small className="block text-xs text-white/50">
+                  Starts EP {nextEpisode.number} when this one ends
+                </small>
+              )}
+            </span>
+            <SettingToggle
+              value={autoPlayNext}
+              onChange={(v) => updatePlayerSettings({ autoPlayNext: v })}
             />
-          </label>
+          </div>
 
           {/* Episode list */}
           {details?.episodes && details.episodes.length > 0 && (
             <div id="watch-episodes">
-              <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-muted)]">Episodes</h3>
-              <div className="grid grid-cols-4 gap-2">
-                {details.episodes.map((ep) => (
+              <div className="mb-2 flex items-baseline justify-between">
+                <h2 className="font-display text-[19px] font-bold text-white">Episodes</h2>
+                <span className="text-sm text-white/50">{details.episodes.length}</span>
+              </div>
+              {details.episodes.map((ep) => {
+                const cur = ep.id === currentEpisodeId
+                const h = progress.get(ep.id)
+                const dur = h?.duration && h.duration > 0 ? h.duration : 0
+                const pos = h?.progress_seconds ?? 0
+                const watched =
+                  !!h?.completed ||
+                  (!h && currentEpisode ? ep.number < currentEpisode.number : false)
+                const pct = dur && !watched ? Math.min(100, (pos / dur) * 100) : 0
+                const left = dur ? Math.max(0, dur - pos) : 0
+                const status = cur
+                  ? `Now playing${left ? ` · ${fmtMmSs(left)} left` : ''}`
+                  : watched
+                    ? 'Watched'
+                    : pos > 5
+                      ? `Resume ${fmtMmSs(pos)}`
+                      : downloaded.has(ep.number)
+                        ? 'Downloaded'
+                        : 'Not watched'
+                return (
                   <button
                     key={ep.id}
                     onClick={() => handleEpisodeSelect(ep.id)}
-                    className={`min-h-[44px] rounded text-sm font-medium transition-colors ${
-                      ep.id === currentEpisodeId
-                        ? 'bg-[var(--color-accent-primary)] text-white'
-                        : 'bg-white/10 text-[var(--color-text-secondary)] active:bg-white/20'
+                    className={`flex min-h-[72px] w-full items-center gap-3 border-l-[3px] py-2 pl-2 pr-1 text-left ${
+                      cur ? 'border-[var(--color-accent-primary)] bg-white/5' : 'border-transparent'
                     }`}
                   >
-                    {ep.number}
+                    <div className="relative aspect-video w-[104px] shrink-0 overflow-hidden rounded-lg bg-white/10">
+                      {(ep.thumbnail || details.cover_url) && (
+                        <img
+                          src={ep.thumbnail || details.cover_url}
+                          alt=""
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                      )}
+                      {dur > 0 && (
+                        <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 font-mono text-[10px] text-white">
+                          {fmtMmSs(dur)}
+                        </span>
+                      )}
+                      {pct > 0 && (
+                        <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
+                          <i
+                            className="block h-full bg-[var(--color-accent-primary)]"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <b className="line-clamp-2 text-sm font-semibold text-white">
+                        {ep.number}. {ep.title || `Episode ${ep.number}`}
+                      </b>
+                      <small
+                        className={`block text-xs ${cur ? 'text-[var(--color-accent-primary)]' : 'text-white/50'}`}
+                      >
+                        {status}
+                      </small>
+                    </div>
+                    {cur ? (
+                      <span className="rounded-full bg-[var(--color-accent-primary)] px-2 py-0.5 text-[11px] font-bold text-white">
+                        Playing
+                      </span>
+                    ) : watched ? (
+                      <Check size={18} className="text-white/50" />
+                    ) : downloaded.has(ep.number) ? (
+                      <Download size={18} className="text-white/50" />
+                    ) : null}
                   </button>
-                ))}
-              </div>
+                )
+              })}
             </div>
           )}
         </div>
 
-        <BottomSheet isOpen={audioSubsOpen} onClose={() => setAudioSubsOpen(false)} title="Audio & subtitles">
+        <BottomSheet
+          isOpen={audioSubsOpen}
+          onClose={() => setAudioSubsOpen(false)}
+          title="Audio & subtitles"
+        >
           <p className="px-[18px] py-4 text-sm text-white/70">
             Audio, subtitle and quality options are in the player: tap the video, then the settings
             gear (or rotate to landscape).

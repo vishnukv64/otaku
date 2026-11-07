@@ -255,6 +255,7 @@ function HomeScreen() {
               totalItems={trending.data.length || 1}
               currentIndex={featuredIndex}
               onIndexChange={handleFeaturedIndexChange}
+              rank={featuredIndex + 1}
             />
           ) : (
             <HeroSection

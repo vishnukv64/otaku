@@ -27,6 +27,8 @@ interface DownloadButtonProps {
   episodeNumber: number
   subtitles?: Subtitle[]
   className?: string
+  /** Optional text shown under the icon (phone action tile) */
+  label?: string
 }
 
 const EMPTY_SUBTITLES: Subtitle[] = []
@@ -39,6 +41,7 @@ export function DownloadButton({
   episodeNumber,
   subtitles = EMPTY_SUBTITLES,
   className = '',
+  label,
 }: DownloadButtonProps) {
   const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
@@ -155,6 +158,7 @@ export function DownloadButton({
         ) : (
           <Download size={20} />
         )}
+        {label}
       </button>
 
       {/* Download Options Menu */}

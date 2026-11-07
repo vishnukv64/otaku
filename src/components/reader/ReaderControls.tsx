@@ -15,7 +15,11 @@ import {
   Settings,
   BookOpen,
   AlignVerticalSpaceAround,
+  SkipBack,
+  SkipForward,
 } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
+import { ReaderPagedLtr, ReaderWebtoon } from '@/components/ui/OtakuIcons'
 import { cn } from '@/lib/utils'
 
 // Icon button style matching mock: 36x36, radius-md, glass border/bg
@@ -59,6 +63,8 @@ interface ReaderControlsProps {
   onOpenSettings: () => void
   onOpenChapterList: () => void
   onGoBack: () => void
+  /** Phone chrome: show "· Downloaded" in the subtitle */
+  offline?: boolean
 
   // Display options
   readingMode?: ReadingMode
@@ -88,9 +94,106 @@ export function ReaderControls({
   onOpenSettings,
   onOpenChapterList,
   onGoBack,
+  offline,
+  onPageChange,
   readingMode = 'vertical',
   onReadingModeChange,
 }: ReaderControlsProps) {
+  if (isMobile()) {
+    const scroll = readingMode === 'vertical' || readingMode === 'webtoon'
+    const mobBtn =
+      'flex h-11 w-[42px] shrink-0 items-center justify-center text-[var(--color-text-primary)]'
+    const chBtn =
+      'inline-flex min-h-11 shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg-hover)] px-2.5 text-[13px] font-semibold text-[var(--color-text-primary)] disabled:opacity-40'
+    const pct = totalPages > 1 ? ((currentPage - 1) / (totalPages - 1)) * 100 : 0
+    return (
+      <>
+        <div
+          className="fixed inset-x-0 top-0 z-[200] flex h-14 items-center bg-[var(--color-overlay)] px-1"
+          style={{ paddingTop: 'var(--sat)', height: 'calc(56px + var(--sat))' }}
+        >
+          <button onClick={onGoBack} aria-label="Back to details" className={mobBtn}>
+            <ChevronLeft size={20} />
+          </button>
+          <div className="min-w-0 flex-1 px-1">
+            <b className="block truncate font-display text-[15px] leading-tight text-[var(--color-text-primary)]">{mangaTitle || 'Manga'}</b>
+            <span className="block truncate text-xs text-[var(--color-text-secondary)]">
+              Ch. {currentChapterNumber || '-'}
+              {chapterTitle ? ` · ${chapterTitle}` : ''}
+              {offline ? ' · Downloaded' : ''}
+            </span>
+          </div>
+          {onToggleBookmark && (
+            <button
+              onClick={onToggleBookmark}
+              aria-label="Bookmark"
+              className={cn(mobBtn, isBookmarked && 'text-[var(--color-gold)]')}
+            >
+              <Bookmark size={20} fill={isBookmarked ? 'currentColor' : 'none'} />
+            </button>
+          )}
+          <button onClick={onOpenChapterList} aria-label="Chapter list" className={mobBtn}>
+            <List size={20} />
+          </button>
+          <button onClick={onOpenSettings} aria-label="Settings" className={mobBtn}>
+            <Settings size={20} />
+          </button>
+        </div>
+        <div
+          className="fixed inset-x-0 bottom-0 z-[200] grid gap-2.5 bg-[var(--color-overlay)] px-3.5 pt-3"
+          style={{ paddingBottom: 'calc(var(--sab) + 12px)' }}
+        >
+          <div className="flex items-center gap-2.5 text-[13px] text-[var(--color-text-secondary)]">
+            <span className="min-w-[3ch] text-right">1</span>
+            <input
+              type="range"
+              aria-label="Page"
+              min={1}
+              max={totalPages || 1}
+              value={currentPage}
+              onChange={(e) => onPageChange?.(Number(e.target.value))}
+              className="mx-3.5 h-1 flex-1 accent-[var(--color-accent-primary)]"
+              style={{ background: `linear-gradient(to right, var(--color-accent-primary) ${pct}%, var(--color-surface) ${pct}%)` }}
+            />
+            <span className="min-w-[3ch]">{totalPages}</span>
+          </div>
+          <div className="-mt-0.5 text-center text-sm font-semibold text-[var(--color-text-primary)]">
+            {currentPage} / {totalPages}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={onPreviousChapter} disabled={!hasPreviousChapter} aria-label="Previous chapter" className={chBtn}>
+              <SkipBack size={16} />
+              {hasPreviousChapter && previousChapterNumber ? `Ch. ${previousChapterNumber}` : 'Prev'}
+            </button>
+            <div role="group" aria-label="Reading mode" className="flex rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] p-0.5">
+              {[
+                { label: 'Page', mode: 'single' as const, on: !scroll, Icon: ReaderPagedLtr },
+                { label: 'Webtoon', mode: 'webtoon' as const, on: scroll, Icon: ReaderWebtoon },
+              ].map(({ label, mode, on, Icon }) => (
+                <button
+                  key={mode}
+                  aria-label={label}
+                  aria-pressed={on}
+                  onClick={() => onReadingModeChange?.(mode)}
+                  className={cn(
+                    'flex h-10 w-11 items-center justify-center rounded-md',
+                    on ? 'bg-[var(--color-surface)] text-[var(--color-accent-light)]' : 'text-[var(--color-text-secondary)]'
+                  )}
+                >
+                  <Icon size={20} />
+                </button>
+              ))}
+            </div>
+            <button onClick={onNextChapter} disabled={!hasNextChapter} aria-label="Next chapter" className={chBtn}>
+              {hasNextChapter && nextChapterNumber ? `Ch. ${nextChapterNumber}` : 'Next'}
+              <SkipForward size={16} />
+            </button>
+          </div>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       {/* ── Top Bar ──────────────────────────────────────── */}

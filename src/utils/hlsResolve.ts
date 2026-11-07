@@ -5,11 +5,27 @@ import { proxyHlsPlaylist } from './tauri-commands'
 export interface HlsVariant {
   url: string
   resolution: number
+  audioUrl?: string
 }
 
 export interface ResolvedVariant {
   url: string
   resolution: number
+  audioUrl?: string
+}
+
+// Separate audio rendition (EXT-X-MEDIA TYPE=AUDIO,URI=...); DEFAULT=YES wins, else first.
+function parseAudioRendition(masterText: string, masterUrl: string): string | undefined {
+  let first: string | undefined
+  for (const line of masterText.split(/\r?\n/)) {
+    if (!line.startsWith('#EXT-X-MEDIA') || !/TYPE=AUDIO/i.test(line)) continue
+    const uri = line.match(/URI="([^"]+)"/i)?.[1]
+    if (!uri) continue
+    const url = new URL(uri, masterUrl).toString()
+    if (/DEFAULT=YES/i.test(line)) return url
+    first ??= url
+  }
+  return first
 }
 
 // Parse an HLS master playlist (m3u8 text) into its #EXT-X-STREAM-INF
@@ -23,6 +39,7 @@ export function parseHlsMaster(masterText: string, masterUrl: string): HlsVarian
   const lines = masterText.split(/\r?\n/)
   const out: HlsVariant[] = []
   const baseUri = masterUrl.replace(/\/[^/]*$/, '/')
+  const audioUrl = parseAudioRendition(masterText, masterUrl)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (!line || !line.startsWith('#EXT-X-STREAM-INF')) continue
@@ -35,7 +52,7 @@ export function parseHlsMaster(masterText: string, masterUrl: string): HlsVarian
     if (!/^https?:\/\//i.test(uri)) {
       uri = new URL(uri, baseUri).toString()
     }
-    out.push({ url: uri, resolution: height })
+    out.push({ url: uri, resolution: height, audioUrl })
   }
   return out
 }
@@ -43,6 +60,12 @@ export function parseHlsMaster(masterText: string, masterUrl: string): HlsVarian
 // Pick the best variant from a parsed master playlist for a given
 // preference. Mirrors the fallback chain in pickSource but operates on
 // HlsVariant instead of VideoSource.
+// Download backend only sees one URL; a video-only variant carries its audio playlist
+// in an `#otaku-audio=` fragment (read by downloads::resolve_hls_segments).
+export function downloadVariantUrl(v: { url: string; audioUrl?: string }): string {
+  return v.audioUrl ? `${v.url}#otaku-audio=${encodeURIComponent(v.audioUrl)}` : v.url
+}
+
 export function pickHlsVariant(
   variants: HlsVariant[],
   preferred: QualityPreference,
@@ -75,7 +98,7 @@ export async function resolveAdaptiveToVariant(
   try {
     const variants = await listAdaptiveVariants(source)
     const pick = pickHlsVariant(variants, preferred)
-    if (pick) return { url: pick.url, resolution: pick.resolution }
+    if (pick) return { url: downloadVariantUrl(pick), resolution: pick.resolution }
   } catch (err) {
     console.warn('[hlsResolve] master parse failed', err)
   }

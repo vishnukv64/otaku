@@ -11,6 +11,7 @@ import useEmblaCarousel from 'embla-carousel-react'
 import { WheelGesturesPlugin } from 'embla-carousel-wheel-gestures'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
+import { isMobile } from '@/utils/platform'
 import type { SearchResult } from '@/types/extension'
 
 interface Top10SectionProps {
@@ -21,6 +22,7 @@ interface Top10SectionProps {
 export function Top10Section({ items, onItemClick }: Top10SectionProps) {
   const press = usePosterLongPress()
   const [pressed, setPressed] = useState<SearchResult | null>(null)
+  const mobile = isMobile()
   const [emblaRef, emblaApi] = useEmblaCarousel(
     {
       align: 'start',
@@ -46,7 +48,7 @@ export function Top10Section({ items, onItemClick }: Top10SectionProps) {
     <div className="mb-10 group/carousel overflow-visible">
       {/* Section Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">Top 10 Anime</h2>
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">Top 10 Anime</h2>
         <Link
           to="/anime"
           className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors flex items-center gap-1"
@@ -81,12 +83,13 @@ export function Top10Section({ items, onItemClick }: Top10SectionProps) {
         </button>
 
         {/* Embla Viewport */}
+        {/* Phone: native snap scroll (smooth, axis-locked by iOS); desktop: Embla. */}
         <div
-          className="overflow-x-hidden"
-          style={{ overflowY: 'clip', touchAction: 'pan-y pinch-zoom' }}
-          ref={emblaRef}
+          className={mobile ? 'scrollbar-hide -mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 snap-x snap-mandatory' : 'overflow-x-hidden'}
+          style={mobile ? { WebkitOverflowScrolling: 'touch' } : { overflowY: 'clip', touchAction: 'pan-y pinch-zoom' }}
+          ref={mobile ? undefined : emblaRef}
         >
-          <div className="flex gap-3 py-2">
+          <div className={`flex gap-3 py-2 ${mobile ? 'w-max px-4' : ''}`}>
             {top10.map((item, index) => {
               const rank = index + 1
               const isTop3 = rank <= 3
@@ -94,7 +97,7 @@ export function Top10Section({ items, onItemClick }: Top10SectionProps) {
               return (
                 <button
                   key={item.id}
-                  className="flex-[0_0_130px] cursor-pointer relative overflow-visible rounded-[var(--radius-md)] group/rank transition-transform duration-300 hover:-translate-y-1"
+                  className={`flex-[0_0_130px] ${mobile ? "snap-start" : ""} cursor-pointer relative overflow-visible rounded-[var(--radius-md)] group/rank transition-transform duration-300 hover:-translate-y-1`}
                   onClick={() => onItemClick?.(item)}
                   {...press.handlers}
                   onTouchStartCapture={() => setPressed(item)}

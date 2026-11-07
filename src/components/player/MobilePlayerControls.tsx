@@ -14,6 +14,7 @@ import {
   Minimize,
   Pause,
   PictureInPicture2,
+  RotateCw,
   Cast,
   Play,
   Settings,
@@ -25,8 +26,18 @@ import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
 import { LockControls, SeekBack10, SeekFwd10 } from '@/components/ui/OtakuIcons'
 import { SEEK_STEP, usePlayerGestures } from '@/hooks/usePlayerGestures'
 import type { SubtitleFontFamily } from '@/store/playerStore'
+import { isAndroid } from '@/utils/platform'
+import { invoke } from '@tauri-apps/api/core'
 
-export type PlayerMenu = 'settings' | 'quality' | 'server' | 'audio' | 'subs' | 'speed' | 'episodes' | 'tracks'
+export type PlayerMenu =
+  | 'settings'
+  | 'quality'
+  | 'server'
+  | 'audio'
+  | 'subs'
+  | 'speed'
+  | 'episodes'
+  | 'tracks'
 
 interface EpisodeLite {
   id: string
@@ -66,7 +77,10 @@ export interface MobilePlayerControlsProps {
   onSubtitle: (url: string) => void
   subtitleFontScale: number
   subtitleFontFamily: SubtitleFontFamily
-  onSubtitleStyle: (s: { subtitleFontScale?: number; subtitleFontFamily?: SubtitleFontFamily }) => void
+  onSubtitleStyle: (s: {
+    subtitleFontScale?: number
+    subtitleFontFamily?: SubtitleFontFamily
+  }) => void
   speeds: number[]
   speed: number
   onSpeed: (s: number) => void
@@ -213,7 +227,12 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
 
   // ── Menu bodies (shared by sheet and side panel) ────────────────────────
   const row = (label: string, detail: string, to: PlayerMenu, icon: React.ReactNode) => (
-    <SheetOption key={to} icon={icon} detail={<ChevronRightDetail text={detail} />} onClick={() => setMenu(to)}>
+    <SheetOption
+      key={to}
+      icon={icon}
+      detail={<ChevronRightDetail text={detail} />}
+      onClick={() => setMenu(to)}
+    >
       {label}
     </SheetOption>
   )
@@ -228,17 +247,28 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
     tracks: 'Audio & subtitles',
   }
   const audioBody = p.audioModes.map((m) => (
-    <SheetOption key={m} checked={m === p.audioMode} onClick={pick(() => p.onAudio(m as 'sub' | 'dub'))}>
+    <SheetOption
+      key={m}
+      checked={m === p.audioMode}
+      onClick={pick(() => p.onAudio(m as 'sub' | 'dub'))}
+    >
       {m === 'dub' ? 'Dub' : 'Sub'}
     </SheetOption>
   ))
   const subsList = (
     <>
-      <SheetOption checked={p.selectedSubtitleUrl === 'off'} onClick={pick(() => p.onSubtitle('off'))}>
+      <SheetOption
+        checked={p.selectedSubtitleUrl === 'off'}
+        onClick={pick(() => p.onSubtitle('off'))}
+      >
         Off
       </SheetOption>
       {p.subtitleTracks.map((t) => (
-        <SheetOption key={t.url} checked={t.url === p.selectedSubtitleUrl} onClick={pick(() => p.onSubtitle(t.url))}>
+        <SheetOption
+          key={t.url}
+          checked={t.url === p.selectedSubtitleUrl}
+          onClick={pick(() => p.onSubtitle(t.url))}
+        >
           {t.label}
         </SheetOption>
       ))}
@@ -246,7 +276,9 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
   )
   const subsStyle = (
     <>
-      <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">Subtitle style</div>
+      <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">
+        Subtitle style
+      </div>
       <div className="flex items-center gap-3 px-[18px] pb-3 text-sm text-white">
         <span className="w-12">Size</span>
         <input
@@ -268,7 +300,9 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
             type="button"
             onClick={() => p.onSubtitleStyle({ subtitleFontFamily: f })}
             className={`min-h-[40px] rounded-full px-4 text-sm ${
-              f === p.subtitleFontFamily ? 'bg-[var(--color-accent-primary)] text-white' : 'bg-white/10 text-white/80'
+              f === p.subtitleFontFamily
+                ? 'bg-[var(--color-accent-primary)] text-white'
+                : 'bg-white/10 text-white/80'
             }`}
           >
             {FONT_LABELS[f]}
@@ -285,13 +319,39 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
     webkitShowPlaybackTargetPicker?: () => void
   }
   const wk = p.videoRef.current as WebkitVideo | null
-  const canPip = !!wk && (!!wk.webkitSupportsPresentationMode?.('picture-in-picture') || document.pictureInPictureEnabled === true)
+  const canPip =
+    !!wk &&
+    (!!wk.webkitSupportsPresentationMode?.('picture-in-picture') ||
+      document.pictureInPictureEnabled === true)
   const canAirPlay = !!wk?.webkitShowPlaybackTargetPicker
+  // iOS: rotate the window (native request; WKWebView can't lock orientation itself).
+  // Android keeps its fullscreen bridge, which also forces landscape.
+  const fullscreenOrRotate = isAndroid() ? (
+    <button
+      type="button"
+      aria-label={p.isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+      className={iconBtn}
+      onClick={p.toggleFullscreen}
+    >
+      {p.isFullscreen ? <Minimize size={22} /> : <Maximize size={22} />}
+    </button>
+  ) : (
+    <button
+      type="button"
+      aria-label={p.landscape ? 'Rotate to portrait' : 'Rotate to landscape'}
+      className={iconBtn}
+      onClick={() => void invoke('set_orientation', { landscape: !p.landscape }).catch(() => {})}
+    >
+      <RotateCw size={22} />
+    </button>
+  )
   const togglePip = () => {
     const v = p.videoRef.current as WebkitVideo | null
     if (!v) return
     if (v.webkitSetPresentationMode) {
-      v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture')
+      v.webkitSetPresentationMode(
+        v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
+      )
     } else if (document.pictureInPictureElement) {
       void document.exitPictureInPicture().catch(() => {})
     } else {
@@ -307,8 +367,10 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
     body = (
       <>
         {row('Quality', p.selectedQuality, 'quality', <Settings size={20} />)}
-        {p.servers.length > 0 && row('Server', p.servers[p.selectedServer] ?? '', 'server', <Download size={20} />)}
-        {p.audioModes.length > 1 && row('Audio', p.audioMode.toUpperCase(), 'audio', <Volume2 size={20} />)}
+        {p.servers.length > 0 &&
+          row('Server', p.servers[p.selectedServer] ?? '', 'server', <Download size={20} />)}
+        {p.audioModes.length > 1 &&
+          row('Audio', p.audioMode.toUpperCase(), 'audio', <Volume2 size={20} />)}
         {row('Subtitles', subLabel, 'subs', <Captions size={20} />)}
         {row('Playback speed', `${p.speed}×`, 'speed', <Gauge size={20} />)}
       </>
@@ -332,9 +394,13 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       <>
         {p.audioModes.length > 1 && (
           <>
-            <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">Audio</div>
+            <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">
+              Audio
+            </div>
             {audioBody}
-            <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">Subtitles</div>
+            <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">
+              Subtitles
+            </div>
           </>
         )}
         {subsList}
@@ -410,7 +476,10 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       {/* Brightness: CSS filter over the picture */}
       <div
         className="pointer-events-none absolute inset-0"
-        style={{ backdropFilter: `brightness(${brightness})`, WebkitBackdropFilter: `brightness(${brightness})` }}
+        style={{
+          backdropFilter: `brightness(${brightness})`,
+          WebkitBackdropFilter: `brightness(${brightness})`,
+        }}
       />
 
       {/* Gesture surface */}
@@ -438,9 +507,14 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
         <div className="pointer-events-none absolute left-1/2 top-6 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-white">
           {hud.kind === 'volume' ? <Volume2 size={18} /> : <Sun size={18} />}
           <div className="h-1 w-24 rounded bg-white/25">
-            <div className="h-full rounded bg-white" style={{ width: `${Math.round(hud.value * 100)}%` }} />
+            <div
+              className="h-full rounded bg-white"
+              style={{ width: `${Math.round(hud.value * 100)}%` }}
+            />
           </div>
-          <span className="w-9 text-right text-xs tabular-nums">{Math.round(hud.value * 100)}%</span>
+          <span className="w-9 text-right text-xs tabular-nums">
+            {Math.round(hud.value * 100)}%
+          </span>
         </div>
       )}
 
@@ -451,11 +525,11 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       )}
 
       {resumeChip && !p.suspended && (
-        <div className="pointer-events-auto absolute bottom-24 left-4 z-10 flex items-center gap-3 rounded-full bg-black/75 py-1 pl-4 pr-1 text-sm text-white">
+        <div className={`pointer-events-auto absolute ${p.landscape ? 'bottom-24 left-4 text-sm' : 'bottom-[68px] left-3 text-xs'} z-10 flex items-center gap-2 rounded-full bg-black/75 py-0.5 pl-3 pr-0.5 text-white`}>
           Resumed at {fmt(p.resumedAt ?? 0)}
           <button
             type="button"
-            className="min-h-[40px] rounded-full bg-white/15 px-4 font-semibold"
+            className={`${p.landscape ? 'min-h-[40px] px-4' : 'min-h-[32px] px-3'} rounded-full bg-white/15 font-semibold`}
             onClick={() => {
               p.seekTo(0)
               setResumeChip(false)
@@ -482,21 +556,36 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
         {/* Top bar */}
         <div
           className="absolute inset-x-0 top-0 flex items-center gap-1 px-2"
-          style={{ paddingTop: 'max(env(safe-area-inset-top), 4px)' }}
+          style={{ paddingTop: p.landscape ? 'max(env(safe-area-inset-top), 4px)' : 4 }}
         >
-          <button type="button" aria-label="Back" className={iconBtn} onClick={shown ? p.onBack : undefined}>
+          <button
+            type="button"
+            aria-label="Back"
+            className={iconBtn}
+            onClick={shown ? p.onBack : undefined}
+          >
             <ArrowLeft size={22} />
           </button>
           <div className="min-w-0 flex-1 px-1">
             <div className="truncate text-sm font-semibold text-white">{p.title}</div>
             <div className="truncate text-xs text-white/70">{p.episodeLabel}</div>
           </div>
-          {p.onDownload && !p.landscape && (
-            <button type="button" aria-label="Download" className={iconBtn} onClick={p.onDownload}>
-              <Download size={20} />
+          {!p.landscape && canAirPlay && (
+            <button
+              type="button"
+              aria-label="AirPlay"
+              className={iconBtn}
+              onClick={() => wk?.webkitShowPlaybackTargetPicker?.()}
+            >
+              <Cast size={22} />
             </button>
           )}
-          <button type="button" aria-label="Settings" className={iconBtn} onClick={() => setMenu('settings')}>
+          <button
+            type="button"
+            aria-label="Settings"
+            className={iconBtn}
+            onClick={() => setMenu('settings')}
+          >
             <Settings size={22} />
           </button>
         </div>
@@ -504,7 +593,12 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
         {/* Centre */}
         <div className="absolute inset-0 flex items-center justify-center gap-10">
           {!p.disableSeeking && (
-            <button type="button" aria-label="Back 10 seconds" className={`${iconBtn} h-14 w-14`} onClick={() => p.skipBy('backward')}>
+            <button
+              type="button"
+              aria-label="Back 10 seconds"
+              className={`${iconBtn} h-14 w-14`}
+              onClick={() => p.skipBy('backward')}
+            >
               <SeekBack10 size={34} />
             </button>
           )}
@@ -514,10 +608,19 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
             className={`${iconBtn} h-16 w-16 bg-black/50`}
             onClick={p.togglePlay}
           >
-            {p.isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" />}
+            {p.isPlaying ? (
+              <Pause size={32} fill="currentColor" />
+            ) : (
+              <Play size={32} fill="currentColor" />
+            )}
           </button>
           {!p.disableSeeking && (
-            <button type="button" aria-label="Forward 10 seconds" className={`${iconBtn} h-14 w-14`} onClick={() => p.skipBy('forward')}>
+            <button
+              type="button"
+              aria-label="Forward 10 seconds"
+              className={`${iconBtn} h-14 w-14`}
+              onClick={() => p.skipBy('forward')}
+            >
               <SeekFwd10 size={34} />
             </button>
           )}
@@ -527,7 +630,7 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
           <button
             type="button"
             onClick={p.onSkipIntro}
-            className="pointer-events-auto absolute bottom-24 right-4 min-h-[44px] rounded-lg border border-white/30 bg-black/60 px-5 text-sm font-semibold text-white"
+            className={`pointer-events-auto absolute ${p.landscape ? 'bottom-24 right-4' : 'bottom-[68px] right-3'} min-h-[36px] rounded-lg border border-white/30 bg-black/60 px-5 text-sm font-semibold text-white`}
           >
             Skip Intro
           </button>
@@ -536,14 +639,20 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
         {/* Bottom bar */}
         <div
           className="absolute inset-x-0 bottom-0 px-3"
-          style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)' }}
+          style={{ paddingBottom: p.landscape ? 'max(env(safe-area-inset-bottom), 8px)' : 8 }}
         >
           <div className="flex items-center gap-3 text-xs tabular-nums text-white">
-            <span className="w-11 text-right">{fmt(shownTime)}</span>
+            {p.landscape && <span className="w-11 text-right">{fmt(shownTime)}</span>}
             <div className="pointer-events-auto relative h-6 flex-1">
               <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25">
-                <div className="absolute inset-y-0 left-0 rounded bg-white/35" style={{ width: `${p.bufferedPercentage}%` }} />
-                <div className="absolute inset-y-0 left-0 rounded bg-[var(--color-accent-primary)]" style={{ width: `${pct}%` }} />
+                <div
+                  className="absolute inset-y-0 left-0 rounded bg-white/35"
+                  style={{ width: `${p.bufferedPercentage}%` }}
+                />
+                <div
+                  className="absolute inset-y-0 left-0 rounded bg-[var(--color-accent-primary)]"
+                  style={{ width: `${pct}%` }}
+                />
               </div>
               <input
                 type="range"
@@ -572,60 +681,117 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
                 style={{ left: `${pct}%` }}
               />
             </div>
-            <span className="w-11">-{fmt(Math.max(0, p.duration - shownTime))}</span>
+            {p.landscape && (
+              <span className="w-11">-{fmt(Math.max(0, p.duration - shownTime))}</span>
+            )}
           </div>
-          <div className="mt-1 flex items-center justify-between">
-            <div className="flex items-center">
-              {!p.landscape && (
-                <button type="button" className="pointer-events-auto flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm text-white active:bg-white/15" onClick={() => setMenu('tracks')}>
-                  <Captions size={20} /> Audio &amp; subs
-                </button>
-              )}
-              {p.landscape && (
-                <>
-                  <button type="button" className="pointer-events-auto flex min-h-[44px] items-center gap-1 rounded-full px-3 text-sm text-white active:bg-white/15" onClick={() => setMenu('quality')}>
-                    {p.selectedQuality}
-                  </button>
-                  <button type="button" aria-label="Audio and subtitles" className={iconBtn} onClick={() => setMenu('tracks')}>
-                    <Captions size={22} />
-                  </button>
-                  {p.episodes && p.episodes.length > 1 && (
-                    <button type="button" aria-label="Episodes" className={iconBtn} onClick={() => setMenu('episodes')}>
-                      <List size={22} />
-                    </button>
-                  )}
-                  {p.hasNext && (
-                    <button type="button" aria-label="Next episode" className={iconBtn} onClick={p.onNext}>
-                      <SkipForward size={22} />
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="flex items-center">
-              {canAirPlay && (
-                <button type="button" aria-label="AirPlay" className={iconBtn} onClick={() => wk?.webkitShowPlaybackTargetPicker?.()}>
-                  <Cast size={22} />
-                </button>
-              )}
-              {canPip && (
-                <button type="button" aria-label="Picture in picture" className={iconBtn} onClick={togglePip}>
-                  <PictureInPicture2 size={22} />
-                </button>
-              )}
-              <button type="button" aria-label="Lock controls" className={iconBtn} onClick={() => setLocked(true)}>
-                <LockControls size={22} />
+          {!p.landscape && (
+            <div className="flex items-center gap-2 pb-1 text-xs tabular-nums text-white">
+              <span className="font-mono">{fmt(shownTime)}</span>
+              <span className="font-mono text-white/60">/ {fmt(p.duration)}</span>
+              <span className="flex-1" />
+              <button
+                type="button"
+                className="pointer-events-auto min-h-[32px] rounded-full bg-white/15 px-3 text-xs font-semibold text-white"
+                onClick={() => setMenu('quality')}
+              >
+                {p.selectedQuality}
               </button>
               <button
                 type="button"
-                aria-label={p.isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                className={iconBtn}
-                onClick={p.toggleFullscreen}
+                className="pointer-events-auto min-h-[32px] rounded-full bg-white/15 px-3 text-xs font-semibold text-white"
+                onClick={() => setMenu('speed')}
               >
-                {p.isFullscreen ? <Minimize size={22} /> : <Maximize size={22} />}
+                {p.speed}×
               </button>
+              {fullscreenOrRotate}
             </div>
-          </div>
+          )}
+          {p.landscape && (
+            <div className="mt-1 flex items-center justify-between">
+              <div className="flex items-center">
+                {!p.landscape && (
+                  <button
+                    type="button"
+                    className="pointer-events-auto flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm text-white active:bg-white/15"
+                    onClick={() => setMenu('tracks')}
+                  >
+                    <Captions size={20} /> Audio &amp; subs
+                  </button>
+                )}
+                {p.landscape && (
+                  <>
+                    <button
+                      type="button"
+                      className="pointer-events-auto flex min-h-[44px] items-center gap-1 rounded-full px-3 text-sm text-white active:bg-white/15"
+                      onClick={() => setMenu('quality')}
+                    >
+                      {p.selectedQuality}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Audio and subtitles"
+                      className={iconBtn}
+                      onClick={() => setMenu('tracks')}
+                    >
+                      <Captions size={22} />
+                    </button>
+                    {p.episodes && p.episodes.length > 1 && (
+                      <button
+                        type="button"
+                        aria-label="Episodes"
+                        className={iconBtn}
+                        onClick={() => setMenu('episodes')}
+                      >
+                        <List size={22} />
+                      </button>
+                    )}
+                    {p.hasNext && (
+                      <button
+                        type="button"
+                        aria-label="Next episode"
+                        className={iconBtn}
+                        onClick={p.onNext}
+                      >
+                        <SkipForward size={22} />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="flex items-center">
+                {canAirPlay && (
+                  <button
+                    type="button"
+                    aria-label="AirPlay"
+                    className={iconBtn}
+                    onClick={() => wk?.webkitShowPlaybackTargetPicker?.()}
+                  >
+                    <Cast size={22} />
+                  </button>
+                )}
+                {canPip && (
+                  <button
+                    type="button"
+                    aria-label="Picture in picture"
+                    className={iconBtn}
+                    onClick={togglePip}
+                  >
+                    <PictureInPicture2 size={22} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label="Lock controls"
+                  className={iconBtn}
+                  onClick={() => setLocked(true)}
+                >
+                  <LockControls size={22} />
+                </button>
+                {fullscreenOrRotate}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -634,11 +800,19 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
         <div className="pointer-events-auto absolute inset-y-0 right-0 z-30 flex w-[min(340px,60%)] flex-col bg-[rgba(20,20,20,0.96)] backdrop-blur-xl">
           <div className="flex items-center justify-between border-b border-white/10 px-[18px] py-3">
             <span className="text-base font-semibold text-white">{menuTitle[menu]}</span>
-            <button type="button" aria-label="Close" className="h-11 w-11 text-white/70" onClick={close}>
+            <button
+              type="button"
+              aria-label="Close"
+              className="h-11 w-11 text-white/70"
+              onClick={close}
+            >
               ✕
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div
+            className="flex-1 overflow-y-auto"
+            style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+          >
             {sheetHeader}
             {body}
           </div>

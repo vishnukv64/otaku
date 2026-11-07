@@ -336,8 +336,8 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
       <div className="p-4 border-b border-white/10 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-[var(--color-accent-primary)]" />
-            <h2 className="text-lg font-bold">Notifications</h2>
+            <Bell className="w-5 h-5 text-[var(--color-accent-primary)] max-sm:hidden" />
+            <h2 className="text-lg font-bold max-sm:hidden">Notifications</h2>
             {unreadCount > 0 && (
               <span className="px-1.5 py-0.5 text-xs bg-[var(--color-accent-primary)] text-white rounded-full">
                 {unreadCount}

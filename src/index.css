@@ -97,6 +97,9 @@
 
   html {
     scroll-behavior: smooth;
+    /* Fills any strip the webview leaves uncovered (iOS home-indicator area,
+       rubber-band overscroll) with the app background instead of the native one. */
+    background-color: var(--color-bg-primary);
   }
 
   body {

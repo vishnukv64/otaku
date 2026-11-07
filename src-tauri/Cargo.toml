@@ -77,6 +77,7 @@ sysinfo = "0.31"
 # iOS-only dependencies
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri-plugin-edge-to-edge = "0.3"
+objc2 = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

@@ -77,7 +77,7 @@ export function ActivityChart() {
     !data || data.length === 0 || data.every((d) => d.watch_minutes === 0 && d.read_minutes === 0)
 
   return (
-    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6">
+    <div className="rounded-xl bg-[var(--color-surface-subtle)] p-6 max-sm:p-4">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Activity</h2>
         <div className="flex gap-1 rounded-lg bg-[var(--color-surface-hover)] p-1">

@@ -411,7 +411,7 @@ fn rewrite_local_hls_playlist(text: &str, playlist_path: &std::path::Path, token
 
     for raw_line in text.lines() {
         let line = raw_line.trim();
-        if line.starts_with("#EXT-X-MAP") {
+        if line.starts_with("#EXT-X-MAP") || line.starts_with("#EXT-X-MEDIA") {
             out.push_str(&rewrite_hls_map_line(line, playlist_dir, token));
         } else if line.is_empty() || line.starts_with('#') || line.starts_with("http://") || line.starts_with("https://") {
             out.push_str(line);

@@ -54,6 +54,11 @@ const extensionObject = {
     return image && image.hq ? extensionObject.baseUrl + '/image/poster/' + image.hq + '.webp' : null;
   },
 
+  thumbnail: function(image) {
+    const key = image && (image.sm || image.hq);
+    return key ? extensionObject.baseUrl + '/image/thumbnail/' + key + '.webp' : null;
+  },
+
   // All ja-JP episodes. The API pages by episode range: ?ep=N returns the
   // page containing episode N plus the list of every page's episode numbers.
   episodes: function(slug) {
@@ -148,7 +153,7 @@ const extensionObject = {
       id: id + '::' + ep.episode_number,
       number: Number(ep.episode_number),
       title: ep.title || ('Episode ' + ep.episode_string),
-      thumbnail: null
+      thumbnail: extensionObject.thumbnail(ep.thumbnail)
     }));
     if (!episodes.length && show.watch_uri) {
       episodes.push({ id: id + '::1', number: 1, title: show.title_en || show.title, thumbnail: null });

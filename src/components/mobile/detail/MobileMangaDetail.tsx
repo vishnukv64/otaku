@@ -15,9 +15,16 @@ import {
   Heart,
   Loader2,
   Lock,
-  MoreVertical,
+  BellRing,
+  BookmarkCheck,
+  CircleCheckBig,
+  CheckCheck,
+  Circle,
+  Clock,
+  Plus,
+  RefreshCw,
+  Tag,
   ShieldOff,
-  Tags,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -86,7 +93,7 @@ interface Props {
   onClose: () => void
 }
 
-type Sheet = null | 'library' | 'range' | 'tags' | 'row' | 'confirmDelete' | 'menu'
+type Sheet = null | 'library' | 'range' | 'tags' | 'confirmDelete' | 'menu'
 
 export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
   const navigate = useNavigate()
@@ -550,25 +557,28 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
     )
   }
 
-  const iconBtn = (on: boolean, extra = '') =>
-    `flex h-11 w-11 items-center justify-center rounded-xl border transition-colors ${
-      on ? extra : 'glass border-[var(--color-glass-border)] text-[var(--color-text-muted)]'
+  const pillBtn = (on: boolean) =>
+    `inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-[13px] ${
+      on
+        ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] text-white'
+        : 'border-[var(--color-glass-border-hover)] text-[var(--color-text)]'
     }`
   const label = 'text-[0.65rem] font-bold uppercase tracking-[0.08em] text-[var(--color-text-muted)]'
   const statusCh = details.status && details.status.toLowerCase() !== 'unknown' ? details.status : ''
 
   return (
     <PushedScreen onClose={onClose} shareTitle={title} onMenu={() => setSheet('menu')}>
-      {/* Cover header */}
-      <div className="relative h-[300px] overflow-hidden">
-        {coverSrc && <img src={coverSrc} alt="" className="absolute inset-0 h-full w-full object-cover" />}
-        <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-[var(--color-bg-primary)]/70 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 px-4 pb-3">
-          <h1 className="font-['Space_Grotesk',sans-serif] text-2xl font-extrabold leading-tight text-white">{title}</h1>
+      {/* Header: poster + title block (mock .dh) */}
+      <div className="flex gap-3.5 px-4 pb-0 pt-14">
+        <div className="h-[156px] w-[104px] shrink-0 overflow-hidden rounded-[var(--radius-md)] bg-[var(--color-surface)] shadow-lg">
+          {coverSrc && <img src={coverSrc} alt="" className="h-full w-full object-cover" />}
+        </div>
+        <div className="min-w-0">
+          <h1 className="mb-1.5 line-clamp-3 font-['Space_Grotesk',sans-serif] text-[21px] leading-[1.15] text-white">{title}</h1>
           {details.authors && details.authors.length > 0 && (
-            <p className="mt-0.5 text-sm text-white/70">{details.authors.join(', ')}</p>
+            <p className="mb-2 text-[12.5px] text-[var(--color-text-muted)]">{details.authors.join(', ')}</p>
           )}
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {statusCh && (
               <span className={`chip ${statusCh.toLowerCase().includes('publishing') ? 'chip-green' : ''}`}>{statusCh}</span>
             )}
@@ -579,78 +589,84 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="space-y-3 px-4 pt-3">
-        {progress ? (
-          <button
-            onClick={() => readChapter(progress.chapterId)}
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-gradient)] text-sm font-semibold text-white"
-          >
-            <BookOpen size={18} aria-hidden="true" />
-            Continue Ch. {progress.chapterNumber} (p.{progress.page})
-          </button>
-        ) : (
-          <button
-            onClick={() => readChapter()}
-            disabled={chaptersLoading || chapters.length === 0}
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-gradient)] text-sm font-semibold text-white disabled:bg-[var(--color-bg-secondary)] disabled:text-[var(--color-text-muted)]"
-          >
-            <BookOpen size={18} aria-hidden="true" />
-            {chaptersLoading ? 'Loading...' : 'Start Reading'}
-          </button>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Actions (mock .acts) */}
+      <div className="px-4 pb-3 pt-3.5">
+        <div className="flex items-center gap-2">
+          {progress ? (
+            <button
+              onClick={() => readChapter(progress.chapterId)}
+              className="flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] px-[18px] text-[15px] font-semibold text-white active:bg-[var(--color-accent-hover)]"
+            >
+              <BookOpen size={18} aria-hidden="true" />
+              <span className="truncate">Continue Ch. {progress.chapterNumber} (p.{progress.page})</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => readChapter()}
+              disabled={chaptersLoading || chapters.length === 0}
+              className="flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] px-[18px] text-[15px] font-semibold text-white disabled:opacity-40"
+            >
+              <BookOpen size={18} aria-hidden="true" />
+              {chaptersLoading ? 'Loading...' : 'Start Reading'}
+            </button>
+          )}
           <button
             onClick={() => setSheet('library')}
             disabled={libraryLoading}
-            className="glass flex min-h-11 items-center gap-1.5 rounded-xl border border-[var(--color-glass-border)] px-3.5 text-sm font-medium"
+            className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-glass-border-hover)] px-3 text-[15px] font-semibold text-[var(--color-text-primary)]"
           >
             {libraryLoading ? (
               <Loader2 size={16} className="animate-spin" aria-hidden="true" />
             ) : inLibrary ? (
-              <Check size={16} aria-hidden="true" />
-            ) : null}
+              <BookmarkCheck size={16} aria-hidden="true" />
+            ) : (
+              <Plus size={16} aria-hidden="true" />
+            )}
             {inLibrary && smartStatus ? STATUS_LABEL[smartStatus] : 'Add to Library'}
             <ChevronDown size={14} aria-hidden="true" />
           </button>
-          <button
-            onClick={favorite}
-            aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-            className={iconBtn(isFavorite, 'bg-[rgba(229,9,20,0.15)] text-[var(--color-accent-light)] border-[var(--color-accent-mid)]')}
-          >
-            <Heart size={20} className={isFavorite ? 'fill-current' : ''} aria-hidden="true" />
-          </button>
+        </div>
+        <div className="flex items-center gap-2 pt-2">
           {inLibrary && (
             <>
               <button
                 onClick={() => sendFeedback('liked')}
-                aria-label={feedback === 'liked' ? 'Remove like' : 'Like this manga'}
-                className={iconBtn(feedback === 'liked', 'bg-emerald-500 text-white border-emerald-400')}
+                aria-pressed={feedback === 'liked'}
+                className={pillBtn(feedback === 'liked')}
               >
-                <ThumbsUp size={20} className={feedback === 'liked' ? 'fill-current' : ''} aria-hidden="true" />
+                <ThumbsUp size={16} aria-hidden="true" /> Like
               </button>
               <button
                 onClick={() => sendFeedback('disliked')}
-                aria-label={feedback === 'disliked' ? 'Remove dislike' : 'Dislike this manga'}
-                className={iconBtn(feedback === 'disliked', 'bg-red-500 text-white border-red-400')}
+                aria-pressed={feedback === 'disliked'}
+                className={pillBtn(feedback === 'disliked')}
               >
-                <ThumbsDown size={20} className={feedback === 'disliked' ? 'fill-current' : ''} aria-hidden="true" />
+                <ThumbsDown size={16} aria-hidden="true" /> Dislike
               </button>
-              <button
-                ref={tagButtonRef}
-                onClick={() => setShowTagSelector((v) => !v)}
-                className="glass flex min-h-11 items-center gap-1.5 rounded-xl border border-[var(--color-glass-border)] px-3 text-sm text-[var(--color-text-muted)]"
-              >
-                <Tags size={16} aria-hidden="true" />
+              <button ref={tagButtonRef} onClick={() => setShowTagSelector((v) => !v)} className={pillBtn(false)}>
+                <Tag size={16} aria-hidden="true" />
                 {tags.length > 0 ? 'Tags' : 'Add Tags'}
               </button>
             </>
           )}
+          <span className="ml-auto flex">
+            <button
+              onClick={favorite}
+              aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+              className={`flex h-11 w-11 items-center justify-center rounded-full ${
+                isFavorite ? 'text-[var(--color-accent-primary)]' : 'text-[var(--color-text-primary)]'
+              }`}
+            >
+              <Heart size={20} className={isFavorite ? 'fill-current' : ''} aria-hidden="true" />
+            </button>
+            {isTracked && (
+              <span role="img" aria-label="Tracking new chapter releases" className="flex h-11 w-11 items-center justify-center">
+                <BellRing size={20} aria-hidden="true" />
+              </span>
+            )}
+          </span>
         </div>
-        {inLibrary && tags.length > 0 && <TagChips tags={tags} onRemove={removeTag} />}
-        {isTracked && (
-          <p className="text-xs text-indigo-300">Tracking new chapter releases</p>
-        )}
+        {inLibrary && tags.length > 0 && <div className="mt-2"><TagChips tags={tags} onRemove={removeTag} /></div>}
         <TagSelector
           mediaId={manga.id}
           isOpen={showTagSelector}
@@ -805,7 +821,7 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
                   </button>
                 )}
 
-                <ul className="space-y-2">
+                <ul className="-mx-4">
                   {visible.map((c) => {
                     const dl = downloadingChapters.get(c.id)
                     const isDl = downloaded.has(c.id)
@@ -822,75 +838,116 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
                           : `Downloading ${dl.downloaded_images}/${dl.total_images} images`
                       : isCurrent
                         ? `Reading · page ${progress?.page}`
-                        : timeAgo(c.releaseDate)
+                        : !isOnline && !isDl
+                          ? 'Not downloaded'
+                          : timeAgo(c.releaseDate)
                     const locked = !isOnline && !isDl
+                    const sel = selected.has(c.id)
+                    const muted = isRead && !isCurrent
                     return (
                       <li
                         key={c.id}
-                        className={`flex min-h-14 items-center gap-2 rounded-xl bg-[var(--color-bg-secondary)] pl-3 ${
-                          selected.has(c.id) ? 'ring-2 ring-[var(--color-accent-primary)]' : ''
-                        } ${locked ? 'opacity-50' : ''}`}
+                        className={`relative mx-4 mb-2 flex min-h-16 items-center gap-2.5 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] py-2 pl-3.5 pr-1 ${
+                          sel ? 'bg-[rgba(229,9,20,0.12)] outline outline-1 outline-[rgba(229,9,20,0.45)]' : ''
+                        } ${locked ? 'opacity-40' : ''} ${isCurrent ? 'shadow-[inset_3px_0_0_var(--color-accent-primary)]' : ''}`}
                       >
                         {selecting && (
                           <span
                             aria-hidden="true"
-                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                              selected.has(c.id)
-                                ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]'
-                                : 'border-[var(--color-text-muted)]'
+                            className={`-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center ${
+                              sel ? 'text-[var(--color-accent-primary)]' : 'text-[var(--color-text-muted)]'
                             }`}
                           >
-                            {selected.has(c.id) && <Check size={12} />}
+                            {sel ? <CheckCircle size={20} /> : <Circle size={20} />}
                           </span>
                         )}
                         <button
-                          className="min-w-0 flex-1 py-2 text-left"
-                          onClick={() => (dl?.status === 'failed' && !selecting ? downloadSingle(c) : rowTap(c))}
+                          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                          onClick={() => rowTap(c)}
                           onPointerDown={() => startPress(c.id)}
                           onPointerUp={endPress}
                           onPointerLeave={endPress}
                           onContextMenu={(e) => e.preventDefault()}
                         >
-                          <span className="flex items-center gap-2">
-                            <span className="font-medium">Ch. {c.number}</span>
-                            {isNew && (
-                              <span className="rounded bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
-                                NEW
-                              </span>
-                            )}
-                            {isRead && <Check size={14} className="text-blue-400" aria-label="Read" />}
-                            {isDl && <CheckCircle size={14} className="text-green-500" aria-label="Downloaded" />}
-                            {locked && <Lock size={13} aria-label="Needs a connection" />}
-                          </span>
                           <span
-                            className={`block truncate text-xs ${
-                              dl?.status === 'failed' ? 'text-red-400' : 'text-[var(--color-text-muted)]'
+                            className={`min-w-[46px] font-mono text-[12.5px] font-semibold ${
+                              muted ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-secondary)]'
                             }`}
                           >
-                            {[c.title, sub].filter(Boolean).join(' · ')}
+                            Ch. {c.number}
                           </span>
-                          {dl?.status === 'downloading' && (
-                            <span className="mt-1 block h-1 overflow-hidden rounded bg-white/10">
-                              <span
-                                className="block h-full bg-[var(--color-accent-primary)]"
-                                style={{ width: `${dl.percentage}%` }}
-                              />
-                            </span>
-                          )}
+                          <span className="min-w-0 flex-1">
+                            <b
+                              className={`flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[14.5px] font-medium ${
+                                muted ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-primary)]'
+                              }`}
+                            >
+                              {isNew && (
+                                <span className="shrink-0 rounded bg-[var(--color-green)] px-1.5 py-px text-xs font-extrabold tracking-[0.04em] text-[#04210d]">
+                                  NEW
+                                </span>
+                              )}
+                              <span className="min-w-0 truncate">{c.title}</span>
+                            </b>
+                            <small
+                              className={`mt-0.5 block text-xs ${
+                                dl?.status === 'failed' ? 'text-red-400' : 'text-[var(--color-text-muted)]'
+                              }`}
+                            >
+                              {sub}
+                            </small>
+                            {dl?.status === 'downloading' && (
+                              <span className="mt-1.5 block h-1 w-[120px] overflow-hidden rounded bg-white/10">
+                                <span
+                                  className="block h-full bg-[var(--color-accent-primary)]"
+                                  style={{ width: `${dl.percentage}%` }}
+                                />
+                              </span>
+                            )}
+                          </span>
                         </button>
                         {!selecting && (
                           <button
-                            aria-label={`Chapter ${c.number} actions`}
-                            className="flex h-11 w-11 shrink-0 items-center justify-center text-[var(--color-text-muted)]"
+                            disabled={locked || (!!dl && dl.status !== 'failed')}
+                            aria-label={
+                              locked
+                                ? 'Unavailable offline'
+                                : isDl
+                                  ? 'Delete download'
+                                  : dl?.status === 'failed'
+                                    ? 'Retry download'
+                                    : dl?.status === 'queued'
+                                      ? 'Queued'
+                                      : dl
+                                        ? `Downloading ${dl.downloaded_images} of ${dl.total_images} pages`
+                                        : 'Download chapter'
+                            }
+                            className={`flex h-11 w-11 shrink-0 items-center justify-center ${
+                              isDl
+                                ? 'text-[var(--color-green)]'
+                                : dl && dl.status !== 'queued'
+                                  ? 'text-[var(--color-accent-light)]'
+                                  : 'text-[var(--color-text-secondary)]'
+                            }`}
                             onClick={() => {
-                              setRowChapter(c)
-                              setSheet('row')
+                              if (isDl) {
+                                setRowChapter(c)
+                                setSheet('confirmDelete')
+                              } else void downloadSingle(c)
                             }}
                           >
-                            {dl && dl.status !== 'failed' ? (
-                              <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                            {locked ? (
+                              <Lock size={18} aria-hidden="true" />
+                            ) : isDl ? (
+                              <CircleCheckBig size={20} aria-hidden="true" />
+                            ) : dl?.status === 'failed' ? (
+                              <RefreshCw size={18} aria-hidden="true" />
+                            ) : dl?.status === 'queued' ? (
+                              <Clock size={18} aria-hidden="true" />
+                            ) : dl ? (
+                              <Loader2 size={18} className="animate-spin" aria-hidden="true" />
                             ) : (
-                              <MoreVertical size={18} aria-hidden="true" />
+                              <Download size={18} aria-hidden="true" />
                             )}
                           </button>
                         )}
@@ -899,7 +956,7 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
                   })}
                 </ul>
                 {!isOnline && chapters.length > visible.length && (
-                  <p className="mt-3 text-center text-sm text-[var(--color-text-muted)]">
+                  <p className="mx-0 mb-2 px-3 py-2.5 text-[12.5px] text-[var(--color-text-muted)]">
                     {chapters.length - visible.length} other chapters need a connection.
                   </p>
                 )}
@@ -931,24 +988,16 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
         )}
       </div>
 
-      {/* Pinned bulk bar */}
+      {/* Bulk bar (mock .selbar) */}
       {selecting && (
         <div
-          className="fixed inset-x-0 bottom-0 z-[210] flex items-center gap-3 border-t border-[var(--color-glass-border)] bg-[var(--color-bg-secondary)] px-4 pt-3"
-          style={{ paddingBottom: 'calc(var(--sab) + 12px)' }}
+          className="fixed inset-x-3 z-[210] flex items-center gap-2 rounded-[var(--radius-xl)] border border-[var(--color-glass-border-hover)] bg-[var(--color-panel)] py-2.5 pl-4 pr-2.5 shadow-lg"
+          style={{ bottom: 'calc(var(--sab) + 12px)' }}
         >
-          <span className="mr-auto text-sm font-medium">{selected.size} selected</span>
-          <button
-            className="min-h-11 px-2 text-sm text-[var(--color-text-secondary)]"
-            onClick={() =>
-              setSelected(selected.size === visible.length ? new Set() : new Set(visible.map((c) => c.id)))
-            }
-          >
-            Select all
-          </button>
+          <b className="flex-1 text-sm leading-tight text-white">{selected.size} selected</b>
           <button
             disabled={selected.size === 0 || !isOnline}
-            className="flex min-h-11 items-center gap-2 rounded-xl bg-[var(--color-accent-primary)] px-5 text-sm font-semibold text-white disabled:opacity-40"
+            className="flex min-h-10 items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] px-3 text-sm font-semibold text-white disabled:opacity-40"
             onClick={() => {
               const list = chapters.filter((c) => selected.has(c.id) && !downloaded.has(c.id))
               exitSelect()
@@ -956,6 +1005,17 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
             }}
           >
             <Download size={16} aria-hidden="true" /> Download
+          </button>
+          <button
+            aria-label="Mark as read"
+            disabled={selected.size === 0}
+            className="flex h-11 w-11 items-center justify-center disabled:opacity-40"
+            onClick={() => {
+              chapters.filter((c) => selected.has(c.id) && !readSet.has(c.id)).forEach((c) => void toggleRead(c))
+              exitSelect()
+            }}
+          >
+            <CheckCheck size={18} aria-hidden="true" />
           </button>
           <button aria-label="Cancel selection" className="flex h-11 w-11 items-center justify-center" onClick={exitSelect}>
             <X size={18} aria-hidden="true" />
@@ -1040,52 +1100,6 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
             {range.inRange} chapters · {range.skipped} already downloaded, {range.toDownload.length} will download
           </p>
         </div>
-      </BottomSheet>
-
-      <BottomSheet
-        isOpen={sheet === 'row'}
-        onClose={() => setSheet(null)}
-        title={rowChapter ? `Ch. ${rowChapter.number}${rowChapter.title ? ` · ${rowChapter.title}` : ''}` : ''}
-      >
-        {rowChapter && (
-          <>
-            <SheetOption
-              icon={<BookOpen size={18} />}
-              disabled={!isOnline && !downloaded.has(rowChapter.id)}
-              onClick={() => {
-                setSheet(null)
-                readChapter(rowChapter.id)
-              }}
-            >
-              Read Ch. {rowChapter.number}
-            </SheetOption>
-            {downloaded.has(rowChapter.id) ? (
-              <SheetOption destructive icon={<Trash2 size={18} />} onClick={() => setSheet('confirmDelete')}>
-                Delete download
-              </SheetOption>
-            ) : (
-              <SheetOption
-                icon={<Download size={18} />}
-                disabled={!isOnline}
-                onClick={() => {
-                  setSheet(null)
-                  void downloadSingle(rowChapter)
-                }}
-              >
-                Download chapter
-              </SheetOption>
-            )}
-            <SheetOption
-              icon={<Check size={18} />}
-              onClick={() => {
-                setSheet(null)
-                void toggleRead(rowChapter)
-              }}
-            >
-              {readSet.has(rowChapter.id) ? 'Mark as unread' : 'Mark as read'}
-            </SheetOption>
-          </>
-        )}
       </BottomSheet>
 
       <BottomSheet

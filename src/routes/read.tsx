@@ -6,7 +6,8 @@
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
-import { Loader2, X, Home } from 'lucide-react'
+import { Loader2, X, Home, FileText, CircleAlert, RefreshCw } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
 import { MangaReader } from '@/components/reader/MangaReader'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -384,24 +385,34 @@ function ReadPage() {
       <div className="w-full h-full">
         {loading && !isNsfwBlocked && (
           <div className="w-full h-full flex items-center justify-center bg-black">
-            <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
+            {isMobile() ? (
+              <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[var(--color-surface)] border-t-[var(--color-accent-primary)]" />
+            ) : (
+              <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)]" />
+            )}
           </div>
         )}
 
         {error && (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
-            <p className="text-lg font-semibold mb-2">Error Loading Chapter</p>
+          <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white px-8 text-center">
+            {isMobile() && <CircleAlert size={48} strokeWidth={1.5} className="mb-3 text-[var(--color-text-muted)]" aria-hidden="true" />}
+            <p className={isMobile() ? 'mb-1.5 font-display text-xl' : 'text-lg font-semibold mb-2'}>Error Loading Chapter</p>
             <p className="text-[var(--color-text-secondary)]">{error}</p>
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex gap-3 max-sm:w-[200px] max-sm:flex-col">
               <button
                 type="button"
                 onClick={() => setReloadKey((k) => k + 1)}
-                className="min-h-[44px] rounded-lg bg-[var(--color-accent-primary)] px-5 text-sm font-semibold"
+                className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--color-accent-primary)] px-5 text-sm font-semibold"
               >
+                {isMobile() && <RefreshCw size={16} aria-hidden="true" />}
                 Retry
               </button>
-              <button type="button" onClick={handleGoBack} className="min-h-[44px] rounded-lg bg-white/10 px-5 text-sm">
-                Back
+              <button
+                type="button"
+                onClick={handleGoBack}
+                className="min-h-[44px] rounded-lg bg-white/10 px-5 text-sm max-sm:border max-sm:border-white/20 max-sm:bg-transparent"
+              >
+                {isMobile() ? 'Back to details' : 'Back'}
               </button>
             </div>
           </div>
@@ -452,11 +463,17 @@ function ReadPage() {
         )}
 
         {!loading && !error && !isNsfwBlocked && chapterImages && chapterImages.images.length === 0 && (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
+          <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white px-6 text-center">
+            {isMobile() && <FileText size={40} className="mb-3 text-white/50" aria-hidden="true" />}
             <p className="text-lg font-semibold mb-2">No Pages Available</p>
             <p className="text-[var(--color-text-secondary)]">
               This chapter does not have any available pages.
             </p>
+            {isMobile() && (
+              <button type="button" onClick={handleGoBack} className="mt-5 min-h-[44px] w-[200px] rounded-lg border border-white/20 text-sm">
+                Pick another chapter
+              </button>
+            )}
           </div>
         )}
       </div>

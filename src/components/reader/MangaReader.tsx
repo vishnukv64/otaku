@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { ChevronRight, Loader2, WifiOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useReaderStore } from '@/store/readerStore'
 import { saveReadingProgress } from '@/utils/tauri-commands'
@@ -160,6 +160,7 @@ export function MangaReader({
   // Check if we can navigate to adjacent chapters (use props passed from parent)
   const canGoToPreviousChapter = !!(onPreviousChapter && hasPreviousChapter)
   const canGoToNextChapter = !!(onNextChapter && hasNextChapter)
+  const nextChapterInfo = chapters[chapters.findIndex((c) => c.id === chapterId) + 1]
 
   // Wrapper for next page that handles chapter boundary
   const handleNextPage = useCallback(() => {
@@ -274,9 +275,9 @@ export function MangaReader({
     }
   }, [refreshMediaStatus]) // Include refreshMediaStatus in deps
 
-  // On mobile, only allow single and webtoon modes
+  // On mobile, double only works in landscape
   const effectiveReadingMode = mobile
-    ? (settings.readingMode === 'vertical' || (settings.readingMode === 'double' && !isLandscape)
+    ? ((settings.readingMode === 'double' && !isLandscape)
         ? 'single'
         : settings.readingMode)
     : settings.readingMode
@@ -629,26 +630,53 @@ export function MangaReader({
       {/* Main content */}
       {renderContent()}
 
-      {mobile && offline && (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs text-white/80">
-          Downloaded · offline
+      {mobile && offline && showControls && (
+        <div className="pointer-events-none absolute inset-x-3 z-[150] flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-glass-bg-hover)] px-3 py-2 text-[13px] text-[var(--color-text-primary)]" style={{ top: 'calc(var(--sat) + 64px)' }}>
+          <WifiOff size={16} className="shrink-0 text-[var(--color-warn)]" aria-hidden="true" />
+          You are offline. Reading from downloaded content.
         </div>
       )}
 
-      {/* End-of-chapter card (phone) */}
+      {/* End-of-chapter card (phone; mock reader.html "End of chapter") */}
       {mobile && !isVerticalScrollMode && totalPages > 0 && currentPage >= totalPages && !showControls && (
         <div className="absolute inset-x-4 bottom-6 z-10 rounded-2xl bg-black/85 p-4 text-white">
-          <div className="text-xs uppercase tracking-wide text-white/50">End of chapter {currentChapter}</div>
-          {canGoToNextChapter ? (
-            <button
-              type="button"
-              onClick={() => onNextChapter?.()}
-              className="mt-2 min-h-[48px] w-full rounded-xl bg-[var(--color-accent-primary)] text-sm font-semibold"
-            >
-              Next chapter
-            </button>
+          {canGoToNextChapter && nextChapterInfo ? (
+            <>
+              <div className="text-xs uppercase tracking-wide text-white/50">You finished Ch. {currentChapter}</div>
+              <h3 className="mt-1 font-display text-lg font-bold">Next: Ch. {nextChapterInfo.number}</h3>
+              <div className="text-xs text-white/60">
+                {[nextChapterInfo.title, nextChapterInfo.releaseDate].filter(Boolean).join(' · ')}
+              </div>
+              <div className="mt-2 text-xs text-white/50">Marks Ch. {currentChapter} read ({settings.markReadThreshold}% passed)</div>
+              <button
+                type="button"
+                onClick={() => onNextChapter?.()}
+                className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-1 rounded-xl bg-[var(--color-accent-primary)] text-sm font-semibold"
+              >
+                Read Ch. {nextChapterInfo.number}
+                <ChevronRight size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowControls(true)}
+                className="mt-2 min-h-[48px] w-full rounded-xl border border-white/20 text-sm font-semibold"
+              >
+                Stay on this page
+              </button>
+            </>
           ) : (
-            <p className="mt-1 text-sm">You&apos;re up to date — this is the last chapter.</p>
+            <>
+              <div className="text-xs uppercase tracking-wide text-white/50">Ch. {currentChapter} · last available</div>
+              <h3 className="mt-1 font-display text-lg font-bold">You are all caught up</h3>
+              <div className="text-xs text-white/60">New chapters appear in your Library as they release.</div>
+              <button
+                type="button"
+                onClick={() => onGoBack?.()}
+                className="mt-3 min-h-[48px] w-full rounded-xl border border-white/20 text-sm font-semibold"
+              >
+                Back to details
+              </button>
+            </>
           )}
         </div>
       )}
@@ -681,6 +709,7 @@ export function MangaReader({
             setShowControls(true)
           }}
           onGoBack={() => onGoBack?.()}
+          offline={offline}
           readingMode={settings.readingMode}
           onReadingModeChange={(mode) => useReaderStore.getState().setReadingMode(mode)}
           showControls={showControls}

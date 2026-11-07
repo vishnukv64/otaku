@@ -11,6 +11,8 @@ interface MobileHeroSectionProps {
   totalItems?: number
   currentIndex?: number
   onIndexChange?: (index: number) => void
+  /** 1-based rank in Anime Top 10 today, shown as a badge */
+  rank?: number
 }
 
 export function MobileHeroSection({
@@ -20,6 +22,7 @@ export function MobileHeroSection({
   totalItems = 1,
   currentIndex = 0,
   onIndexChange,
+  rank,
 }: MobileHeroSectionProps) {
   const touchStartX = useRef(0)
   const [added, setAdded] = useState(false)
@@ -76,6 +79,12 @@ export function MobileHeroSection({
       {/* Content overlaid at bottom */}
       <div className="absolute bottom-0 left-0 right-0 p-5">
         {/* Title */}
+        {rank != null && rank <= 10 && (
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white">
+            <em className="rounded-[3px] bg-[var(--color-accent-primary)] px-1.5 py-px font-display font-extrabold not-italic">TOP 10</em>
+            #{rank} in Anime today
+          </div>
+        )}
         <h1 className="text-2xl font-bold mb-1.5 drop-shadow-lg line-clamp-2">
           {media.title}
         </h1>

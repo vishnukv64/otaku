@@ -7,7 +7,8 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Loader2, ImageOff } from 'lucide-react'
+import { Loader2, ImageOff, RefreshCw } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
 import { cn } from '@/lib/utils'
 import type { ChapterImage } from '@/types/extension'
 import { FitMode } from '@/store/readerStore'
@@ -28,8 +29,9 @@ interface VerticalScrollViewProps {
 const WEBTOON_MAX_WIDTH = 800
 
 /** Sub-component for each page image - uses proxy hook for remote URLs */
-function ScrollPageImage({
+function ScrollPageImageInner({
   image,
+  onRetry,
   shouldLoad,
   isWebtoonMode,
   imageStyle,
@@ -37,6 +39,7 @@ function ScrollPageImage({
   onError,
 }: {
   image: ChapterImage
+  onRetry: () => void
   shouldLoad: boolean
   isWebtoonMode: boolean
   imageStyle: React.CSSProperties
@@ -67,9 +70,23 @@ function ScrollPageImage({
   // Error state
   if (hasError) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-[var(--color-text-muted)]">
+      <div
+        className={cn(
+          'flex flex-col items-center justify-center text-[var(--color-text-muted)]',
+          isMobile() ? 'my-[5px] h-[260px] gap-1.5 bg-[var(--color-surface)] px-5 text-[var(--color-text-secondary)]' : 'py-20'
+        )}
+      >
         <ImageOff className="w-12 h-12 mb-2" />
         <p className="text-sm">Failed to load page {image.page}</p>
+        {isMobile() && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-2 flex min-h-11 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-glass-border-hover)] px-[18px] text-[15px] font-semibold text-white"
+          >
+            <RefreshCw size={16} aria-hidden="true" /> Retry
+          </button>
+        )}
       </div>
     )
   }
@@ -121,6 +138,11 @@ function ScrollPageImage({
       )}
     </div>
   )
+}
+
+function ScrollPageImage(props: Omit<React.ComponentProps<typeof ScrollPageImageInner>, 'onRetry'>) {
+  const [attempt, setAttempt] = useState(0)
+  return <ScrollPageImageInner key={attempt} {...props} onRetry={() => setAttempt((a) => a + 1)} />
 }
 
 export function VerticalScrollView({

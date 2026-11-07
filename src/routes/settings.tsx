@@ -29,6 +29,7 @@ import {
   Bell,
   Shield,
   HelpCircle,
+  Smartphone,
 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { ChevronLeft } from 'lucide-react'
@@ -44,6 +45,7 @@ type SettingsPage =
   | 'downloads'
   | 'notifications'
   | 'privacy'
+  | 'devices'
   | 'about'
 
 const settingsNavItems: { key: SettingsPage; label: string; icon: typeof Palette; sub: string; group: 'Preferences' | 'Data' }[] = [
@@ -53,6 +55,10 @@ const settingsNavItems: { key: SettingsPage; label: string; icon: typeof Palette
   { key: 'downloads', label: 'Downloads', icon: Download, sub: 'Storage and limits', group: 'Preferences' },
   { key: 'notifications', label: 'Notifications', icon: Bell, sub: 'When to notify you', group: 'Preferences' },
   { key: 'privacy', label: 'Privacy', icon: Shield, sub: 'Control your data and privacy settings', group: 'Data' },
+  // Mac side of Pair & sync; the phone pairs from You › Pair with Mac instead.
+  ...(isMobile()
+    ? []
+    : [{ key: 'devices' as const, label: 'Devices', icon: Smartphone, sub: 'Pair your iPhone and sync progress', group: 'Data' as const }]),
   { key: 'about', label: 'About', icon: HelpCircle, sub: 'App information and credits', group: 'Data' },
 ]
 
@@ -576,7 +582,6 @@ function SettingsScreen() {
             {/* Export & Import */}
             {!isMobile() && <ExportImportSection />}
             {!isMobile() && <AutoBackupSection />}
-            {!isMobile() && <DevicesSection />}
           </div>
         )}
 
@@ -699,6 +704,17 @@ function SettingsScreen() {
 
             {/* Updates Section (desktop only) */}
             {!isMobile() && <UpdateSection />}
+          </div>
+        )}
+
+        {/* Devices (Mac): pair a phone by QR, approve, revoke */}
+        {activePage === 'devices' && (
+          <div>
+            <h2 className="font-display font-bold text-xl mb-1.5">Devices</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Pair Otaku on your iPhone to sync watch and reading progress
+            </p>
+            <DevicesSection />
           </div>
         )}
 

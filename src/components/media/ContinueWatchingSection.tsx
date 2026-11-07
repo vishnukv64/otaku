@@ -161,7 +161,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   if (loading) {
     return (
       <div className="mb-10">
-        <h2 className="text-xl font-bold font-display mb-4 flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
+        <h2 className="text-xl font-bold font-display mb-4 flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">
           Continue Watching
         </h2>
         <div className="flex items-center justify-center py-12">
@@ -178,14 +178,14 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   return (
     <div className="mb-10 overflow-visible">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">
           Continue Watching
         </h2>
         <Link
-          to="/library"
-          className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+          to={isMobile() ? '/history' : '/library'}
+          className="flex items-center gap-1 text-sm max-sm:min-h-[44px] max-sm:text-[13px] max-sm:text-[var(--color-text-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
         >
-          See all
+          {isMobile() ? 'History' : 'See all'}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
         </Link>
       </div>

@@ -7,6 +7,7 @@ mod extensions;
 mod jikan;
 mod media;
 mod notifications;
+mod orientation;
 mod request_headers;
 mod release_checker;
 mod status_normalizer;
@@ -407,6 +408,7 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
+      orientation::set_orientation,
       commands::load_extension,
       commands::search_anime,
       commands::discover_anime,
