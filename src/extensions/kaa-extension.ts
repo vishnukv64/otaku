@@ -110,7 +110,7 @@ const extensionObject = {
       html = extensionObject.request(playerUrl, { accept: 'text/html' });
     } catch (error) {
       try { __log('[KAA] player page failed: ' + (error && error.message ? error.message : String(error))); } catch (_) {}
-      return { manifest: null, subtitles: [] };
+      return { manifest: null, previewVtt: null, subtitles: [] };
     }
     const props = html.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const manifest = props.match(/"manifest":\[0,"([^"]+)"\]/);
@@ -120,7 +120,9 @@ const extensionObject = {
     while ((m = re.exec(props)) !== null) {
       subtitles.push({ url: m[3], language: m[1] || m[2], label: m[2] || m[1] });
     }
+    const preview = props.match(/"thumbnails":\[0,"([^"]+\.vtt[^"]*)"\]/);
     return {
+      previewVtt: preview ? preview[1] : null,
       manifest: manifest ? (manifest[1].indexOf('//') === 0 ? 'https:' + manifest[1] : manifest[1]) : null,
       subtitles: subtitles
     };
@@ -153,7 +155,8 @@ const extensionObject = {
       id: id + '::' + ep.episode_number,
       number: Number(ep.episode_number),
       title: ep.title || ('Episode ' + ep.episode_string),
-      thumbnail: extensionObject.thumbnail(ep.thumbnail)
+      thumbnail: extensionObject.thumbnail(ep.thumbnail),
+      duration: ep.duration_ms ? Math.round(ep.duration_ms / 1000) : null
     }));
     if (!episodes.length && show.watch_uri) {
       episodes.push({ id: id + '::1', number: 1, title: show.title_en || show.title, thumbnail: null });
@@ -211,7 +214,8 @@ const extensionObject = {
           server: server.name || 'KAA',
           referrer: extensionObject.streamReferer,
           audio_type: 'sub',
-          subtitles: player.subtitles
+          subtitles: player.subtitles,
+          preview_vtt: player.previewVtt
         });
       }
       return { sources: sources, subtitles: subtitles };

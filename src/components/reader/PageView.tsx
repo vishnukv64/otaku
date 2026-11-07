@@ -126,7 +126,7 @@ export function PageView({
     >
       {/* Loading state */}
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
+        <div className={cn('absolute inset-0 flex items-center justify-center', isMobile() ? 'bg-[rgba(42,42,42,0.5)]' : 'bg-muted/50')}>
           isMobile() ? <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[var(--color-surface)] border-t-[var(--color-accent-primary)]" /> : <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </div>
       )}

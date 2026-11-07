@@ -297,7 +297,8 @@ function ReadPage() {
             // Only show toast once per chapter (avoid duplicates from effect re-runs)
             if (shownResumeToastRef.current !== currentChapterId) {
               shownResumeToastRef.current = currentChapterId
-              toastInfo('Resuming Reading', `Resuming from page ${progress.current_page}`)
+              // phone: MangaReader shows the mock's resume toast with Start over
+              if (!isMobile()) toastInfo('Resuming Reading', `Resuming from page ${progress.current_page}`)
             }
 
             // Mark as read if completed

@@ -71,6 +71,8 @@ export interface Episode {
   thumbnail?: string
   /** ISO 8601 air date. If in the future, the episode hasn't aired yet. */
   aired?: string
+  /** Runtime in seconds, when the provider reports it. */
+  duration?: number
 }
 
 export interface MediaDetails {
@@ -132,6 +134,8 @@ export interface VideoSource {
   // Per-source subtitle sidecars (not the top-level VideoSources.subtitles,
   // which are provider-wide). Rust side mirrors this as Vec<Subtitle>.
   subtitles?: Subtitle[]
+  /** WebVTT sprite map for seek-bar previews. */
+  preview_vtt?: string
 }
 
 export interface Subtitle {

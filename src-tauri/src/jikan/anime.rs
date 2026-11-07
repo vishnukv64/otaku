@@ -217,6 +217,7 @@ fn jikan_episode_to_episode(anime_mal_id: i64, ep: &JikanEpisode) -> Episode {
         title: ep.title.clone(),
         thumbnail: None,
         aired: ep.aired.clone(),
+        duration: None,
     }
 }
 
@@ -463,6 +464,7 @@ pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
                     title: Some(format!("Episode {}", n)),
                     thumbnail: None,
                     aired: None,
+                    duration: None,
                 })
                 .collect();
         }
@@ -533,6 +535,7 @@ fn fill_synthetic_episodes(
             title: Some(format!("Episode {}", n)),
             thumbnail: None,
             aired: Some(ep_date.to_rfc3339()),
+            duration: None,
         });
     }
 }
@@ -921,6 +924,7 @@ fn anilist_media_to_details(mal_id: i64, media: &serde_json::Value) -> Option<Me
             title: Some(format!("Episode {}", n)),
             thumbnail: None,
             aired: None,
+            duration: None,
         })
         .collect();
 

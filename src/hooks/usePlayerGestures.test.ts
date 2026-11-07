@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyDrag, dragValue, resolveTap, tapZone } from './usePlayerGestures'
+import { classifyDrag, dragValue, resolveTap, swipeDirection, tapZone } from './usePlayerGestures'
 
 describe('usePlayerGestures mapping', () => {
   it('splits zones 30/40/30', () => {
@@ -25,6 +25,17 @@ describe('usePlayerGestures mapping', () => {
     expect(classifyDrag(40, 5, 10, 100)).toBe('scrub')
     expect(classifyDrag(2, -40, 10, 100)).toBe('brightness')
     expect(classifyDrag(2, -40, 80, 100)).toBe('volume')
+    // centre strip swipes only when enabled; sides stay brightness/volume
+    expect(classifyDrag(2, -40, 50, 100, true)).toBe('swipe')
+    expect(classifyDrag(2, -40, 50, 100)).toBe('volume')
+    expect(classifyDrag(2, -40, 10, 100, true)).toBe('brightness')
+    expect(classifyDrag(40, 5, 50, 100, true)).toBe('scrub')
+  })
+
+  it('commits middle swipes past the threshold', () => {
+    expect(swipeDirection(-80)).toBe('up')
+    expect(swipeDirection(80)).toBe('down')
+    expect(swipeDirection(-30)).toBeNull()
   })
 
   it('maps drag distance to values, clamped', () => {

@@ -98,7 +98,7 @@ function ScrollPageImageInner({
         {/* Loading spinner - shown while <img> element loads the blob */}
         {!isFullyLoaded && (
           <div
-            className="flex items-center justify-center bg-[var(--color-bg-secondary)]/30"
+            className={cn('flex items-center justify-center', isMobile() ? 'bg-[rgba(42,42,42,0.5)]' : 'bg-[var(--color-bg-secondary)]/30')}
             style={{ minHeight: isWebtoonMode ? '300px' : '50vh', width: '100%' }}
           >
             <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
@@ -125,7 +125,7 @@ function ScrollPageImageInner({
   // Proxy is loading or not started yet (skipped)
   return (
     <div
-      className="w-full flex items-center justify-center bg-[var(--color-bg-secondary)]/20"
+      className={cn('w-full flex items-center justify-center', isMobile() ? 'bg-[rgba(42,42,42,0.5)]' : 'bg-[var(--color-bg-secondary)]/20')}
       style={{
         aspectRatio: isWebtoonMode ? '3/4' : '2/3',
         maxHeight: isWebtoonMode ? '400px' : '100vh',

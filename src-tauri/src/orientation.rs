@@ -1,42 +1,108 @@
-//! Player rotate button: ask iOS to rotate the window scene. WKWebView has no
-//! working `screen.orientation.lock`, so the web side can't do this itself.
+//! iOS orientation: the app is portrait-only, the player may rotate.
+//!
+//! WKWebView has no working `screen.orientation.lock`, so the web side calls
+//! `set_orientation`. We replace `supportedInterfaceOrientations` on the root
+//! view controller's class with one that reads a mask we control, then ask the
+//! window scene to re-evaluate (and optionally rotate).
 
-/// Rotate to landscape (`true`) or portrait (`false`). A request, not a lock:
-/// the device can still rotate freely afterwards. No-op off iOS and below iOS 16.
+/// `mode`:
+/// - `"app"`: portrait only, rotate back to portrait now (leaving the player, app start)
+/// - `"player"`: portrait and landscape, follow the device
+/// - `"landscape"` / `"portrait"`: player rotate button; device can still rotate after
+///
+/// No-op off iOS; rotation requests need iOS 16+.
 #[tauri::command]
-pub fn set_orientation(app: tauri::AppHandle, landscape: bool) -> Result<(), String> {
+pub fn set_orientation(app: tauri::AppHandle, mode: String) -> Result<(), String> {
     #[cfg(target_os = "ios")]
     {
-        app.run_on_main_thread(move || unsafe { request(landscape) })
+        let (mask, request) = match mode.as_str() {
+            "app" => (ios::PORTRAIT, Some(ios::PORTRAIT)),
+            "player" => (ios::ALL, None),
+            "landscape" => (ios::ALL, Some(ios::LANDSCAPE)),
+            "portrait" => (ios::ALL, Some(ios::PORTRAIT)),
+            other => return Err(format!("unknown orientation mode {other}")),
+        };
+        app.run_on_main_thread(move || unsafe { ios::apply(mask, request) })
             .map_err(|e| e.to_string())?;
     }
     #[cfg(not(target_os = "ios"))]
-    let _ = (app, landscape);
+    let _ = (app, mode);
     Ok(())
 }
 
 #[cfg(target_os = "ios")]
-unsafe fn request(landscape: bool) {
-    use objc2::runtime::{AnyClass, AnyObject};
+mod ios {
+    use objc2::ffi::{class_replaceMethod, object_getClass};
     use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use objc2::sel;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Once;
 
-    // UIInterfaceOrientationMask: Portrait = 1<<1, LandscapeLeft|LandscapeRight = 1<<4|1<<3.
-    let mask: usize = if landscape { (1 << 4) | (1 << 3) } else { 1 << 1 };
-    let (Some(app_cls), Some(prefs_cls)) = (
-        AnyClass::get(c"UIApplication"),
-        AnyClass::get(c"UIWindowSceneGeometryPreferencesIOS"), // iOS 16+
-    ) else {
-        return;
-    };
-    let app: *mut AnyObject = msg_send![app_cls, sharedApplication];
-    let scenes: *mut AnyObject = msg_send![app, connectedScenes];
-    let scene: *mut AnyObject = msg_send![scenes, anyObject];
-    if scene.is_null() {
-        return;
+    // UIInterfaceOrientationMask bits.
+    pub const PORTRAIT: usize = 1 << 1;
+    pub const LANDSCAPE: usize = (1 << 3) | (1 << 4);
+    pub const ALL: usize = PORTRAIT | LANDSCAPE;
+
+    static MASK: AtomicUsize = AtomicUsize::new(PORTRAIT);
+    static INSTALL: Once = Once::new();
+
+    extern "C-unwind" fn supported(_this: *mut AnyObject, _cmd: Sel) -> usize {
+        MASK.load(Ordering::Relaxed)
     }
-    // ponytail: the preferences object is leaked (a few bytes per tap).
-    let prefs: *mut AnyObject = msg_send![prefs_cls, alloc];
-    let prefs: *mut AnyObject = msg_send![prefs, initWithInterfaceOrientations: mask];
-    let none: *mut AnyObject = std::ptr::null_mut();
-    let _: () = msg_send![scene, requestGeometryUpdateWithPreferences: prefs, errorHandler: none];
+
+    unsafe fn first_scene() -> *mut AnyObject {
+        let Some(app_cls) = AnyClass::get(c"UIApplication") else {
+            return std::ptr::null_mut();
+        };
+        let app: *mut AnyObject = msg_send![app_cls, sharedApplication];
+        let scenes: *mut AnyObject = msg_send![app, connectedScenes];
+        msg_send![scenes, anyObject]
+    }
+
+    unsafe fn root_vc(scene: *mut AnyObject) -> *mut AnyObject {
+        let windows: *mut AnyObject = msg_send![scene, windows];
+        let window: *mut AnyObject = msg_send![windows, firstObject];
+        if window.is_null() {
+            return std::ptr::null_mut();
+        }
+        msg_send![window, rootViewController]
+    }
+
+    pub unsafe fn apply(mask: usize, request: Option<usize>) {
+        let scene = first_scene();
+        if scene.is_null() {
+            return;
+        }
+        let vc = root_vc(scene);
+        if vc.is_null() {
+            return;
+        }
+        INSTALL.call_once(|| {
+            // ponytail: swizzles the whole root VC class; fine, the app has one window.
+            let cls = object_getClass(vc) as *mut AnyClass;
+            let imp: Imp = std::mem::transmute(
+                supported as extern "C-unwind" fn(*mut AnyObject, Sel) -> usize,
+            );
+            class_replaceMethod(cls, sel!(supportedInterfaceOrientations), imp, c"Q@:".as_ptr());
+        });
+        MASK.store(mask, Ordering::Relaxed);
+
+        // iOS 16+: re-read the mask, then rotate if asked.
+        let responds: bool =
+            msg_send![vc, respondsToSelector: sel!(setNeedsUpdateOfSupportedInterfaceOrientations)];
+        if responds {
+            let _: () = msg_send![vc, setNeedsUpdateOfSupportedInterfaceOrientations];
+        }
+        let (Some(want), Some(prefs_cls)) =
+            (request, AnyClass::get(c"UIWindowSceneGeometryPreferencesIOS"))
+        else {
+            return;
+        };
+        // ponytail: the preferences object is leaked (a few bytes per call).
+        let prefs: *mut AnyObject = msg_send![prefs_cls, alloc];
+        let prefs: *mut AnyObject = msg_send![prefs, initWithInterfaceOrientations: want];
+        let none: *mut AnyObject = std::ptr::null_mut();
+        let _: () = msg_send![scene, requestGeometryUpdateWithPreferences: prefs, errorHandler: none];
+    }
 }

@@ -28,6 +28,7 @@ import { SEEK_STEP, usePlayerGestures } from '@/hooks/usePlayerGestures'
 import type { SubtitleFontFamily } from '@/store/playerStore'
 import { isAndroid } from '@/utils/platform'
 import { invoke } from '@tauri-apps/api/core'
+import type { SeekPreview } from '@/hooks/usePlayerExtras'
 
 export type PlayerMenu =
   | 'settings'
@@ -63,6 +64,8 @@ export interface MobilePlayerControlsProps {
   skipBy: (direction: 'forward' | 'backward') => void
   toggleFullscreen: () => void
   onBack?: () => void
+  /** Shrink into the mini player (portrait swipe down). */
+  onMinimize?: () => void
   qualities: string[]
   selectedQuality: string
   onQuality: (q: string) => void
@@ -89,8 +92,10 @@ export interface MobilePlayerControlsProps {
   episodes?: EpisodeLite[]
   currentEpisode?: number
   onEpisodeSelect?: (id: string) => void
-  showSkipIntro: boolean
-  onSkipIntro: () => void
+  /** Label of the AniSkip interval currently playing, or null. */
+  skipLabel: string | null
+  onSkip: () => void
+  seekPreview?: ((t: number) => SeekPreview | null) | null
   /** Opens the Download sheet owned by the route/player. */
   onDownload?: () => void
   /** Saved position the player resumed from (seconds); shows a "Start over" chip. */
@@ -184,6 +189,13 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
 
   const gestures = usePlayerGestures({
     disabled: locked || p.suspended,
+    // Portrait only: swipe up on the centre strip opens episodes, down shrinks to the mini player.
+    onSwipe: p.landscape
+      ? undefined
+      : (dir) => {
+          if (dir === 'up') setMenu('episodes')
+          else p.onMinimize?.()
+        },
     read: () => ({
       time: p.videoRef.current?.currentTime ?? 0,
       duration: p.duration,
@@ -223,6 +235,7 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
   }
   const shown = (visible || !p.isPlaying || !!menu) && !p.suspended
   const shownTime = scrub ?? p.currentTime
+  const sprite = scrub !== null ? p.seekPreview?.(scrub) ?? null : null
   const pct = p.duration > 0 ? (shownTime / p.duration) * 100 : 0
 
   // ── Menu bodies (shared by sheet and side panel) ────────────────────────
@@ -340,7 +353,7 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       type="button"
       aria-label={p.landscape ? 'Rotate to portrait' : 'Rotate to landscape'}
       className={iconBtn}
-      onClick={() => void invoke('set_orientation', { landscape: !p.landscape }).catch(() => {})}
+      onClick={() => void invoke('set_orientation', { mode: p.landscape ? 'portrait' : 'landscape' }).catch(() => {})}
     >
       <RotateCw size={22} />
     </button>
@@ -519,7 +532,24 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       )}
 
       {scrub !== null && (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xl bg-black/70 px-4 py-2 text-lg font-semibold tabular-nums text-white">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-xl bg-black/70 px-4 py-2 text-lg font-semibold tabular-nums text-white">
+          {sprite && (
+            <div
+              className="overflow-hidden rounded-md"
+              style={{ width: 160, height: (sprite.h * 160) / sprite.w }}
+            >
+              <div
+                style={{
+                  width: sprite.w,
+                  height: sprite.h,
+                  backgroundImage: `url("${sprite.url}")`,
+                  backgroundPosition: `-${sprite.x}px -${sprite.y}px`,
+                  transform: `scale(${160 / sprite.w})`,
+                  transformOrigin: 'top left',
+                }}
+              />
+            </div>
+          )}
           {fmt(scrub)} <span className="text-white/50">/ {fmt(p.duration)}</span>
         </div>
       )}
@@ -626,13 +656,13 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
           )}
         </div>
 
-        {p.showSkipIntro && !p.disableSeeking && (
+        {p.skipLabel && !p.disableSeeking && (
           <button
             type="button"
-            onClick={p.onSkipIntro}
+            onClick={p.onSkip}
             className={`pointer-events-auto absolute ${p.landscape ? 'bottom-24 right-4' : 'bottom-[68px] right-3'} min-h-[36px] rounded-lg border border-white/30 bg-black/60 px-5 text-sm font-semibold text-white`}
           >
-            Skip Intro
+            {p.skipLabel}
           </button>
         )}
 

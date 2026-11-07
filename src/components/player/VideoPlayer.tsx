@@ -29,6 +29,7 @@ import {
 import { DownloadButton } from './DownloadButton'
 import { MobilePlayerControls } from './MobilePlayerControls'
 import { useMobileLayout } from '@/hooks/useMobileLayout'
+import { useActiveSkip, useSeekPreview } from '@/hooks/usePlayerExtras'
 import { usePlayerStore, type SubtitleFontFamily } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { usePipStore } from '@/store/pipStore'
@@ -1951,6 +1952,13 @@ export function VideoPlayer({
     subtitleFontFamilies[playerSettings.subtitleFontFamily ?? 'system'] ??
     subtitleFontFamilies.system
 
+  const activeSkip = useActiveSkip(mediaId, currentEpisode, duration, currentTime)
+  const seekPreview = useSeekPreview(
+    currentSource?.preview_vtt,
+    videoServer ? (u) => createProxyUrl(videoServer, u, currentSource?.referrer) : null
+  )
+  const hoverSprite = seekPreview && hoverPreview.visible ? seekPreview(hoverPreview.time) : null
+
   // Compute progress percentage
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
 
@@ -2074,6 +2082,7 @@ export function VideoPlayer({
             skipBy={handleSkip}
             toggleFullscreen={toggleFullscreen}
             onBack={onGoBack}
+            onMinimize={handleEnterPip}
             qualities={availableQualities}
             selectedQuality={selectedQuality}
             onQuality={changeQuality}
@@ -2097,8 +2106,9 @@ export function VideoPlayer({
             episodes={episodes}
             currentEpisode={currentEpisode}
             onEpisodeSelect={onEpisodeSelect}
-            showSkipIntro={currentTime > 0 && currentTime < 90}
-            onSkipIntro={() => seekToTime(90)}
+            skipLabel={activeSkip?.label ?? null}
+            onSkip={() => activeSkip && seekToTime(activeSkip.end)}
+            seekPreview={seekPreview}
             resumedAt={initialTime}
             offline={currentSource?.server === 'Local'}
           />
@@ -2144,7 +2154,7 @@ export function VideoPlayer({
         </div>
 
         {/* ── Skip Intro Button ─────────────────────────────────── */}
-        {!disableSeeking && currentTime > 0 && currentTime < 90 && (
+        {!disableSeeking && activeSkip && (
           <div
             className={`absolute bottom-[100px] right-6 z-10 flex items-center gap-2 py-[10px] px-5 rounded cursor-pointer transition-all duration-150 ${
               showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -2162,8 +2172,7 @@ export function VideoPlayer({
             }}
             onClick={(e) => {
               e.stopPropagation()
-              // Skip to 90 seconds
-              seekToTime(90)
+              seekToTime(activeSkip.end)
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'
@@ -2174,7 +2183,7 @@ export function VideoPlayer({
               e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)'
             }}
           >
-            Skip Intro
+            {activeSkip.label}
             <svg
               width="16"
               height="16"
@@ -2309,6 +2318,29 @@ export function VideoPlayer({
                 cursor: isDragging ? 'grabbing' : 'grab',
               }}
             />
+            {hoverSprite && (
+              <div
+                className="absolute pointer-events-none rounded overflow-hidden border border-white/20"
+                style={{
+                  top: `${-28 - 6 - (hoverSprite.h * 160) / hoverSprite.w}px`,
+                  left: `${Math.max(80, Math.min(hoverPreview.x, (progressBarRef.current?.clientWidth || 0) - 80))}px`,
+                  transform: 'translateX(-50%)',
+                  width: 160,
+                  height: (hoverSprite.h * 160) / hoverSprite.w,
+                }}
+              >
+                <div
+                  style={{
+                    width: hoverSprite.w,
+                    height: hoverSprite.h,
+                    backgroundImage: `url("${hoverSprite.url}")`,
+                    backgroundPosition: `-${hoverSprite.x}px -${hoverSprite.y}px`,
+                    transform: `scale(${160 / hoverSprite.w})`,
+                    transformOrigin: 'top left',
+                  }}
+                />
+              </div>
+            )}
             {/* Tooltip */}
             {hoverPreview.visible && (
               <div

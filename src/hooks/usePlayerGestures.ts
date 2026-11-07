@@ -5,13 +5,15 @@
 import { useCallback, useRef } from 'react'
 
 export type TapZone = 'left' | 'center' | 'right'
-export type DragKind = 'scrub' | 'brightness' | 'volume'
+export type DragKind = 'scrub' | 'brightness' | 'volume' | 'swipe'
 
 export const DOUBLE_TAP_MS = 300
 export const SEEK_STEP = 10
 const DRAG_SLOP = 10
 /** A full-width horizontal drag scrubs this many seconds. */
 const SCRUB_SECONDS_PER_WIDTH = 90
+/** Vertical travel that commits a middle-strip swipe. */
+export const SWIPE_COMMIT = 60
 
 /** Left 30% / centre 40% / right 30%, same split as the reader. */
 export function tapZone(x: number, width: number): TapZone {
@@ -37,13 +39,28 @@ export function resolveTap(
   return { type: 'pending' }
 }
 
-/** Axis-locks a drag: horizontal scrubs, vertical is brightness (left half) or volume (right half). */
-export function classifyDrag(dx: number, dy: number, startX: number, width: number): DragKind | null {
+/**
+ * Axis-locks a drag: horizontal scrubs; vertical is brightness (left half) or volume
+ * (right half), or a `swipe` when it starts in the centre strip and swipes are enabled.
+ */
+export function classifyDrag(
+  dx: number,
+  dy: number,
+  startX: number,
+  width: number,
+  swipes = false
+): DragKind | null {
   const ax = Math.abs(dx)
   const ay = Math.abs(dy)
   if (Math.max(ax, ay) < DRAG_SLOP) return null
   if (ax > ay) return 'scrub'
+  if (swipes && tapZone(startX, width) === 'center') return 'swipe'
   return startX < width / 2 ? 'brightness' : 'volume'
+}
+
+/** Middle-strip swipe result on release. */
+export function swipeDirection(dy: number): 'up' | 'down' | null {
+  return dy <= -SWIPE_COMMIT ? 'up' : dy >= SWIPE_COMMIT ? 'down' : null
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
@@ -72,6 +89,8 @@ interface Handlers {
   onBrightness: (v: number) => void
   /** Preview while dragging (time in seconds) and commit on release; null = cancelled. */
   onScrub: (time: number | null, commit: boolean) => void
+  /** Centre-strip vertical swipe (portrait: up = episodes, down = mini player). Omit to disable. */
+  onSwipe?: (dir: 'up' | 'down') => void
   /** Ignore touches (e.g. controls locked) */
   disabled?: boolean
 }
@@ -101,8 +120,12 @@ export function usePlayerGestures(h: Handlers) {
     const rect = e.currentTarget.getBoundingClientRect()
     const dx = e.clientX - d.x
     const dy = e.clientY - d.y
-    d.kind ??= classifyDrag(dx, dy, d.x - rect.left, rect.width)
+    d.kind ??= classifyDrag(dx, dy, d.x - rect.left, rect.width, !!hRef.current.onSwipe)
     if (!d.kind) return
+    if (d.kind === 'swipe') {
+      d.value = dy
+      return
+    }
     const size = { width: rect.width, height: rect.height }
     const start =
       d.kind === 'scrub' ? d.base.time : d.kind === 'volume' ? d.base.volume : d.base.brightness
@@ -118,6 +141,10 @@ export function usePlayerGestures(h: Handlers) {
     if (!d) return
     if (d.kind) {
       if (d.kind === 'scrub') hRef.current.onScrub(d.value, true)
+      else if (d.kind === 'swipe') {
+        const dir = swipeDirection(d.value)
+        if (dir) hRef.current.onSwipe?.(dir)
+      }
       return
     }
     const rect = e.currentTarget.getBoundingClientRect()

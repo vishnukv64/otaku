@@ -21,7 +21,7 @@ import { DownloadButton } from '@/components/player/DownloadButton'
 import { SettingToggle } from '@/components/settings/SettingToggle'
 import { BottomSheet } from '@/components/ui/BottomSheet'
 import { usePlayerStore } from '@/store/playerStore'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { useMobileLayout } from '@/hooks/useMobileLayout'
 import {
@@ -51,7 +51,7 @@ import {
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
-import { isAndroid } from '@/utils/platform'
+import { isAndroid, isIOS } from '@/utils/platform'
 import { usePipStore } from '@/store/pipStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { buildAnikotoSearchQueries, resolveAnikotoSlug } from '@/utils/anikotoResolver'
@@ -87,6 +87,13 @@ export const Route = createFileRoute('/watch')({
 
 function WatchPage() {
   const { malId, episodeId: initialEpisodeId } = Route.useSearch()
+
+  // iOS: only the player may rotate; leaving it snaps the app back to portrait.
+  useEffect(() => {
+    if (!isIOS()) return
+    void invoke('set_orientation', { mode: 'player' }).catch(() => {})
+    return () => void invoke('set_orientation', { mode: 'app' }).catch(() => {})
+  }, [])
 
   const [details, setDetails] = useState<MediaDetails | null>(null)
   const [sources, setSources] = useState<VideoSources | null>(null)
@@ -945,7 +952,7 @@ function WatchPage() {
               {details.episodes.map((ep) => {
                 const cur = ep.id === currentEpisodeId
                 const h = progress.get(ep.id)
-                const dur = h?.duration && h.duration > 0 ? h.duration : 0
+                const dur = h?.duration && h.duration > 0 ? h.duration : (ep.duration ?? 0)
                 const pos = h?.progress_seconds ?? 0
                 const watched =
                   !!h?.completed ||

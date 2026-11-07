@@ -118,6 +118,9 @@ pub struct Episode {
     pub thumbnail: Option<String>,
     /// ISO 8601 air date. If in the future, the episode hasn't aired yet.
     pub aired: Option<String>,
+    /// Runtime in seconds, when the provider reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
 }
 
 /// Season information
@@ -200,6 +203,9 @@ pub struct VideoSource {
     pub audio_type: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<Subtitle>,
+    /// WebVTT sprite map for seek-bar previews, when the provider has one.
+    #[serde(default, alias = "previewVtt", skip_serializing_if = "Option::is_none")]
+    pub preview_vtt: Option<String>,
 }
 
 /// Subtitle track

@@ -2,9 +2,11 @@
  * Phone reader sheets (mock: design/files/reader.html): Settings (every readerStore
  * setting) and Chapter list, both as BottomSheets.
  */
-import { useState } from 'react'
-import { Check, ChevronDown, ChevronUp, RotateCcw, Rows3, Search } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, ChevronDown, Download, ChevronUp, RotateCcw, Rows3, Search } from 'lucide-react'
 import { BottomSheet } from '@/components/ui/BottomSheet'
+import { isChapterDownloaded } from '@/utils/tauri-commands'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { ReaderDouble, ReaderPagedLtr, ReaderPagedRtl, ReaderWebtoon } from '@/components/ui/OtakuIcons'
 import { useReaderStore, type FitMode, type ReadingMode } from '@/store/readerStore'
 import type { Chapter } from '@/types/extension'
@@ -181,6 +183,7 @@ export function MobileReaderSettings({ isOpen, onClose }: { isOpen: boolean; onC
 }
 
 export function MobileChapterSheet(p: {
+  mediaId: string
   isOpen: boolean
   onClose: () => void
   chapters: Chapter[]
@@ -189,6 +192,18 @@ export function MobileChapterSheet(p: {
   onSelect: (id: string) => void
 }) {
   const [q, setQ] = useState('')
+  const { isOnline } = useNetworkStatus()
+  const [downloaded, setDownloaded] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!p.isOpen) return
+    let cancelled = false
+    void Promise.all(p.chapters.map((c) => isChapterDownloaded(p.mediaId, c.id).then((d) => (d ? c.id : null), () => null))).then(
+      (ids) => !cancelled && setDownloaded(new Set(ids.filter((i): i is string => !!i)))
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [p.isOpen, p.mediaId, p.chapters])
   const list = q
     ? p.chapters.filter((c) => `${c.number} ${c.title ?? ''}`.toLowerCase().includes(q.toLowerCase()))
     : p.chapters
@@ -210,14 +225,17 @@ export function MobileChapterSheet(p: {
       {list.map((c) => {
         const cur = c.id === p.currentChapterId
         const read = p.readChapters.has(c.id)
+        const isDl = downloaded.has(c.id)
+        const off = !isOnline && !isDl
         const isNew = !read && !cur && curNum !== undefined && c.number > curNum
         return (
           <button
             key={c.id}
             type="button"
+            disabled={off}
             aria-current={cur ? 'true' : undefined}
             onClick={() => p.onSelect(c.id)}
-            className={`flex min-h-[56px] w-full items-center justify-between gap-3 border-b border-[var(--color-glass-border)] px-[18px] text-left last:border-b-0 active:bg-[var(--color-glass-bg-hover)] ${read && !cur ? 'opacity-60' : ''} ${cur ? 'bg-[var(--color-glass-bg)]' : ''}`}
+            className={`flex min-h-[56px] w-full items-center justify-between gap-3 border-b border-[var(--color-glass-border)] px-[18px] text-left last:border-b-0 active:bg-[var(--color-glass-bg-hover)] ${read && !cur ? 'opacity-60' : ''} ${cur ? 'bg-[var(--color-glass-bg)]' : ''} ${off ? 'opacity-45' : ''}`}
           >
             <span className="min-w-0">
               <b className="block truncate text-[15px] font-semibold text-white">
@@ -230,7 +248,8 @@ export function MobileChapterSheet(p: {
               {(cur || isNew) && (
                 <span className="rounded-full bg-[var(--color-accent-primary)] px-2 py-0.5 text-[11px] font-bold text-white">{cur ? 'Reading' : 'NEW'}</span>
               )}
-              {read && <Check size={16} className="text-white/60" aria-label="Read" />}
+              {read && <Check size={16} className="text-[var(--color-green)]" aria-label="Read" />}
+              {isDl && <Download size={16} className="text-white/60" aria-label="Downloaded" />}
             </span>
           </button>
         )

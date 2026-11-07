@@ -1269,7 +1269,9 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
                                     : `Downloading ${Math.round(dl.total_bytes ? (dl.downloaded_bytes / dl.total_bytes) * 100 : 0)}%`
                                 : partial
                                   ? `${Math.round(pct)}% watched`
-                                  : ''}
+                                  : e.duration
+                                    ? `${Math.round(e.duration / 60)} min`
+                                    : ''}
                           </span>
                         </span>
                       </button>
