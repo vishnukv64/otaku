@@ -16,6 +16,10 @@ import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { ContinueReadingSection } from '@/components/media/ContinueReadingSection'
 import { GenreFilterBar } from '@/components/media/GenreFilterBar'
 import { BrowseSidebar, type BrowseFilters, type NavItem } from '@/components/browse/BrowseSidebar'
+import { MobileBrowseControls } from '@/components/browse/MobileBrowseControls'
+import { isMobile } from '@/utils/platform'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { WifiOff } from 'lucide-react'
 import { BrowseHeader } from '@/components/browse/BrowseHeader'
 import { ActiveFilterChips, type FilterChip } from '@/components/browse/ActiveFilterChips'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -712,6 +716,8 @@ function MangaScreen() {
     []
   )
 
+  const mobile = isMobile()
+  const { isOnline } = useNetworkStatus()
   const carousels = [
     { title: 'Most Popular', hook: popular },
     { title: 'Recommended', hook: favorite },
@@ -745,7 +751,7 @@ function MangaScreen() {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] overflow-visible">
       {/* Sidebar */}
-      <BrowseSidebar
+      {!mobile && <BrowseSidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
         activeNav={activeNav}
@@ -756,17 +762,37 @@ function MangaScreen() {
         genres={mangaGenres}
         genresLoading={genresLoading}
         yearOptions={yearOptions}
-      />
+      />}
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 overflow-visible">
+      <main className={`flex-1 min-w-0 px-4 sm:px-6 lg:px-8 3xl:px-12 overflow-visible ${mobile ? 'py-3' : 'py-8'}`}>
+        {mobile && !isOnline && (
+          <div className="mb-3 flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+            <WifiOff size={14} /> You’re offline. Browsing needs a connection — showing what was loaded.
+          </div>
+        )}
         {/* Browse Header with sort */}
+        {mobile ? (
+          <MobileBrowseControls
+            mediaType="manga"
+            activeNav={activeNav}
+            onNavChange={setActiveNav}
+            filters={browseFilters}
+            onFiltersChange={setBrowseFilters}
+            onReset={handleClearAllFilters}
+            genres={mangaGenres}
+            genresLoading={genresLoading}
+            yearOptions={yearOptions}
+            resultCount={resultCount}
+          />
+        ) : (
         <BrowseHeader
           title={headerTitle}
           resultCount={resultCount}
           sortBy={browseFilters.orderBy || defaultMangaFilters.orderBy}
           onSortChange={handleHeaderSortChange}
         />
+        )}
 
         {/* Active Filter Chips */}
         <ActiveFilterChips
@@ -816,7 +842,7 @@ function MangaScreen() {
           <div>
             {searchResults.length > 0 && (
               <div className="overflow-visible">
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
+                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
                   {sortedSearchResults.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -867,7 +893,7 @@ function MangaScreen() {
                 </div>
               ) : sortedGenreResults.length > 0 ? (
                 <div className="overflow-visible">
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
+                  <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
                     {sortedGenreResults.map((item) => (
                       <MediaCard
                         key={item.id}
@@ -917,7 +943,7 @@ function MangaScreen() {
               </div>
             ) : sortedTopRatedItems.length > 0 ? (
               <div className="overflow-visible">
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
+                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
                   {sortedTopRatedItems.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -952,7 +978,7 @@ function MangaScreen() {
               </div>
             ) : sortedPublishingItems.length > 0 ? (
               <div className="overflow-visible">
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
+                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
                   {sortedPublishingItems.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -987,7 +1013,7 @@ function MangaScreen() {
               </div>
             ) : sortedFilteredBrowseItems.length > 0 ? (
               <div className="overflow-visible">
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-visible">
+                <div className="grid ${mobile ? 'grid-cols-2 gap-3' : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4'} overflow-visible">
                   {sortedFilteredBrowseItems.map((item) => (
                     <MediaCard
                       key={item.id}
@@ -1052,6 +1078,9 @@ function MangaScreen() {
                   title={title}
                   items={hook.data}
                   loading={hook.loading}
+                  error={hook.error}
+                  onRetry={() => void hook.refetch()}
+                  disabled={mobile && !isOnline}
                   onItemClick={handleMediaClick}
                 />
               ))}

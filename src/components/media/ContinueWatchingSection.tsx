@@ -7,14 +7,16 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, Link } from '@tanstack/react-router'
-import { Play, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
-import { getContinueWatchingWithDetails, removeFromContinueWatching, loadExtension, type ContinueWatchingEntry } from '@/utils/tauri-commands'
+import { Play, Loader2, ChevronLeft, ChevronRight, X, Info, MoreHorizontal, SkipForward, Check, List } from 'lucide-react'
+import { getContinueWatchingWithDetails, removeFromContinueWatching, saveWatchProgress, loadExtension, type ContinueWatchingEntry } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaDetailModal } from './MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
 import { notifySuccess, notifyError } from '@/utils/notify'
+import { isMobile } from '@/utils/platform'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
 
 interface ContinueWatchingSectionProps {
   extensionId?: string
@@ -27,6 +29,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
+  const [menuEntry, setMenuEntry] = useState<ContinueWatchingEntry | null>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
@@ -128,6 +131,30 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     } catch (error) {
       console.error('Failed to remove from continue watching:', error)
       notifyError('Remove Failed', 'Failed to remove from Continue Watching', meta)
+    }
+  }
+
+  const toSearchResult = (entry: ContinueWatchingEntry): SearchResult => ({
+    id: entry.media.id,
+    title: entry.media.title,
+    cover_url: entry.media.cover_url,
+    description: entry.media.description,
+    rating: entry.media.rating,
+    year: entry.media.year,
+    status: entry.media.status,
+  })
+
+  const playNext = (entry: ContinueWatchingEntry) =>
+    navigate({ to: '/watch', search: { malId: entry.media.id } })
+
+  const markWatched = async (entry: ContinueWatchingEntry) => {
+    try {
+      await saveWatchProgress(entry.media.id, entry.episode_id, entry.episode_number, entry.duration ?? 0, entry.duration ?? undefined, true)
+      setContinueWatching(prev => prev.map(e => (e.media.id === entry.media.id ? { ...e, completed: true } : e)))
+      notifySuccess('Marked watched', `EP ${entry.episode_number} of "${entry.media.title}"`)
+    } catch (error) {
+      console.error('Failed to mark watched:', error)
+      notifyError('Failed', 'Could not mark as watched')
     }
   }
 
@@ -266,13 +293,24 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                   </div>
                 </button>
 
+                {isMobile() && (
+                  <button
+                    onClick={() => setMenuEntry(entry)}
+                    aria-label={`More actions for ${media.title}`}
+                    className="absolute right-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <MoreHorizontal size={18} />
+                    </span>
+                  </button>
+                )}
                 {/* Info button */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedMedia(media)
                   }}
-                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  className={`${isMobile() ? 'hidden ' : ''}absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto`}
                   title="View Details"
                 >
                   <Info className="w-4 h-4" />
@@ -280,7 +318,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  className={`${isMobile() ? 'hidden ' : ''}absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto`}
                   title="Remove from Continue Watching"
                 >
                   <X className="w-4 h-4" />
@@ -290,6 +328,58 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
           })}
         </div>
       </div>
+
+      {menuEntry && (
+        <BottomSheet isOpen onClose={() => setMenuEntry(null)} title={menuEntry.media.title}>
+          <SheetOption
+            icon={<Play size={20} />}
+            onClick={() => {
+              handleContinueWatching(menuEntry)
+              setMenuEntry(null)
+            }}
+          >
+            {menuEntry.completed ? 'Resume' : `Resume EP ${menuEntry.episode_number}`}
+          </SheetOption>
+          <SheetOption
+            icon={<SkipForward size={20} />}
+            onClick={() => {
+              playNext(menuEntry)
+              setMenuEntry(null)
+            }}
+          >
+            Play next
+          </SheetOption>
+          <SheetOption
+            icon={<List size={20} />}
+            onClick={() => {
+              setSelectedMedia(toSearchResult(menuEntry))
+              setMenuEntry(null)
+            }}
+          >
+            Episodes &amp; details
+          </SheetOption>
+          <SheetOption
+            icon={<Check size={20} />}
+            disabled={menuEntry.completed}
+            onClick={() => {
+              void markWatched(menuEntry)
+              setMenuEntry(null)
+            }}
+          >
+            Mark watched
+          </SheetOption>
+          <SheetOption
+            destructive
+            icon={<X size={20} />}
+            onClick={() => {
+              void handleRemove({ stopPropagation: () => {} } as React.MouseEvent, menuEntry.media.id, menuEntry.media.title)
+              setMenuEntry(null)
+            }}
+          >
+            Remove from Continue Watching
+          </SheetOption>
+        </BottomSheet>
+      )}
 
       {/* Media Detail Modal */}
       {selectedMedia && (

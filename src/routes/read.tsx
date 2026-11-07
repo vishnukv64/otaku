@@ -62,6 +62,8 @@ function ReadPage() {
   const [isNsfwBlocked, setIsNsfwBlocked] = useState(false)
   const [chapterImages, setChapterImages] = useState<ChapterImages | null>(null)
   const [currentChapterId, setCurrentChapterId] = useState<string>(initialChapterId || '')
+  const [reloadKey, setReloadKey] = useState(0)
+  const [offline, setOffline] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resumePage, setResumePage] = useState<number>(1)
@@ -281,6 +283,7 @@ function ReadPage() {
     const loadChapterData = async () => {
       setLoading(true)
       setError(null)
+      setOffline(false)
 
       try {
         // Step 1: Load reading progress FIRST
@@ -327,6 +330,7 @@ function ReadPage() {
               title: `Chapter ${currentChapter.number}`,
             })
 
+            setOffline(true)
             toastInfo('Offline Mode', 'Reading from downloaded content')
             return
           }
@@ -343,7 +347,7 @@ function ReadPage() {
     }
 
     loadChapterData()
-  }, [effectiveExtId, resolvedMangaId, trackingId, currentChapterId, currentChapter])
+  }, [effectiveExtId, resolvedMangaId, trackingId, currentChapterId, currentChapter, reloadKey])
 
   const handleNextChapter = () => {
     if (!details || currentChapterIndex === -1) return
@@ -388,6 +392,18 @@ function ReadPage() {
           <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
             <p className="text-lg font-semibold mb-2">Error Loading Chapter</p>
             <p className="text-[var(--color-text-secondary)]">{error}</p>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setReloadKey((k) => k + 1)}
+                className="min-h-[44px] rounded-lg bg-[var(--color-accent-primary)] px-5 text-sm font-semibold"
+              >
+                Retry
+              </button>
+              <button type="button" onClick={handleGoBack} className="min-h-[44px] rounded-lg bg-white/10 px-5 text-sm">
+                Back
+              </button>
+            </div>
           </div>
         )}
 
@@ -431,6 +447,7 @@ function ReadPage() {
             onGoBack={handleGoBack}
             initialPage={resumePage}
             readChapters={readChapters}
+            offline={offline}
           />
         )}
 

@@ -127,15 +127,23 @@ export function PeakHoursHeatmap() {
     )
   }
 
-  const { cells, weeks, monthLabels } = buildYearGrid(activityMap)
+  const grid = buildYearGrid(activityMap)
+  // Phone: show the last 26 weeks so cells stay tappable-sized and the grid fits 390px
+  const narrow = containerWidth > 0 && containerWidth < 640
+  const skip = narrow ? Math.max(0, grid.weeks - 26) : 0
+  const weeks = grid.weeks - skip
+  const cells = grid.cells.filter((c) => c.weekIdx >= skip).map((c) => ({ ...c, weekIdx: c.weekIdx - skip }))
+  const monthLabels = grid.monthLabels
+    .map((m) => ({ ...m, weekIdx: Math.max(0, m.weekIdx - skip) }))
+    .filter((m, i, a) => i === a.length - 1 || a[i + 1].weekIdx > 0 || m.weekIdx > 0)
   const maxMinutes = Math.max(...cells.map((c) => c.minutes), 1)
   const totalDays = cells.filter((c) => c.minutes > 0).length
   const totalMinutes = cells.reduce((sum, c) => sum + c.minutes, 0)
 
   // Dynamic cell size: fill available width
-  const availableWidth = containerWidth - DAY_LABEL_WIDTH - 64 // 64 = p-8 padding (32 each side)
+  const availableWidth = containerWidth - DAY_LABEL_WIDTH - (narrow ? 32 : 64) // p-4 sm:p-8 padding
   const cell = containerWidth > 0
-    ? Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor((availableWidth - (weeks - 1) * GAP) / weeks)))
+    ? Math.max(narrow ? 6 : MIN_CELL, Math.min(MAX_CELL, Math.floor((availableWidth - (weeks - 1) * GAP) / weeks)))
     : 14
   const step = cell + GAP
   const gridWidth = weeks * step - GAP
@@ -147,7 +155,7 @@ export function PeakHoursHeatmap() {
         <div>
           <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Activity</h2>
           <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
-            {totalDays} active days in the last year
+            {totalDays} active days in the last {narrow ? '6 months' : 'year'}
             {totalMinutes > 0 && (
               <span className="ml-2 text-[var(--color-text-muted)]">
                 ({formatMinutes(totalMinutes)} total)

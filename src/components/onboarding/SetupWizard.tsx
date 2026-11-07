@@ -100,14 +100,14 @@ export function SetupWizard({ onComplete, onBack }: SetupWizardProps) {
       <div className="flex items-center justify-between py-4">
         <button
           onClick={handleBack}
-          className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          className="flex min-h-[44px] items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           Back
         </button>
         <button
           onClick={onComplete}
-          className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+          className="min-h-[44px] px-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
         >
           Skip
         </button>
@@ -225,7 +225,7 @@ export function SetupWizard({ onComplete, onBack }: SetupWizardProps) {
         {/* Next / Finish button */}
         <button
           onClick={handleNext}
-          className="px-8 py-3 rounded-xl bg-[#e50914] text-white font-semibold text-base hover:bg-[#ff1a25] transition-all active:scale-95"
+          className="px-8 py-3 min-h-[48px] max-sm:w-full rounded-xl bg-[#e50914] text-white font-semibold text-base hover:bg-[#ff1a25] transition-all active:scale-95"
         >
           {isLast ? 'Finish' : 'Next'}
         </button>

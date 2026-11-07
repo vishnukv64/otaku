@@ -11,7 +11,7 @@ import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
 import { usePipStore } from '@/store/pipStore'
 import { saveWatchProgress, type VideoServerUrls } from '@/utils/tauri-commands'
-import { isAndroid } from '@/utils/platform'
+import { isAndroid, isMobile } from '@/utils/platform'
 
 /** HTMLVideoElement extended with WebKit PiP APIs (macOS WKWebView) */
 interface WebKitVideoElement extends HTMLVideoElement {
@@ -50,7 +50,10 @@ export function MiniPlayer() {
   const [isNativePip, setIsNativePip] = useState(false)
 
   // Dragging state
-  const [position, setPosition] = useState({ right: 24, bottom: 24 })
+  const [position, setPosition] = useState(
+    // Phone: dock above the 53px tab bar
+    isMobile() ? { right: 8, bottom: 53 + 12 } : { right: 24, bottom: 24 }
+  )
   const dragRef = useRef<{
     startX: number
     startY: number

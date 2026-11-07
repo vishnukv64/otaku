@@ -5,7 +5,10 @@
  * Manga rows: "Ch. 12.5 · Page 8/24"
  */
 
-import { Play, X, Check } from 'lucide-react'
+import { useState } from 'react'
+import { Play, X, Check, MoreHorizontal, Trash2 } from 'lucide-react'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
+import { isMobile } from '@/utils/platform'
 import { useNavigate } from '@tanstack/react-router'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
 import {
@@ -51,6 +54,8 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
   const navigate = useNavigate()
   const { src: coverSrc } = useProxiedImage(entry.media.cover_url || '')
 
+  const [menuOpen, setMenuOpen] = useState(false)
+  const mobile = isMobile()
   const isAnime = entry.type === 'watch'
   const isCompleted = entry.completed
 
@@ -97,8 +102,8 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
     }
   }
 
-  const handleRemove = async (e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleRemove = async (e?: React.MouseEvent) => {
+    e?.stopPropagation()
     const meta = {
       metadata: {
         media_id: entry.media.id,
@@ -143,6 +148,7 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
           {entry.media.title}
         </h4>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{progressLabel}</p>
+        {mobile && <p className="text-[0.7rem] text-[var(--color-text-dim)]">{relativeTimestamp(entry.timestamp)}</p>}
 
         {/* Progress bar or checkmark */}
         {isCompleted ? (
@@ -166,6 +172,21 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
       </span>
 
       {/* Actions */}
+      {mobile ? (
+        <>
+          <button
+            onClick={() => setMenuOpen(true)}
+            aria-label={`Actions for ${entry.media.title}`}
+            className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)]"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          <BottomSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} title={entry.media.title}>
+            <SheetOption icon={<Play size={18} />} onClick={() => { setMenuOpen(false); handleResume() }}>Resume</SheetOption>
+            <SheetOption destructive icon={<Trash2 size={18} />} onClick={() => { setMenuOpen(false); void handleRemove() }}>Remove from history</SheetOption>
+          </BottomSheet>
+        </>
+      ) : (
       <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover/entry:opacity-100 transition-opacity">
         <button
           onClick={handleResume}
@@ -182,6 +203,7 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
           <X size={14} />
         </button>
       </div>
+      )}
     </div>
   )
 }

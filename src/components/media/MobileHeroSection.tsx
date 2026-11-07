@@ -1,5 +1,7 @@
-import { useRef } from 'react'
-import { Play, Info } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Play, Plus, Check } from 'lucide-react'
+import { addToLibrary } from '@/utils/tauri-commands'
+import { notifyError } from '@/utils/notify'
 import type { SearchResult } from '@/types/extension'
 
 interface MobileHeroSectionProps {
@@ -20,6 +22,15 @@ export function MobileHeroSection({
   onIndexChange,
 }: MobileHeroSectionProps) {
   const touchStartX = useRef(0)
+  const [added, setAdded] = useState(false)
+  const addToList = async () => {
+    try {
+      await addToLibrary(media.id, 'plan_to_watch')
+      setAdded(true)
+    } catch {
+      notifyError('Failed', 'Could not add to My List')
+    }
+  }
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX
@@ -43,8 +54,8 @@ export function MobileHeroSection({
 
   return (
     <div
-      className="relative w-full rounded-lg overflow-hidden mb-6"
-      style={{ height: '60vh' }}
+      className="relative mx-auto mb-6 w-full overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-glass-border)] shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+      style={{ height: '62vh', maxHeight: 560 }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -60,7 +71,7 @@ export function MobileHeroSection({
       )}
 
       {/* Gradient overlay at bottom */}
-      <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-black/50 to-transparent" />
+      <div onClick={onMoreInfo} className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-black/50 to-transparent" />
 
       {/* Content overlaid at bottom */}
       <div className="absolute bottom-0 left-0 right-0 p-5">
@@ -103,17 +114,18 @@ export function MobileHeroSection({
         <div className="flex items-center gap-3">
           <button
             onClick={onWatch}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-white text-black font-semibold rounded text-sm"
+            className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full bg-white px-5 text-sm font-semibold text-black"
           >
             <Play size={16} fill="currentColor" />
-            Watch Now
+            Play
           </button>
           <button
-            onClick={onMoreInfo}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-white/20 text-white font-semibold rounded text-sm backdrop-blur-sm"
+            onClick={() => void addToList()}
+            disabled={added}
+            className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full bg-white/20 px-5 text-sm font-semibold text-white backdrop-blur-sm"
           >
-            <Info size={16} />
-            More Info
+            {added ? <Check size={16} /> : <Plus size={16} />}
+            My List
           </button>
         </div>
 

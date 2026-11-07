@@ -27,6 +27,8 @@ import {
   type VideoServerUrls,
 } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
+import { MobilePlayerControls } from './MobilePlayerControls'
+import { useMobileLayout } from '@/hooks/useMobileLayout'
 import { usePlayerStore, type SubtitleFontFamily } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { usePipStore } from '@/store/pipStore'
@@ -241,6 +243,7 @@ export function VideoPlayer({
   const [loading, setLoading] = useState(true)
   const [buffering, setBuffering] = useState(false)
   const [isSeeking, setIsSeeking] = useState(false)
+  const [retryKey, setRetryKey] = useState(0)
   const [bufferedPercentage, setBufferedPercentage] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [showNextEpisodeOverlay, setShowNextEpisodeOverlay] = useState(false)
@@ -919,6 +922,7 @@ export function VideoPlayer({
     currentSource?.url,
     currentSource?.referrer,
     isLegacyTsDownload,
+    retryKey,
   ])
 
   // Close MiniPlayer when VideoPlayer starts playing (user navigated to /watch manually)
@@ -1940,6 +1944,7 @@ export function VideoPlayer({
   }, [isDragging, duration, disableSeeking, seekToTime])
 
   const mobile = isMobile()
+  const { isLandscape } = useMobileLayout()
   const subtitleScale = Math.max(0.75, Math.min(2, (playerSettings.subtitleFontScale ?? 100) / 100))
   const subtitleFontSize = `${(mobile ? 17.6 : 23.2) * subtitleScale}px`
   const subtitleFontFamily =
@@ -2051,6 +2056,56 @@ export function VideoPlayer({
           </div>
         )}
 
+        {mobile && (
+          <MobilePlayerControls
+            videoRef={videoRef}
+            title={animeTitle}
+            episodeLabel={`EP ${currentEpisode ?? ''}${episodeTitle ? ` · ${episodeTitle}` : ''}${currentSource?.server === 'Local' ? ' · Downloaded' : ''}`}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            bufferedPercentage={bufferedPercentage}
+            landscape={isLandscape || isFullscreen}
+            isFullscreen={isFullscreen}
+            disableSeeking={disableSeeking}
+            suspended={!!error || showNextEpisodeOverlay}
+            togglePlay={togglePlay}
+            seekTo={seekToTime}
+            skipBy={handleSkip}
+            toggleFullscreen={toggleFullscreen}
+            onBack={onGoBack}
+            qualities={availableQualities}
+            selectedQuality={selectedQuality}
+            onQuality={changeQuality}
+            servers={servers}
+            selectedServer={selectedServer}
+            onServer={changeServer}
+            audioModes={audioModes}
+            audioMode={selectedAudioMode}
+            onAudio={changeAudioMode}
+            subtitleTracks={subtitleTracks.map((s) => ({ url: s.url, label: s.label || s.language }))}
+            selectedSubtitleUrl={selectedSubtitleUrl}
+            onSubtitle={setSelectedSubtitleUrl}
+            subtitleFontScale={playerSettings.subtitleFontScale ?? 100}
+            subtitleFontFamily={playerSettings.subtitleFontFamily ?? 'system'}
+            onSubtitleStyle={updatePlayerSettings}
+            speeds={playbackSpeedOptions}
+            speed={playerSettings.playbackSpeed}
+            onSpeed={(s) => updatePlayerSettings({ playbackSpeed: s })}
+            hasNext={hasNextEpisode}
+            onNext={() => onNextEpisode?.()}
+            episodes={episodes}
+            currentEpisode={currentEpisode}
+            onEpisodeSelect={onEpisodeSelect}
+            showSkipIntro={currentTime > 0 && currentTime < 90}
+            onSkipIntro={() => seekToTime(90)}
+            resumedAt={initialTime}
+            offline={currentSource?.server === 'Local'}
+          />
+        )}
+
+        {!mobile && (
+        <>
         {/* ── Center Play Button ────────────────────────────────── */}
         <div
           className={`absolute top-1/2 left-1/2 z-[5] flex items-center justify-center w-[72px] h-[72px] rounded-full cursor-pointer transition-all duration-200 ${
@@ -3078,6 +3133,8 @@ export function VideoPlayer({
             </div>
           </div>
         </div>
+        </>
+        )}
 
         {/* ── Keyboard Shortcuts Hint ───────────────────────────── */}
         {showShortcutsHint && !mobile && (
@@ -3231,6 +3288,29 @@ export function VideoPlayer({
             </svg>
             <h3 className="text-xl font-bold mb-2">Playback Error</h3>
             <p className="text-white/60">{error}</p>
+            {mobile && (
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  className="min-h-[44px] rounded-lg bg-[#e50914] px-5 text-sm font-semibold"
+                  onClick={() => {
+                    setError(null)
+                    setRetryKey((k) => k + 1)
+                  }}
+                >
+                  Retry
+                </button>
+                {servers.length > 1 && (
+                  <button
+                    type="button"
+                    className="min-h-[44px] rounded-lg bg-white/10 px-5 text-sm font-semibold"
+                    onClick={() => changeServer((selectedServer + 1) % servers.length)}
+                  >
+                    Try another server
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 

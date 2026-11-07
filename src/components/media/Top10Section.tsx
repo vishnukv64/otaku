@@ -5,7 +5,8 @@
  * Netflix-inspired design with accent glow on top 3 positions.
  */
 
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
+import { PosterQuickActions, usePosterLongPress } from './PosterQuickActions'
 import useEmblaCarousel from 'embla-carousel-react'
 import { WheelGesturesPlugin } from 'embla-carousel-wheel-gestures'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
@@ -18,6 +19,8 @@ interface Top10SectionProps {
 }
 
 export function Top10Section({ items, onItemClick }: Top10SectionProps) {
+  const press = usePosterLongPress()
+  const [pressed, setPressed] = useState<SearchResult | null>(null)
   const [emblaRef, emblaApi] = useEmblaCarousel(
     {
       align: 'start',
@@ -93,6 +96,8 @@ export function Top10Section({ items, onItemClick }: Top10SectionProps) {
                   key={item.id}
                   className="flex-[0_0_130px] cursor-pointer relative overflow-visible rounded-[var(--radius-md)] group/rank transition-transform duration-300 hover:-translate-y-1"
                   onClick={() => onItemClick?.(item)}
+                  {...press.handlers}
+                  onTouchStartCapture={() => setPressed(item)}
                 >
                   {/* Poster */}
                   <div className="relative w-full aspect-[2/3] rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-card)]">
@@ -143,6 +148,9 @@ export function Top10Section({ items, onItemClick }: Top10SectionProps) {
           </div>
         </div>
       </div>
+      {press.open && pressed && (
+        <PosterQuickActions media={pressed} isOpen onClose={() => press.setOpen(false)} onDetails={() => onItemClick?.(pressed)} />
+      )}
     </div>
   )
 }

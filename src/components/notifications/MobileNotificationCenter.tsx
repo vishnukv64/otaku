@@ -24,6 +24,9 @@ import {
   acknowledgeNewReleases,
   getCachedMediaDetails,
 } from '@/utils/tauri-commands'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
+import { ConfirmSheet, ErrorState } from '@/components/mobile/you/ui'
+import { isMobile } from '@/utils/platform'
 import { NotificationItem } from './NotificationItem'
 import {
   ReleaseRadarGroupCard,
@@ -79,6 +82,9 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
   const [releaseSettings, setReleaseSettings] = useState<ReleaseCheckSettings | null>(null)
   const [releaseStatus, setReleaseStatus] = useState<ReleaseCheckStatus | null>(null)
   const [showIntervalPicker, setShowIntervalPicker] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const mobile = isMobile()
   const navigate = useNavigate()
 
   const store = useNotificationStore()
@@ -157,7 +163,9 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
       ])
       setReleaseSettings(settings)
       setReleaseStatus(status)
+      setLoadError(false)
     } catch (error) {
+      setLoadError(true)
       console.error('Failed to load release check data:', error)
     }
   }
@@ -342,14 +350,14 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
               <>
                 <button
                   onClick={markAllAsRead}
-                  className="p-2 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  className="p-2 max-sm:min-h-[44px] max-sm:min-w-[44px] flex items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   title="Mark all as read"
                 >
                   <CheckCheck size={18} />
                 </button>
                 <button
-                  onClick={clearAll}
-                  className="p-2 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={mobile ? () => setConfirmClear(true) : clearAll}
+                  className="p-2 max-sm:min-h-[44px] max-sm:min-w-[44px] flex items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   title="Clear all"
                 >
                   <Trash2 size={18} />
@@ -363,7 +371,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
         <div className="flex gap-4">
           <button
             onClick={() => setActiveTab('all')}
-            className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`pb-2 max-sm:min-h-[44px] text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'all'
                 ? 'text-[var(--color-accent-primary)] border-[var(--color-accent-primary)]'
                 : 'text-[var(--color-text-secondary)] border-transparent hover:text-[var(--color-text-primary)]'
@@ -373,7 +381,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
           </button>
           <button
             onClick={() => setActiveTab('releases')}
-            className={`pb-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+            className={`pb-2 max-sm:min-h-[44px] text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === 'releases'
                 ? 'text-[var(--color-accent-primary)] border-[var(--color-accent-primary)]'
                 : 'text-[var(--color-text-secondary)] border-transparent hover:text-[var(--color-text-primary)]'
@@ -419,13 +427,13 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
               <div className="relative">
                 <button
                   onClick={() => setShowIntervalPicker(!showIntervalPicker)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                  className="flex items-center gap-1 px-2 py-1 max-sm:min-h-[44px] text-xs rounded-md bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                 >
                   {currentIntervalLabel}
                   <ChevronDown size={12} />
                 </button>
 
-                {showIntervalPicker && (
+                {showIntervalPicker && !mobile && (
                   <div className="absolute right-0 top-full mt-1 w-28 bg-[var(--color-bg-primary)] border border-[var(--color-bg-hover)] rounded-lg shadow-lg z-10 overflow-hidden">
                     <div className="py-1">
                       {INTERVAL_OPTIONS.map((option) => (
@@ -450,7 +458,7 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
               <button
                 onClick={handleCheckNow}
                 disabled={isChecking}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 max-sm:min-h-[44px] rounded-md text-xs font-medium transition-colors ${
                   isChecking
                     ? 'text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] cursor-not-allowed'
                     : 'text-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 hover:bg-[var(--color-accent-primary)]/20'
@@ -480,7 +488,9 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
 
       {/* Notification List */}
       <div className="flex-1 overflow-y-auto">
-        {displayedNotificationCount === 0 ? (
+        {loadError && displayedNotificationCount === 0 ? (
+          <ErrorState message="Couldn't load notifications." onRetry={loadReleaseData} />
+        ) : displayedNotificationCount === 0 ? (
           <div className="py-16 px-4 text-center">
             <Bell size={40} className="mx-auto mb-4 text-[var(--color-text-muted)]" />
             <p className="text-[var(--color-text-secondary)] font-medium">
@@ -519,6 +529,19 @@ export function NotificationPageContent({ onNavigateAway }: NotificationPageCont
           </div>
         )}
       </div>
+
+      {mobile && releaseSettings && (
+        <>
+          <BottomSheet isOpen={showIntervalPicker} onClose={() => setShowIntervalPicker(false)} title="Check interval">
+            {INTERVAL_OPTIONS.map((o) => (
+              <SheetOption key={o.value} checked={releaseSettings.interval_minutes === o.value} onClick={() => handleIntervalChange(o.value)}>
+                {o.label}
+              </SheetOption>
+            ))}
+          </BottomSheet>
+        </>
+      )}
+      <ConfirmSheet isOpen={confirmClear} onClose={() => setConfirmClear(false)} title="Clear all notifications?" text="This removes every notification. It can't be undone." confirmLabel="Clear all" onConfirm={clearAll} />
 
       {/* Footer */}
       {displayedNotificationCount > 0 && (

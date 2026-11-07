@@ -18,6 +18,7 @@ interface PageViewProps {
   onLoad?: () => void
   onError?: () => void
   onClick?: (zone: 'left' | 'center' | 'right') => void
+  onRetry?: () => void
   className?: string
 }
 
@@ -31,6 +32,7 @@ export function PageView({
   onLoad,
   onError,
   onClick,
+  onRetry,
   className,
 }: PageViewProps) {
   // Proxy remote images through the Rust backend (adds required Referer header)
@@ -133,6 +135,18 @@ export function PageView({
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-muted/50 text-muted-foreground">
           <ImageOff className="w-12 h-12 mb-2" />
           <p className="text-sm">Failed to load page</p>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRetry()
+              }}
+              className="mt-3 min-h-[44px] rounded-lg bg-white/10 px-5 text-sm text-white"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 

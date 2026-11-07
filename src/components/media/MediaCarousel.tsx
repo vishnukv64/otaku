@@ -8,6 +8,7 @@
  */
 
 import { useCallback } from 'react'
+import { isMobile } from '@/utils/platform'
 import { Link } from '@tanstack/react-router'
 import useEmblaCarousel from 'embla-carousel-react'
 import { WheelGesturesPlugin } from 'embla-carousel-wheel-gestures'
@@ -22,6 +23,11 @@ interface MediaCarouselProps {
   items: SearchResult[]
   loading?: boolean
   onItemClick?: (item: SearchResult) => void
+  /** Phone: inline row error with Retry (mock: home.html) */
+  error?: string | null
+  onRetry?: () => void
+  /** Phone offline: row is greyed and not tappable */
+  disabled?: boolean
   /** When true, displays rank numbers (1, 2, 3...) on each card */
   showRank?: boolean
   /** Optional "See all" link href */
@@ -55,7 +61,7 @@ const skeletonGridClasses = {
   spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-6',
 }
 
-export function MediaCarousel({ title, items, loading = false, onItemClick, showRank, seeAllHref, seeAllText = 'See all' }: MediaCarouselProps) {
+export function MediaCarousel({ title, items, loading = false, onItemClick, error, onRetry, disabled, showRank, seeAllHref, seeAllText = 'See all' }: MediaCarouselProps) {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const { getStatus } = useMediaStatusContext()
 
@@ -84,6 +90,22 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
           {Array.from({ length: 6 }).map((_, i) => (
             <MediaCardSkeleton key={i} />
           ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (items.length === 0 && error && isMobile()) {
+    return (
+      <div className="mb-9">
+        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3">{title}</h2>
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] px-4 py-3">
+          <span className="text-sm text-[var(--color-text-secondary)]">Couldn’t load {title}</span>
+          {onRetry && (
+            <button onClick={onRetry} className="min-h-[44px] px-3 text-sm font-semibold text-[var(--color-accent-light)]">
+              Retry
+            </button>
+          )}
         </div>
       </div>
     )
@@ -143,7 +165,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
           }}
           ref={emblaRef}
         >
-          <div className={`flex ${carouselGapClasses[gridDensity]} px-4 -mx-4 py-4`}>
+          <div className={`flex ${carouselGapClasses[gridDensity]} px-4 -mx-4 py-4 ${disabled ? 'pointer-events-none opacity-40' : ''}`}>
             {items.map((item, index) => (
               <div
                 key={item.id}

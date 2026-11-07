@@ -97,7 +97,7 @@ import { useSettingsStore } from '@/store/settingsStore'
 // import { MediaCard } from './MediaCard'
 import { Description } from '@/components/ui/Description'
 import { NextEpisodeCountdown } from './NextEpisodeCountdown'
-import { BottomSheet } from '@/components/ui/BottomSheet'
+import { MobileAnimeDetail } from '@/components/mobile/detail/MobileAnimeDetail'
 import { isMobile } from '@/utils/platform'
 import { DetailTabBar } from './DetailTabBar'
 import { CharacterGrid } from './CharacterGrid'
@@ -188,7 +188,12 @@ interface MediaDetailModalProps {
   onFeedbackChange?: () => void
 }
 
-export function MediaDetailModal({
+/** Phones get the full-screen detail screen (mock: design/files/detail.html); desktop keeps the modal. */
+export function MediaDetailModal(props: MediaDetailModalProps) {
+  return isMobile() ? <MobileAnimeDetail {...props} /> : <MediaDetailModalDesktop {...props} />
+}
+
+function MediaDetailModalDesktop({
   media,
   extensionId,
   isOpen,
@@ -2767,14 +2772,6 @@ export function MediaDetailModal({
       ) : null}
     </>
   )
-
-  if (mobile) {
-    return (
-      <BottomSheet isOpen={isOpen} onClose={onClose}>
-        {modalContent}
-      </BottomSheet>
-    )
-  }
 
   return (
     <div className="fixed inset-0 z-[200] overflow-y-auto animate-in fade-in duration-300">

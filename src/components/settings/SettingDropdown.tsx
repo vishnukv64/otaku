@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
+import { isMobile } from '@/utils/platform'
 
 interface Option {
   value: string
@@ -10,9 +12,11 @@ interface SettingDropdownProps {
   value: string
   options: Option[]
   onChange: (value: string) => void
+  /** Phone picker sheet title */
+  title?: string
 }
 
-export function SettingDropdown({ value, options, onChange }: SettingDropdownProps) {
+export function SettingDropdown({ value, options, onChange, title }: SettingDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -43,6 +47,35 @@ export function SettingDropdown({ value, options, onChange }: SettingDropdownPro
       return () => document.removeEventListener('keydown', handleEscape)
     }
   }, [isOpen])
+
+  if (isMobile()) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          className="flex min-h-[44px] items-center gap-1.5 text-[15px] text-[var(--color-text-secondary)]"
+        >
+          <span>{selectedOption?.label || 'Select...'}</span>
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
+        <BottomSheet isOpen={isOpen} onClose={() => setIsOpen(false)} title={title ?? 'Choose'}>
+          {options.map((option) => (
+            <SheetOption
+              key={option.value}
+              checked={option.value === value}
+              onClick={() => {
+                onChange(option.value)
+                setIsOpen(false)
+              }}
+            >
+              {option.label}
+            </SheetOption>
+          ))}
+        </BottomSheet>
+      </>
+    )
+  }
 
   return (
     <div ref={dropdownRef} className="relative">

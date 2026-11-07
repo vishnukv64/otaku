@@ -91,7 +91,7 @@ export function MigrationScreen({ onComplete }: MigrationScreenProps) {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--color-bg-primary)]">
-      <div className="max-w-md w-full mx-4 text-center">
+      <div className="max-w-md w-full mx-4 px-2 text-center pb-[var(--sab,0px)]">
         {/* Icon */}
         <div className="mb-6 flex justify-center">
           {isComplete ? (
@@ -186,7 +186,7 @@ export function MigrationScreen({ onComplete }: MigrationScreenProps) {
               setError(null)
               startedRef.current = false
             }}
-            className="mt-6 px-6 py-2 rounded-lg bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-primary)]/90 transition-colors"
+            className="mt-6 px-6 py-2 min-h-[48px] max-sm:w-full rounded-lg bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-primary)]/90 transition-colors"
           >
             Retry
           </button>
@@ -196,7 +196,7 @@ export function MigrationScreen({ onComplete }: MigrationScreenProps) {
         {isComplete && (
           <button
             onClick={onComplete}
-            className="mt-6 px-6 py-2 rounded-lg bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-primary)]/90 transition-colors"
+            className="mt-6 px-6 py-2 min-h-[48px] max-sm:w-full rounded-lg bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-primary)]/90 transition-colors"
           >
             Continue
           </button>
@@ -206,7 +206,7 @@ export function MigrationScreen({ onComplete }: MigrationScreenProps) {
         {isError && (
           <button
             onClick={onComplete}
-            className="mt-4 px-6 py-2 rounded-lg bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)]/80 transition-colors"
+            className="mt-4 px-6 py-2 min-h-[48px] max-sm:w-full rounded-lg bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)]/80 transition-colors"
           >
             Continue Anyway
           </button>

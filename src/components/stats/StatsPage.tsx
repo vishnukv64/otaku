@@ -214,10 +214,10 @@ export function StatsPage() {
 
   // ── Render ──────────────────────────────────────────────
   return (
-    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
+    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-sm:py-2 max-w-4k mx-auto">
       <div className="max-w-6xl mx-auto">
         {/* ── Page Header ── */}
-        <div className="mb-6">
+        <div className="mb-6 max-sm:hidden">
           <h1 className="text-[2.5rem] font-extrabold font-display mb-1.5 bg-gradient-to-br from-[var(--color-text-primary)] to-[var(--color-text-secondary)] bg-clip-text text-transparent">
             Activity Statistics
           </h1>
@@ -227,14 +227,14 @@ export function StatsPage() {
         </div>
 
         {/* ── Sticky Nav ── */}
-        <nav className="sticky top-0 z-30 -mx-4 sm:-mx-6 lg:-mx-8 3xl:-mx-12 px-4 sm:px-6 lg:px-8 3xl:px-12 py-3 mb-4 backdrop-blur-xl bg-[var(--color-bg-primary,rgb(10,10,10))]/80 border-b border-[var(--color-border,rgba(255,255,255,0.06))]">
+        <nav className="sticky top-0 max-sm:top-[var(--app-bar-h,0px)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 3xl:-mx-12 px-4 sm:px-6 lg:px-8 3xl:px-12 py-3 mb-4 backdrop-blur-xl bg-[var(--color-bg-primary,rgb(10,10,10))]/80 border-b border-[var(--color-border,rgba(255,255,255,0.06))]">
           <div className="max-w-6xl mx-auto flex gap-1 overflow-x-auto scrollbar-none">
             {NAV_SECTIONS.map((sec) => (
               <button
                 key={sec.id}
                 onClick={() => scrollTo(sec.id)}
                 className={`
-                  px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200
+                  px-4 py-1.5 max-sm:min-h-[40px] rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200
                   ${
                     activeSection === sec.id
                       ? 'bg-[var(--color-accent-primary)] text-white shadow-sm shadow-[var(--color-accent-primary)]/25'

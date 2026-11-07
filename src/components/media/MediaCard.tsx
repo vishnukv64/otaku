@@ -14,6 +14,7 @@ import { getShortStatusLabel, getStatusColor } from '@/contexts/MediaStatusConte
 import { Heart, BookmarkCheck, Bell } from 'lucide-react'
 import { useReleaseState } from '@/hooks/useReleaseStates'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
+import { PosterQuickActions, usePosterLongPress } from './PosterQuickActions'
 
 /** Format episode date for display */
 function formatEpisodeDate(epDate: { year: number; month: number; date: number }): string {
@@ -57,6 +58,7 @@ interface MediaCardProps {
 
 export function MediaCard({ media, onClick, progress, status, rank }: MediaCardProps) {
   const { src: coverSrc } = useProxiedImage(media.cover_url || '')
+  const press = usePosterLongPress()
 
   // Use unified release state hook (V2) for NEW badge
   // Only fetch release state if user is tracking/watching this media
@@ -92,6 +94,7 @@ export function MediaCard({ media, onClick, progress, status, rank }: MediaCardP
       <button
         className="w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] rounded-[var(--radius-md)] transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02]"
         onClick={onClick}
+        {...press.handlers}
         style={{
           filter: 'drop-shadow(0 4px 24px rgba(0,0,0,0.5))',
         }}
@@ -252,6 +255,9 @@ export function MediaCard({ media, onClick, progress, status, rank }: MediaCardP
           )}
         </div>
       </button>
+      {press.open && (
+        <PosterQuickActions media={media} isOpen onClose={() => press.setOpen(false)} onDetails={onClick} />
+      )}
     </div>
   )
 }

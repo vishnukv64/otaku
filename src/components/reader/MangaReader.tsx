@@ -24,6 +24,7 @@ import { PageView } from './PageView'
 import { VerticalScrollView } from './VerticalScrollView'
 import { ReaderControls } from './ReaderControls'
 import { ReaderSettings } from './ReaderSettings'
+import { MobileChapterSheet, MobileReaderSettings } from './MobileReaderSheets'
 import { ChapterList } from './ChapterList'
 
 /** Sub-component for double-page mode images that proxies remote URLs */
@@ -83,6 +84,8 @@ interface MangaReaderProps {
   hasPreviousChapter?: boolean
   chapters?: Chapter[]
   onNextChapter?: () => void
+  /** Chapter is being read from downloaded files (phone shows a badge). */
+  offline?: boolean
   onPreviousChapter?: () => void
   onChapterSelect?: (chapterId: string) => void
   onGoBack?: () => void
@@ -101,6 +104,7 @@ export function MangaReader({
   hasPreviousChapter = false,
   chapters = [],
   onNextChapter,
+  offline,
   onPreviousChapter,
   onChapterSelect,
   onGoBack,
@@ -110,7 +114,8 @@ export function MangaReader({
   const containerRef = useRef<HTMLDivElement>(null)
   const hideControlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const { refresh: refreshMediaStatus } = useMediaStatusContext()
-  const { isMobile: mobile } = useMobileLayout()
+  const { isMobile: mobile, isLandscape } = useMobileLayout()
+  const [retryKey, setRetryKey] = useState(0)
 
   // Refs for unmount save (to avoid stale closures)
   const mangaIdRef = useRef(mangaId)
@@ -271,7 +276,9 @@ export function MangaReader({
 
   // On mobile, only allow single and webtoon modes
   const effectiveReadingMode = mobile
-    ? (settings.readingMode === 'double' || settings.readingMode === 'vertical' ? 'single' : settings.readingMode)
+    ? (settings.readingMode === 'vertical' || (settings.readingMode === 'double' && !isLandscape)
+        ? 'single'
+        : settings.readingMode)
     : settings.readingMode
 
   // Check if current mode is vertical scroll (webtoon or vertical)
@@ -420,8 +427,21 @@ export function MangaReader({
     if (!container) return
 
     let startX = 0
-    const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX }
+    let pinch: { dist: number; zoom: number } | null = null
+    const dist = (e: TouchEvent) =>
+      Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
+    const onTouchStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX
+      if (e.touches.length === 2) pinch = { dist: dist(e), zoom: useReaderStore.getState().settings.zoom }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (pinch && e.touches.length === 2) useReaderStore.getState().setZoom(pinch.zoom * (dist(e) / pinch.dist))
+    }
     const onTouchEnd = (e: TouchEvent) => {
+      if (pinch) {
+        if (e.touches.length === 0) pinch = null
+        return
+      }
       const deltaX = e.changedTouches[0].clientX - startX
       if (Math.abs(deltaX) < 50) return // ignore small swipes
       if (settings.readingDirection === 'rtl') {
@@ -432,9 +452,11 @@ export function MangaReader({
     }
 
     container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchmove', onTouchMove, { passive: true })
     container.addEventListener('touchend', onTouchEnd, { passive: true })
     return () => {
       container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchmove', onTouchMove)
       container.removeEventListener('touchend', onTouchEnd)
     }
   }, [mobile, isVerticalScrollMode, settings.readingDirection, handleNextPage, handlePreviousPage])
@@ -580,6 +602,8 @@ export function MangaReader({
       default:
         return (
           <PageView
+            key={`${currentPage}-${retryKey}`}
+            onRetry={() => setRetryKey((k) => k + 1)}
             imageUrl={currentImage?.url || ''}
             pageNumber={currentPage}
             totalPages={totalPages}
@@ -600,10 +624,34 @@ export function MangaReader({
         'relative w-full h-full flex flex-col overflow-hidden',
         'select-none'
       )}
-      style={{ backgroundColor: settings.backgroundColor }}
+      style={{ backgroundColor: settings.backgroundColor, filter: `brightness(${settings.brightness})` }}
     >
       {/* Main content */}
       {renderContent()}
+
+      {mobile && offline && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs text-white/80">
+          Downloaded · offline
+        </div>
+      )}
+
+      {/* End-of-chapter card (phone) */}
+      {mobile && !isVerticalScrollMode && totalPages > 0 && currentPage >= totalPages && !showControls && (
+        <div className="absolute inset-x-4 bottom-6 z-10 rounded-2xl bg-black/85 p-4 text-white">
+          <div className="text-xs uppercase tracking-wide text-white/50">End of chapter {currentChapter}</div>
+          {canGoToNextChapter ? (
+            <button
+              type="button"
+              onClick={() => onNextChapter?.()}
+              className="mt-2 min-h-[48px] w-full rounded-xl bg-[var(--color-accent-primary)] text-sm font-semibold"
+            >
+              Next chapter
+            </button>
+          ) : (
+            <p className="mt-1 text-sm">You&apos;re up to date — this is the last chapter.</p>
+          )}
+        </div>
+      )}
 
       {/* Controls overlay */}
       {showControls && (
@@ -640,6 +688,23 @@ export function MangaReader({
       )}
 
       {/* Settings panel */}
+      {mobile ? (
+        <>
+          <MobileReaderSettings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+          <MobileChapterSheet
+            isOpen={chapterListOpen}
+            onClose={() => setChapterListOpen(false)}
+            chapters={chapters}
+            currentChapterId={chapterId}
+            readChapters={readChapters}
+            onSelect={(id) => {
+              onChapterSelect?.(id)
+              setChapterListOpen(false)
+            }}
+          />
+        </>
+      ) : (
+        <>
       <ReaderSettings
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -658,6 +723,8 @@ export function MangaReader({
         isOpen={chapterListOpen}
         readChapters={readChapters}
       />
+        </>
+      )}
 
       {/* Scroll progress bar — fixed 2px accent bar at top (mock: always visible) */}
       {totalPages > 0 && (
