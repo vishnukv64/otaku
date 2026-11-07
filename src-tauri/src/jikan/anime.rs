@@ -581,32 +581,182 @@ pub fn genres_anime() -> Result<TagsResult, String> {
     })
 }
 
+// Schedules come from AniList's airing schedule instead of Jikan's /schedules:
+// Jikan goes down for long stretches, and AniList has exact air times plus
+// the MAL id that the rest of the app keys on.
+const ANILIST_URL: &str = "https://graphql.anilist.co";
+const ANILIST_SCHEDULE_QUERY: &str = r#"query ($page: Int, $from: Int, $to: Int) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) {
+      airingAt
+      episode
+      media {
+        idMal
+        title { romaji english }
+        coverImage { large }
+        description(asHtml: false)
+        seasonYear
+        status
+        averageScore
+        episodes
+        format
+        genres
+        isAdult
+        popularity
+        studios(isMain: true) { nodes { name } }
+      }
+    }
+  }
+}"#;
+
+const JST_OFFSET_SECS: i32 = 9 * 3600;
+const WEEKDAYS: [&str; 7] = [
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+];
+
+/// Unix-seconds window for `day` in JST: the next occurrence of that weekday
+/// (today counts), or the coming seven days when no day is given.
+fn schedule_window(day: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Result<(i64, i64), String> {
+    use chrono::{Datelike, FixedOffset};
+    let jst = FixedOffset::east_opt(JST_OFFSET_SECS).expect("valid offset");
+    let today = now.with_timezone(&jst).date_naive();
+    let today_start = today
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight exists")
+        .and_local_timezone(jst)
+        .unwrap()
+        .timestamp();
+    match day {
+        None => Ok((today_start, today_start + 7 * 86400)),
+        Some(d) => {
+            let target = WEEKDAYS
+                .iter()
+                .position(|w| w.eq_ignore_ascii_case(d))
+                .ok_or_else(|| format!("Unknown schedule day: {}", d))? as i64;
+            let current = today.weekday().num_days_from_monday() as i64;
+            let start = today_start + ((target - current).rem_euclid(7)) * 86400;
+            Ok((start, start + 86400))
+        }
+    }
+}
+
+fn anilist_format(format: Option<&str>) -> Option<String> {
+    format.map(|f| match f {
+        "TV" | "TV_SHORT" => "TV".to_string(),
+        "MOVIE" => "Movie".to_string(),
+        "SPECIAL" => "Special".to_string(),
+        "MUSIC" => "Music".to_string(),
+        other => other.to_string(), // OVA, ONA
+    })
+}
+
+fn anilist_status(status: Option<&str>) -> Option<String> {
+    status.map(|s| match s {
+        "RELEASING" => "Releasing".to_string(),
+        "FINISHED" => "Completed".to_string(),
+        "NOT_YET_RELEASED" => "Not Yet Released".to_string(),
+        other => other.to_string(),
+    })
+}
+
+fn strip_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for c in text.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Map one AniList airing entry to a SearchResult. Entries without a MAL id
+/// are dropped: library, details and playback all key on it.
+fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Option<SearchResult> {
+    use chrono::{FixedOffset, TimeZone};
+    let media = entry.get("media")?;
+    let mal_id = media.get("idMal")?.as_i64()?;
+    if sfw && media.get("isAdult").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let str_at = |v: &serde_json::Value, key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
+    let title = media.get("title")?;
+    let english = str_at(title, "english");
+    let romaji = str_at(title, "romaji");
+    let jst = FixedOffset::east_opt(JST_OFFSET_SECS).expect("valid offset");
+    let airs = jst.timestamp_opt(entry.get("airingAt")?.as_i64()?, 0).single()?;
+
+    Some(SearchResult {
+        id: mal_id.to_string(),
+        title: romaji.clone().or_else(|| english.clone())?,
+        cover_url: media.get("coverImage").and_then(|c| str_at(c, "large")),
+        trailer_url: None,
+        description: str_at(media, "description").map(|d| strip_html(&d)),
+        year: media.get("seasonYear").and_then(|v| v.as_u64()).map(|y| y as u32),
+        status: anilist_status(media.get("status").and_then(|v| v.as_str())),
+        rating: media.get("averageScore").and_then(|v| v.as_f64()).map(|s| (s / 10.0) as f32),
+        latest_episode: entry.get("episode").and_then(|v| v.as_u64()).map(|e| e as u32),
+        latest_episode_date: None,
+        available_episodes: media.get("episodes").and_then(|v| v.as_u64()).map(|e| e as u32),
+        media_type: anilist_format(media.get("format").and_then(|v| v.as_str())),
+        genres: media.get("genres").and_then(|g| serde_json::from_value(g.clone()).ok()),
+        native_name: None,
+        title_synonyms: english.filter(|e| Some(e) != romaji.as_ref()).map(|e| vec![e]),
+        rank: None,
+        popularity: media.get("popularity").and_then(|v| v.as_i64()).map(|p| p as i32),
+        views: None,
+        studios: media
+            .pointer("/studios/nodes")
+            .and_then(|n| n.as_array())
+            .map(|nodes| nodes.iter().filter_map(|n| str_at(n, "name")).collect()),
+        // Same shape Jikan used: plural weekday + HH:MM in JST.
+        broadcast_day: Some(format!("{}s", airs.format("%A"))),
+        broadcast_time: Some(airs.format("%H:%M").to_string()),
+        broadcast_timezone: Some("Asia/Tokyo".to_string()),
+    })
+}
+
 pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResults, String> {
-    let page_str = page.to_string();
-    let path = "/schedules";
-    let mut params = vec![("page", page_str.as_str()), ("limit", "25")];
-    let day_owned = day.map(|d| d.to_string());
-    if let Some(ref d) = day_owned {
-        params.push(("filter", d.as_str()));
-    }
-    if sfw {
-        params.push(("sfw", "true"));
-    }
+    let (from, to) = schedule_window(day, chrono::Utc::now())?;
+    let body = serde_json::json!({
+        "query": ANILIST_SCHEDULE_QUERY,
+        "variables": { "page": page.max(1), "from": from - 1, "to": to },
+    });
+    let response: serde_json::Value = ureq::post(ANILIST_URL)
+        .timeout(std::time::Duration::from_secs(20))
+        .set("Accept", "application/json")
+        .send_json(body)
+        .map_err(|e| format!("AniList schedule request failed: {}", e))?
+        .into_json()
+        .map_err(|e| format!("AniList schedule response was not JSON: {}", e))?;
 
-    let response: JikanPaginatedResponse<JikanAnime> =
-        JIKAN.get_parsed_with_query(&path, &params)?;
+    let page_data = response
+        .pointer("/data/Page")
+        .ok_or_else(|| format!("AniList schedule error: {}", response.get("errors").unwrap_or(&response)))?;
+    let entries = page_data
+        .get("airingSchedules")
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or_default();
 
+    // A show can air twice in one window (double episodes); keep its first slot.
     let mut seen = std::collections::HashSet::new();
-    let results = response
-        .data
+    let results = entries
         .iter()
-        .filter(|a| seen.insert(a.mal_id))
-        .map(jikan_anime_to_search_result)
+        .filter_map(|e| anilist_airing_to_search_result(e, sfw))
+        .filter(|r| seen.insert(r.id.clone()))
         .collect();
 
     Ok(SearchResults {
         results,
-        has_next_page: response.pagination.has_next_page,
+        has_next_page: page_data
+            .pointer("/pageInfo/hasNextPage")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
     })
 }
 
@@ -719,4 +869,85 @@ pub fn search_anime_filtered(
             .collect(),
         has_next_page: response.pagination.has_next_page,
     })
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    // 2026-11-07 is a Saturday. 20:00 UTC Friday 11-06 is already 05:00 Saturday in JST.
+    fn fri_evening_utc() -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc.with_ymd_and_hms(2026, 11, 6, 20, 0, 0).unwrap()
+    }
+    const SAT_JST_MIDNIGHT: i64 = 1_793_977_200; // 2026-11-07T00:00+09:00
+
+    #[test]
+    fn window_uses_the_jst_day() {
+        assert_eq!(
+            schedule_window(Some("saturday"), fri_evening_utc()).unwrap(),
+            (SAT_JST_MIDNIGHT, SAT_JST_MIDNIGHT + 86400)
+        );
+    }
+
+    #[test]
+    fn window_rolls_past_days_to_next_week() {
+        let (from, to) = schedule_window(Some("Friday"), fri_evening_utc()).unwrap();
+        assert_eq!(from, SAT_JST_MIDNIGHT + 6 * 86400);
+        assert_eq!(to - from, 86400);
+    }
+
+    #[test]
+    fn window_without_day_covers_a_week_and_rejects_unknown_days() {
+        assert_eq!(
+            schedule_window(None, fri_evening_utc()).unwrap(),
+            (SAT_JST_MIDNIGHT, SAT_JST_MIDNIGHT + 7 * 86400)
+        );
+        assert!(schedule_window(Some("someday"), fri_evening_utc()).is_err());
+    }
+
+    #[test]
+    fn maps_airing_entry_to_jikan_shaped_result() {
+        let entry = serde_json::json!({
+            "airingAt": SAT_JST_MIDNIGHT + 23 * 3600 + 30 * 60,
+            "episode": 5,
+            "media": {
+                "idMal": 52991,
+                "title": { "romaji": "Sousou no Frieren", "english": "Frieren" },
+                "coverImage": { "large": "https://img/x.jpg" },
+                "description": "An elf<br><i>mage</i>.",
+                "seasonYear": 2023, "status": "RELEASING", "averageScore": 91,
+                "episodes": 28, "format": "TV", "genres": ["Fantasy"], "isAdult": false,
+                "popularity": 100, "studios": { "nodes": [{ "name": "Madhouse" }] }
+            }
+        });
+        let r = anilist_airing_to_search_result(&entry, true).unwrap();
+        assert_eq!(r.id, "52991");
+        assert_eq!(r.broadcast_day.as_deref(), Some("Saturdays"));
+        assert_eq!(r.broadcast_time.as_deref(), Some("23:30"));
+        assert_eq!(r.description.as_deref(), Some("An elfmage."));
+        assert_eq!(r.rating, Some(9.1));
+        assert_eq!(r.media_type.as_deref(), Some("TV"));
+        assert_eq!(r.status.as_deref(), Some("Releasing"));
+        assert_eq!(r.title_synonyms, Some(vec!["Frieren".to_string()]));
+        assert_eq!(r.studios, Some(vec!["Madhouse".to_string()]));
+    }
+
+    #[test]
+    fn drops_entries_without_mal_id_and_adult_entries_in_sfw() {
+        let no_mal = serde_json::json!({ "airingAt": 0, "media": { "idMal": null, "title": { "romaji": "X" } } });
+        assert!(anilist_airing_to_search_result(&no_mal, false).is_none());
+        let adult = serde_json::json!({ "airingAt": 0, "media": { "idMal": 1, "isAdult": true, "title": { "romaji": "X" } } });
+        assert!(anilist_airing_to_search_result(&adult, true).is_none());
+        assert!(anilist_airing_to_search_result(&adult, false).is_some());
+    }
+
+    #[test]
+    #[ignore = "hits graphql.anilist.co"]
+    fn live_schedule() {
+        let r = schedules(Some("saturday"), 1, true).unwrap();
+        println!("live: {} results, next={}, first={:?}", r.results.len(), r.has_next_page,
+            r.results.first().map(|x| (&x.title, &x.broadcast_day, &x.broadcast_time)));
+        assert!(!r.results.is_empty());
+    }
 }
