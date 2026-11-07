@@ -113,6 +113,7 @@ impl Database {
             ("023_feedback_table.sql", include_str!("../../migrations/023_feedback_table.sql")),
             ("024_library_auto_download.sql", include_str!("../../migrations/024_library_auto_download.sql")),
             ("025_download_source_referrer.sql", include_str!("../../migrations/025_download_source_referrer.sql")),
+            ("026_sync.sql", include_str!("../../migrations/026_sync.sql")),
         ];
 
         for (name, migration_sql) in migrations {

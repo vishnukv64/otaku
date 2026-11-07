@@ -28,6 +28,7 @@ const PUSHED_TITLES: Record<string, string> = {
   '/schedule': 'Schedule',
   '/notifications': 'Notifications',
   '/logs': 'Logs',
+  '/pair': 'Pair & sync',
 }
 
 function appBarVariant(pathname: string): Variant {

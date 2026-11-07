@@ -29,6 +29,9 @@ import {
   type WatchStatsSummary,
 } from '@/utils/tauri-commands'
 import { useDownloadStatus } from '@/hooks/useDownloadStatus'
+import { PairMac } from '@/components/ui/OtakuIcons'
+import { useSyncStore } from '@/store/syncStore'
+import { syncLabel } from '@/utils/sync-commands'
 import { useNotificationStore } from '@/store/notificationStore'
 import { isReleaseSummaryNotification } from '@/components/notifications/ReleaseRadarGroupCard'
 import { ApiStatusIndicator } from '@/components/layout/ApiStatusIndicator'
@@ -102,6 +105,9 @@ function YouHub() {
   const [reading, setReading] = useState<ReadingStatsSummary | null>(null)
   const [storage, setStorage] = useState<number | null>(null)
   const { activeCount } = useDownloadStatus()
+  const sync = useSyncStore((s) => s.status)
+  const watchSync = useSyncStore((s) => s.watch)
+  useEffect(() => watchSync(), [watchSync])
   const unread = useNotificationStore(
     (s) => s.notifications.filter((n) => !n.read && !n.dismissed && !isReleaseSummaryNotification(n)).length
   )
@@ -158,6 +164,30 @@ function YouHub() {
         />
         <Tile to="/library" icon={<Library size={22} />} title="Library" meta="Your saved titles" />
       </div>
+
+      <SectionHead>Sync</SectionHead>
+      <nav className="mx-4 overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)]" aria-label="Sync">
+        <Row
+          to="/pair"
+          icon={<PairMac size={18} />}
+          title={sync?.devices.length ? 'Devices & sync' : 'Pair with Mac'}
+          sub={sync ? syncLabel(sync) : 'Sync progress, library and stats'}
+          end={
+            <span
+              aria-hidden="true"
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                sync?.state === 'synced'
+                  ? 'bg-[var(--color-success)]'
+                  : sync?.state === 'error'
+                    ? 'bg-[var(--color-accent-primary)]'
+                    : sync && sync.state !== 'idle'
+                      ? 'bg-[var(--color-warning)]'
+                      : 'bg-[var(--color-text-muted)]'
+              }`}
+            />
+          }
+        />
+      </nav>
 
       <SectionHead>App</SectionHead>
       <nav className="mx-4 overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)]" aria-label="App">

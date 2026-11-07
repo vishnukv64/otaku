@@ -15,6 +15,7 @@ import { DangerButton } from '../components/settings/DangerButton'
 import { UpdateSection } from '../components/settings/UpdateSection'
 import { ExportImportSection } from '../components/settings/ExportImportSection'
 import { AutoBackupSection } from '../components/settings/AutoBackupSection'
+import { DevicesSection } from '../components/settings/DevicesSection'
 import { DeveloperStats } from '@/components/settings/DeveloperStats'
 import {
   HardDrive,
@@ -575,6 +576,7 @@ function SettingsScreen() {
             {/* Export & Import */}
             {!isMobile() && <ExportImportSection />}
             {!isMobile() && <AutoBackupSection />}
+            {!isMobile() && <DevicesSection />}
           </div>
         )}
 

@@ -10,6 +10,7 @@ mod notifications;
 mod request_headers;
 mod release_checker;
 mod status_normalizer;
+mod sync;
 mod trackers;
 #[cfg_attr(desktop, path = "tray.rs")]
 #[cfg_attr(not(desktop), path = "tray_stub.rs")]
@@ -284,6 +285,14 @@ pub fn run() {
 
         // Add database to app state
         app_handle.manage(AppState::new(database));
+
+        // Pair & sync engine (phone <-> Mac)
+        match sync::Engine::start(app_handle.clone(), db_pool.as_ref().clone()).await {
+            Ok(engine) => {
+                app_handle.manage(engine);
+            }
+            Err(e) => log::error!("Failed to start sync engine: {}", e),
+        }
 
         // Initialize download manager with database
         let downloads_dir = app_dir.join("downloads");
@@ -626,6 +635,23 @@ pub fn run() {
       commands::get_autostart_status,
       commands::set_desktop_notifications_enabled,
       commands::get_desktop_notifications_enabled,
+      // Pair & sync
+      sync::sync_status,
+      sync::sync_start_pairing,
+      sync::sync_cancel_pairing,
+      sync::sync_approve_pair,
+      sync::sync_pair_scan,
+      sync::sync_pair_redeem,
+      sync::sync_pair_connect,
+      sync::sync_unpair,
+      sync::sync_set_toggles,
+      sync::sync_rename_device,
+      sync::sync_set_relay_url,
+      sync::sync_relay_signin,
+      sync::sync_relay_signout,
+      sync::sync_stats,
+      sync::sync_mark_conflicts_seen,
+      sync::sync_send,
     ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")

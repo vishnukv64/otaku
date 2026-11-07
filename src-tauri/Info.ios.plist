@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Otaku uses the camera only to scan the pairing QR code shown on your Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Otaku talks to your Mac on your Wi-Fi to pair, sync and stream downloads.</string>
+</dict>
+</plist>

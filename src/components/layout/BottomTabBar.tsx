@@ -5,7 +5,7 @@ import { isReleaseSummaryNotification } from '@/components/notifications/Release
 
 // Phone tab bar (mock: design/files/home.html). Settings lives in the You hub, together with
 // History, Stats, Downloads, Schedule and Notifications, so those routes highlight You.
-const YOU_PATHS = ['/you', '/settings', '/history', '/stats', '/downloads', '/schedule', '/notifications', '/logs']
+const YOU_PATHS = ['/you', '/settings', '/history', '/stats', '/downloads', '/schedule', '/notifications', '/logs', '/pair']
 
 const tabs = [
   { name: 'Home', path: '/', icon: House },
