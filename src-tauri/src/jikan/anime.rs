@@ -361,7 +361,15 @@ pub fn watch_episodes_popular() -> Result<SearchResults, String> {
 
 pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
     let path = format!("/anime/{}/full", mal_id);
-    let response: JikanResponse<JikanAnime> = JIKAN.get_parsed(&path)?;
+    let response: JikanResponse<JikanAnime> = match JIKAN.get_parsed(&path) {
+        Ok(r) => r,
+        // A 404 means MAL has no such anime; anything else is Jikan being down.
+        Err(e) if e.contains("Jikan API error 404") => return Err(e),
+        Err(e) => {
+            log::warn!("Jikan details failed for {}: {}; using AniList", mal_id, e);
+            return anilist_anime_details(mal_id).map_err(|a| format!("{} (AniList fallback: {})", e, a));
+        }
+    };
 
     // Don't fail the entire request if episodes can't be fetched (rate limiting)
     let (mut episodes, mut last_aired) = match fetch_all_episodes(mal_id) {
@@ -720,20 +728,132 @@ fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Opti
     })
 }
 
+fn anilist_post(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    ureq::post(ANILIST_URL)
+        .timeout(std::time::Duration::from_secs(20))
+        .set("Accept", "application/json")
+        .send_json(body)
+        .map_err(|e| format!("AniList request failed: {}", e))?
+        .into_json()
+        .map_err(|e| format!("AniList response was not JSON: {}", e))
+}
+
+const ANILIST_DETAILS_QUERY: &str = r#"query ($idMal: Int) {
+  Media(idMal: $idMal, type: ANIME) {
+    title { romaji english native }
+    synonyms
+    coverImage { extraLarge large }
+    trailer { id site }
+    description(asHtml: false)
+    genres
+    status
+    seasonYear
+    season
+    averageScore
+    format
+    duration
+    episodes
+    startDate { year month day }
+    nextAiringEpisode { episode airingAt }
+  }
+}"#;
+
+const WEEK_SECS: i64 = 7 * 86400;
+
+/// Map AniList's Media to the MediaDetails shape Jikan produced. Episode ids
+/// keep the "{malId}-{n}" form so watch history and downloads still match.
+fn anilist_media_to_details(mal_id: i64, media: &serde_json::Value) -> Option<MediaDetails> {
+    use chrono::TimeZone;
+    let str_at = |v: &serde_json::Value, key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
+    let title = media.get("title")?;
+    let romaji = str_at(title, "romaji");
+    let english = str_at(title, "english");
+    let total = media.get("episodes").and_then(|v| v.as_u64()).map(|e| e as u32);
+
+    // Airing shows: everything before the next episode has aired.
+    let next = media.get("nextAiringEpisode").filter(|n| !n.is_null());
+    let next_ep = next.and_then(|n| n.get("episode")).and_then(|v| v.as_u64()).map(|e| e as u32);
+    let next_at = next.and_then(|n| n.get("airingAt")).and_then(|v| v.as_i64());
+    let aired_count = match next_ep {
+        Some(n) => n.saturating_sub(1),
+        None if str_at(media, "status").as_deref() == Some("NOT_YET_RELEASED") => 0,
+        None => total.unwrap_or(1),
+    };
+    let episodes = (1..=aired_count)
+        .map(|n| Episode {
+            id: format!("{}-{}", mal_id, n),
+            number: n as f32,
+            title: Some(format!("Episode {}", n)),
+            thumbnail: None,
+            aired: None,
+        })
+        .collect();
+
+    // Last episode aired one week before the next one (weekly shows), which is
+    // what the next-episode countdown expects.
+    let last_update_end = next_at
+        .filter(|_| aired_count > 0)
+        .and_then(|at| chrono::Utc.timestamp_opt(at - WEEK_SECS, 0).single())
+        .map(|t| t.to_rfc3339());
+
+    let trailer_url = media.get("trailer").filter(|t| str_at(t, "site").as_deref() == Some("youtube"))
+        .and_then(|t| str_at(t, "id"))
+        .map(|id| format!("https://www.youtube.com/embed/{}", id));
+    let start = media.get("startDate");
+    let year = media.get("seasonYear").and_then(|v| v.as_u64()).map(|y| y as u32);
+
+    Some(MediaDetails {
+        id: mal_id.to_string(),
+        title: romaji.clone().or_else(|| english.clone())?,
+        english_name: english,
+        native_name: str_at(title, "native"),
+        title_synonyms: media.get("synonyms").and_then(|v| serde_json::from_value(v.clone()).ok()),
+        cover_url: media.get("coverImage").and_then(|c| str_at(c, "extraLarge").or_else(|| str_at(c, "large"))),
+        trailer_url,
+        description: str_at(media, "description").map(|d| strip_html(&d)),
+        genres: media.get("genres").and_then(|g| serde_json::from_value(g.clone()).ok()).unwrap_or_default(),
+        status: anilist_status(media.get("status").and_then(|v| v.as_str())),
+        year,
+        rating: media.get("averageScore").and_then(|v| v.as_f64()).map(|s| (s / 10.0) as f32),
+        episodes,
+        media_type: anilist_format(media.get("format").and_then(|v| v.as_str())),
+        season: str_at(media, "season").map(|q| Season {
+            quarter: Some(q.to_lowercase()),
+            year,
+        }),
+        episode_duration: media.get("duration").and_then(|v| v.as_u64()).map(|m| m * 60_000),
+        episode_count: total,
+        aired_start: start.and_then(|d| {
+            Some(AiredStart {
+                year: d.get("year")?.as_u64()? as u32,
+                month: d.get("month").and_then(|v| v.as_u64()).map(|v| v as u32),
+                date: d.get("day").and_then(|v| v.as_u64()).map(|v| v as u32),
+            })
+        }),
+        broadcast_interval: last_update_end.as_ref().map(|_| (WEEK_SECS * 1000) as u64),
+        last_update_end,
+    })
+}
+
+fn anilist_anime_details(mal_id: i64) -> Result<MediaDetails, String> {
+    let response = anilist_post(serde_json::json!({
+        "query": ANILIST_DETAILS_QUERY,
+        "variables": { "idMal": mal_id },
+    }))?;
+    response
+        .pointer("/data/Media")
+        .filter(|m| !m.is_null())
+        .and_then(|m| anilist_media_to_details(mal_id, m))
+        .ok_or_else(|| format!("AniList has no anime with MAL id {}", mal_id))
+}
+
 pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResults, String> {
     let (from, to) = schedule_window(day, chrono::Utc::now())?;
     let body = serde_json::json!({
         "query": ANILIST_SCHEDULE_QUERY,
         "variables": { "page": page.max(1), "from": from - 1, "to": to },
     });
-    let response: serde_json::Value = ureq::post(ANILIST_URL)
-        .timeout(std::time::Duration::from_secs(20))
-        .set("Accept", "application/json")
-        .send_json(body)
-        .map_err(|e| format!("AniList schedule request failed: {}", e))?
-        .into_json()
-        .map_err(|e| format!("AniList schedule response was not JSON: {}", e))?;
-
+    let response = anilist_post(body)?;
     let page_data = response
         .pointer("/data/Page")
         .ok_or_else(|| format!("AniList schedule error: {}", response.get("errors").unwrap_or(&response)))?;
@@ -940,6 +1060,52 @@ mod schedule_tests {
         let adult = serde_json::json!({ "airingAt": 0, "media": { "idMal": 1, "isAdult": true, "title": { "romaji": "X" } } });
         assert!(anilist_airing_to_search_result(&adult, true).is_none());
         assert!(anilist_airing_to_search_result(&adult, false).is_some());
+    }
+
+    #[test]
+    fn maps_airing_media_to_details() {
+        let media = serde_json::json!({
+            "title": { "romaji": "One Piece", "english": "ONE PIECE", "native": "ワンピース" },
+            "synonyms": ["OP"],
+            "coverImage": { "extraLarge": "https://img/xl.jpg", "large": "https://img/l.jpg" },
+            "trailer": { "id": "abc", "site": "youtube" },
+            "description": "Pirates<br>.", "genres": ["Action"], "status": "RELEASING",
+            "seasonYear": 1999, "season": "FALL", "averageScore": 87, "format": "TV",
+            "duration": 24, "episodes": null,
+            "startDate": { "year": 1999, "month": 10, "day": 20 },
+            "nextAiringEpisode": { "episode": 1150, "airingAt": SAT_JST_MIDNIGHT }
+        });
+        let d = anilist_media_to_details(21, &media).unwrap();
+        assert_eq!(d.id, "21");
+        assert_eq!(d.episodes.len(), 1149);
+        assert_eq!(d.episodes.last().unwrap().id, "21-1149");
+        assert_eq!(d.cover_url.as_deref(), Some("https://img/xl.jpg"));
+        assert_eq!(d.trailer_url.as_deref(), Some("https://www.youtube.com/embed/abc"));
+        assert_eq!(d.season.as_ref().unwrap().quarter.as_deref(), Some("fall"));
+        assert_eq!(d.episode_duration, Some(24 * 60_000));
+        assert_eq!(d.status.as_deref(), Some("Releasing"));
+        let last = chrono::DateTime::parse_from_rfc3339(d.last_update_end.as_deref().unwrap()).unwrap();
+        assert_eq!(last.timestamp(), SAT_JST_MIDNIGHT - WEEK_SECS);
+        assert_eq!(d.broadcast_interval, Some(604_800_000));
+    }
+
+    #[test]
+    fn finished_and_upcoming_media_episode_counts() {
+        let finished = serde_json::json!({ "title": { "romaji": "X" }, "status": "FINISHED", "episodes": 12 });
+        let d = anilist_media_to_details(1, &finished).unwrap();
+        assert_eq!(d.episodes.len(), 12);
+        assert!(d.last_update_end.is_none());
+        let upcoming = serde_json::json!({ "title": { "romaji": "X" }, "status": "NOT_YET_RELEASED", "episodes": 12 });
+        assert!(anilist_media_to_details(1, &upcoming).unwrap().episodes.is_empty());
+    }
+
+    #[test]
+    #[ignore = "hits api.jikan.moe and graphql.anilist.co"]
+    fn live_details() {
+        let started = std::time::Instant::now();
+        let d = anime_details(52991).unwrap();
+        println!("live details: {} / {:?} eps={} in {:?}", d.title, d.english_name, d.episodes.len(), started.elapsed());
+        assert!(!d.episodes.is_empty());
     }
 
     #[test]
