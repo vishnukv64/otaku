@@ -13,7 +13,6 @@ const extensionObject = {
   type: "anime",
   language: "en",
   baseUrl: "https://kaa.lt",
-  hlsBaseUrl: "https://hls.krussdomi.com/manifest",
   // API calls need a kaa.lt Referer; the stream CDN only serves segments to
   // its player's origin (krussdomi.com), which the manifest host also accepts.
   referer: "https://kaa.lt/",
@@ -97,22 +96,29 @@ const extensionObject = {
     return null;
   },
 
-  subtitles: function(playerUrl) {
+  // The player page's serialized props carry the stream's real manifest URL
+  // (it differs per server: hls.krussdomi.com, bl.krussdomi.com, ...) and its
+  // subtitle tracks.
+  player: function(playerUrl) {
     let html;
     try {
       html = extensionObject.request(playerUrl, { accept: 'text/html' });
     } catch (error) {
       try { __log('[KAA] player page failed: ' + (error && error.message ? error.message : String(error))); } catch (_) {}
-      return [];
+      return { manifest: null, subtitles: [] };
     }
     const props = html.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const manifest = props.match(/"manifest":\[0,"([^"]+)"\]/);
     const re = /\{"language":\[0,"([^"]*)"\],"name":\[0,"([^"]*)"\],"src":\[0,"([^"]+)"\]\}/g;
-    const out = [];
+    const subtitles = [];
     let m;
     while ((m = re.exec(props)) !== null) {
-      out.push({ url: m[3], language: m[1] || m[2], label: m[2] || m[1] });
+      subtitles.push({ url: m[3], language: m[1] || m[2], label: m[2] || m[1] });
     }
-    return out;
+    return {
+      manifest: manifest ? (manifest[1].indexOf('//') === 0 ? 'https:' + manifest[1] : manifest[1]) : null,
+      subtitles: subtitles
+    };
   },
 
   search: (query, page) => {
@@ -187,20 +193,20 @@ const extensionObject = {
       const subtitles = [];
       for (const server of servers) {
         const src = String((server && server.src) || '');
-        // DASH servers (BirdStream) have no HLS manifest at this host.
-        if (/[?&]type=dash\b/.test(src)) continue;
-        const idMatch = src.match(/[?&]id=([^&]+)/);
-        if (!idMatch) continue;
-        const subs = extensionObject.subtitles(src);
-        for (const sub of subs) subtitles.push(sub);
+        // DASH servers (BirdStream) have no HLS manifest.
+        if (!src || /[?&]type=dash\b/.test(src)) continue;
+        const player = extensionObject.player(src);
+        if (!player.manifest) continue;
+        // Every server carries the same tracks; list them once.
+        if (!subtitles.length) for (const sub of player.subtitles) subtitles.push(sub);
         sources.push({
-          url: extensionObject.hlsBaseUrl + '/' + idMatch[1] + '/master.m3u8',
+          url: player.manifest,
           quality: 'Auto',
           type: 'hls',
           server: server.name || 'KAA',
           referrer: extensionObject.streamReferer,
           audio_type: 'sub',
-          subtitles: subs
+          subtitles: player.subtitles
         });
       }
       return { sources: sources, subtitles: subtitles };

@@ -1102,10 +1102,12 @@ mod schedule_tests {
     #[test]
     #[ignore = "hits api.jikan.moe and graphql.anilist.co"]
     fn live_details() {
-        let started = std::time::Instant::now();
-        let d = anime_details(52991).unwrap();
-        println!("live details: {} / {:?} eps={} in {:?}", d.title, d.english_name, d.episodes.len(), started.elapsed());
-        assert!(!d.episodes.is_empty());
+        for id in [52991, 59193] {
+            let started = std::time::Instant::now();
+            let d = anime_details(id).unwrap();
+            println!("live details: {} eps={} in {:?}", d.title, d.episodes.len(), started.elapsed());
+            assert!(!d.episodes.is_empty());
+        }
     }
 
     #[test]

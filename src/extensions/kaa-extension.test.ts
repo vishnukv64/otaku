@@ -26,7 +26,7 @@ const pages = [
 const ep = (n: number) => ({ episode_number: n, episode_string: String(n), slug: `h${n}`, title: `E${n}` })
 
 const playerHtml =
-  '<astro-island props="{&quot;subtitles&quot;:[1,[[0,{&quot;language&quot;:[0,&quot;en&quot;],&quot;name&quot;:[0,&quot;English&quot;],&quot;src&quot;:[0,&quot;https://subst.test/en.vtt&quot;]}]]]}">'
+  '<astro-island props="{&quot;manifest&quot;:[0,&quot;//bl.cdn.test/playlist/abc123/master.m3u8&quot;],&quot;subtitles&quot;:[1,[[0,{&quot;language&quot;:[0,&quot;en&quot;],&quot;name&quot;:[0,&quot;English&quot;],&quot;src&quot;:[0,&quot;https://subst.test/en.vtt&quot;]}]]]}">'
 
 function fakeKaa(): Fetch {
   return (url, options) => {
@@ -64,7 +64,9 @@ function fakeKaa(): Fetch {
     if (url.endsWith('/api/show/movie-1/episode/ep-0-abc9')) {
       return ok({ servers: [{ name: 'VidStreaming', src: 'https://player.test/x?id=mov' }] })
     }
-    if (url.startsWith('https://player.test/x?id=mov')) return ok('')
+    if (url.startsWith('https://player.test/x?id=mov')) {
+      return ok('{&quot;manifest&quot;:[0,&quot;https://hls.test/manifest/mov/master.m3u8&quot;]}')
+    }
     return JSON.stringify({ status: 404, body: '' })
   }
 }
@@ -95,7 +97,7 @@ describe('KAA extension', () => {
     const { sources, subtitles } = loadExtension(fakeKaa()).getSources('frieren-1::3')
     expect(sources).toEqual([
       expect.objectContaining({
-        url: 'https://hls.krussdomi.com/manifest/abc123/master.m3u8',
+        url: 'https://bl.cdn.test/playlist/abc123/master.m3u8',
         type: 'hls',
         server: 'VidStreaming',
         referrer: 'https://krussdomi.com/',
@@ -108,7 +110,7 @@ describe('KAA extension', () => {
     const ext = loadExtension(fakeKaa())
     expect(ext.getDetails('movie-1').episodes).toHaveLength(1)
     expect(ext.getSources('movie-1::1').sources[0].url).toBe(
-      'https://hls.krussdomi.com/manifest/mov/master.m3u8'
+      'https://hls.test/manifest/mov/master.m3u8'
     )
   })
 

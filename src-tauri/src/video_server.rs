@@ -693,7 +693,15 @@ fn rewrite_uri_attribute(line: &str, manifest_url: &str, token: &str, referrer: 
         if let Some(end) = line[uri_start..].find('"') {
             let original_uri = &line[uri_start..uri_start + end];
             let full_url = resolve_hls_url(manifest_url, original_uri);
-            let proxied = proxied_path("proxy", token, &full_url, referrer);
+            // EXT-X-MEDIA (alternate audio/subtitle renditions) points at another
+            // playlist, which needs its segment URLs rewritten too; EXT-X-MAP and
+            // EXT-X-KEY point at plain resources.
+            let route = if line.starts_with("#EXT-X-MEDIA") || line.starts_with("#EXT-X-I-FRAME-STREAM-INF") {
+                "hls"
+            } else {
+                "proxy"
+            };
+            let proxied = proxied_path(route, token, &full_url, referrer);
             return format!("{}URI=\"{}\"{}",
                 &line[..start],
                 proxied,
@@ -815,6 +823,15 @@ mod tests {
         let stripped = normalize_hls_segment(bytes.clone());
 
         assert_eq!(stripped, bytes);
+    }
+
+    #[test]
+    fn rendition_playlists_are_rewritten_recursively() {
+        let m = "https://hls.test/manifest/abc/master.m3u8";
+        let media = r#"#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",URI="eng/playlist.m3u8""#;
+        assert!(rewrite_uri_attribute(media, m, "t", None).contains(r#"URI="/hls?token=t&url="#));
+        let map = r#"#EXT-X-MAP:URI="init.mp4""#;
+        assert!(rewrite_uri_attribute(map, m, "t", None).contains(r#"URI="/proxy?token=t&url="#));
     }
 
     #[test]
@@ -966,3 +983,4 @@ mod live_kaa_playback {
         assert_eq!(segment[0], 0x47, "expected MPEG-TS sync byte");
     }
 }
+
