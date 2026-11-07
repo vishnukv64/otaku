@@ -186,9 +186,11 @@ ios-device: install
 	rustup component add llvm-tools
 	pnpm build
 	cd src-tauri && IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo rustc --target aarch64-apple-ios --lib \
-		--crate-type staticlib --features tauri/custom-protocol
+		--crate-type staticlib --features tauri/custom-protocol,tauri/devtools
 	# ios init leaves Tauri's placeholder AppIcon; use the Otaku set (same file names).
 	cp src-tauri/icons/ios/*.png $(IOS_APPLE)/Assets.xcassets/AppIcon.appiconset/
+	# The Tauri CLI merges src-tauri/Info.ios.plist into the app's Info.plist; we bypass it, so merge here.
+	/usr/libexec/PlistBuddy -c "Merge src-tauri/Info.ios.plist" $(IOS_APPLE)/app_iOS/Info.plist
 	mkdir -p $(IOS_APPLE)/Externals/arm64/release
 	cp src-tauri/target/aarch64-apple-ios/debug/libapp_lib.a $(IOS_APPLE)/Externals/arm64/release/libapp.a
 	sed -i '' -E 's/shellScript = "[^"]*tauri ios xcode-script.*";/shellScript = "exit 0";/' \
