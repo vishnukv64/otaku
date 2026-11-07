@@ -223,6 +223,12 @@ fn jikan_episode_to_episode(anime_mal_id: i64, ep: &JikanEpisode) -> Episode {
 // --- Public API functions ---
 
 pub fn search_anime(query: &str, page: i32, sfw: bool) -> Result<SearchResults, String> {
+    or_anilist(jikan_search_anime(query, page, sfw), "search", || {
+        anilist_media_page(page, sfw, AnilistMediaQuery { search: Some(query), ..Default::default() })
+    })
+}
+
+fn jikan_search_anime(query: &str, page: i32, sfw: bool) -> Result<SearchResults, String> {
     let page_str = page.to_string();
     let mut params = vec![("q", query), ("page", &page_str), ("limit", "25")];
     if sfw {
@@ -243,6 +249,29 @@ pub fn search_anime(query: &str, page: i32, sfw: bool) -> Result<SearchResults, 
 }
 
 pub fn top_anime(
+    page: i32,
+    type_filter: Option<&str>,
+    filter: Option<&str>,
+    sfw: bool,
+) -> Result<SearchResults, String> {
+    or_anilist(jikan_top_anime(page, type_filter, filter, sfw), "top", || {
+        let (sort, status) = match filter {
+            Some("airing") => ("SCORE_DESC", Some("RELEASING")),
+            Some("upcoming") => ("POPULARITY_DESC", Some("NOT_YET_RELEASED")),
+            Some("bypopularity") => ("POPULARITY_DESC", None),
+            Some("favorite") => ("FAVOURITES_DESC", None),
+            _ => ("SCORE_DESC", None),
+        };
+        anilist_media_page(page, sfw, AnilistMediaQuery {
+            sort: Some(sort),
+            status,
+            formats: type_filter.and_then(anilist_formats),
+            ..Default::default()
+        })
+    })
+}
+
+fn jikan_top_anime(
     page: i32,
     type_filter: Option<&str>,
     filter: Option<&str>,
@@ -274,6 +303,17 @@ pub fn top_anime(
 }
 
 pub fn season_now(page: i32, sfw: bool) -> Result<SearchResults, String> {
+    or_anilist(jikan_season_now(page, sfw), "season", || {
+        let (season, year) = current_anilist_season();
+        anilist_media_page(page, sfw, AnilistMediaQuery {
+            season: Some(season),
+            season_year: Some(year),
+            ..Default::default()
+        })
+    })
+}
+
+fn jikan_season_now(page: i32, sfw: bool) -> Result<SearchResults, String> {
     let page_str = page.to_string();
     let mut params = vec![("page", page_str.as_str()), ("limit", "25")];
     if sfw {
@@ -294,6 +334,21 @@ pub fn season_now(page: i32, sfw: bool) -> Result<SearchResults, String> {
 }
 
 pub fn season(
+    year: i32,
+    season_name: &str,
+    page: i32,
+    sfw: bool,
+) -> Result<SearchResults, String> {
+    or_anilist(jikan_season(year, season_name, page, sfw), "season", || {
+        anilist_media_page(page, sfw, AnilistMediaQuery {
+            season: Some(season_name.to_ascii_uppercase()),
+            season_year: Some(year),
+            ..Default::default()
+        })
+    })
+}
+
+fn jikan_season(
     year: i32,
     season_name: &str,
     page: i32,
@@ -320,6 +375,12 @@ pub fn season(
 }
 
 pub fn season_upcoming(page: i32, sfw: bool) -> Result<SearchResults, String> {
+    or_anilist(jikan_season_upcoming(page, sfw), "upcoming", || {
+        anilist_media_page(page, sfw, AnilistMediaQuery { status: Some("NOT_YET_RELEASED"), ..Default::default() })
+    })
+}
+
+fn jikan_season_upcoming(page: i32, sfw: bool) -> Result<SearchResults, String> {
     let page_str = page.to_string();
     let mut params = vec![("page", page_str.as_str()), ("limit", "25")];
     if sfw {
@@ -340,6 +401,16 @@ pub fn season_upcoming(page: i32, sfw: bool) -> Result<SearchResults, String> {
 }
 
 pub fn watch_episodes_popular() -> Result<SearchResults, String> {
+    or_anilist(jikan_watch_episodes_popular(), "popular episodes", || {
+        anilist_media_page(1, true, AnilistMediaQuery {
+            sort: Some("TRENDING_DESC"),
+            status: Some("RELEASING"),
+            ..Default::default()
+        })
+    })
+}
+
+fn jikan_watch_episodes_popular() -> Result<SearchResults, String> {
     let response: JikanPaginatedResponse<JikanWatchEpisodeEntry> =
         JIKAN.get_parsed("/watch/episodes/popular")?;
 
@@ -568,6 +639,25 @@ pub fn anime_recommendations(mal_id: i64) -> Result<SearchResults, String> {
 }
 
 pub fn genres_anime() -> Result<TagsResult, String> {
+    or_anilist(jikan_genres_anime(), "genres", || {
+        Ok(TagsResult {
+            genres: MAL_ANILIST_GENRES
+                .iter()
+                .map(|(id, name)| Tag {
+                    id: Some(*id),
+                    name: name.to_string(),
+                    slug: name.to_lowercase().replace(' ', "-"),
+                    count: 0,
+                    thumbnail: None,
+                })
+                .collect(),
+            studios: vec![],
+            has_next_page: false,
+        })
+    })
+}
+
+fn jikan_genres_anime() -> Result<TagsResult, String> {
     let response: JikanResponse<Vec<JikanGenre>> = JIKAN.get_parsed("/genres/anime")?;
 
     let genres = response
@@ -682,11 +772,9 @@ fn strip_html(text: &str) -> String {
     out.trim().to_string()
 }
 
-/// Map one AniList airing entry to a SearchResult. Entries without a MAL id
-/// are dropped: library, details and playback all key on it.
-fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Option<SearchResult> {
-    use chrono::{FixedOffset, TimeZone};
-    let media = entry.get("media")?;
+/// Map AniList Media to a SearchResult. Entries without a MAL id are
+/// dropped: library, details and playback all key on it.
+fn anilist_media_to_search_result(media: &serde_json::Value, sfw: bool) -> Option<SearchResult> {
     let mal_id = media.get("idMal")?.as_i64()?;
     if sfw && media.get("isAdult").and_then(|v| v.as_bool()).unwrap_or(false) {
         return None;
@@ -695,8 +783,6 @@ fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Opti
     let title = media.get("title")?;
     let english = str_at(title, "english");
     let romaji = str_at(title, "romaji");
-    let jst = FixedOffset::east_opt(JST_OFFSET_SECS).expect("valid offset");
-    let airs = jst.timestamp_opt(entry.get("airingAt")?.as_i64()?, 0).single()?;
 
     Some(SearchResult {
         id: mal_id.to_string(),
@@ -707,7 +793,7 @@ fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Opti
         year: media.get("seasonYear").and_then(|v| v.as_u64()).map(|y| y as u32),
         status: anilist_status(media.get("status").and_then(|v| v.as_str())),
         rating: media.get("averageScore").and_then(|v| v.as_f64()).map(|s| (s / 10.0) as f32),
-        latest_episode: entry.get("episode").and_then(|v| v.as_u64()).map(|e| e as u32),
+        latest_episode: None,
         latest_episode_date: None,
         available_episodes: media.get("episodes").and_then(|v| v.as_u64()).map(|e| e as u32),
         media_type: anilist_format(media.get("format").and_then(|v| v.as_str())),
@@ -721,21 +807,54 @@ fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Opti
             .pointer("/studios/nodes")
             .and_then(|n| n.as_array())
             .map(|nodes| nodes.iter().filter_map(|n| str_at(n, "name")).collect()),
-        // Same shape Jikan used: plural weekday + HH:MM in JST.
-        broadcast_day: Some(format!("{}s", airs.format("%A"))),
-        broadcast_time: Some(airs.format("%H:%M").to_string()),
-        broadcast_timezone: Some("Asia/Tokyo".to_string()),
+        broadcast_day: None,
+        broadcast_time: None,
+        broadcast_timezone: None,
     })
 }
 
+fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Option<SearchResult> {
+    use chrono::{FixedOffset, TimeZone};
+    let mut result = anilist_media_to_search_result(entry.get("media")?, sfw)?;
+    let jst = FixedOffset::east_opt(JST_OFFSET_SECS).expect("valid offset");
+    let airs = jst.timestamp_opt(entry.get("airingAt")?.as_i64()?, 0).single()?;
+    result.latest_episode = entry.get("episode").and_then(|v| v.as_u64()).map(|e| e as u32);
+    // Same shape Jikan used: plural weekday + HH:MM in JST.
+    result.broadcast_day = Some(format!("{}s", airs.format("%A")));
+    result.broadcast_time = Some(airs.format("%H:%M").to_string());
+    result.broadcast_timezone = Some("Asia/Tokyo".to_string());
+    Some(result)
+}
+
+/// POST a GraphQL body to AniList. AniList rate-limits per minute (30/min
+/// while degraded), so a 429 waits out its Retry-After (capped) and retries.
 fn anilist_post(body: serde_json::Value) -> Result<serde_json::Value, String> {
-    ureq::post(ANILIST_URL)
-        .timeout(std::time::Duration::from_secs(20))
-        .set("Accept", "application/json")
-        .send_json(body)
-        .map_err(|e| format!("AniList request failed: {}", e))?
-        .into_json()
-        .map_err(|e| format!("AniList response was not JSON: {}", e))
+    const MAX_ATTEMPTS: u32 = 3;
+    const MAX_WAIT_SECS: u64 = 15;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match ureq::post(ANILIST_URL)
+            .timeout(std::time::Duration::from_secs(20))
+            .set("Accept", "application/json")
+            .send_json(body.clone())
+        {
+            Ok(response) => {
+                return response
+                    .into_json()
+                    .map_err(|e| format!("AniList response was not JSON: {}", e))
+            }
+            Err(ureq::Error::Status(429, response)) if attempt < MAX_ATTEMPTS => {
+                let wait = response
+                    .header("Retry-After")
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(5)
+                    .min(MAX_WAIT_SECS);
+                log::warn!("AniList rate limited; retrying in {}s", wait);
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+            }
+            Err(e) => return Err(format!("AniList request failed: {}", e)),
+        }
+    }
+    unreachable!("the last attempt always returns")
 }
 
 const ANILIST_DETAILS_QUERY: &str = r#"query ($idMal: Int) {
@@ -847,6 +966,140 @@ fn anilist_anime_details(mal_id: i64) -> Result<MediaDetails, String> {
         .ok_or_else(|| format!("AniList has no anime with MAL id {}", mal_id))
 }
 
+const ANILIST_MEDIA_FIELDS: &str = "idMal title { romaji english } coverImage { large } description(asHtml: false) seasonYear status averageScore episodes format genres isAdult popularity studios(isMain: true) { nodes { name } }";
+
+/// Filters for AniList's Page.media, mirroring what the Jikan list endpoints
+/// accept. Unset fields are sent as null, which AniList treats as "no filter".
+#[derive(Default)]
+struct AnilistMediaQuery<'a> {
+    search: Option<&'a str>,
+    sort: Option<&'a str>,
+    status: Option<&'a str>,
+    formats: Option<Vec<&'a str>>,
+    genres: Option<Vec<&'a str>>,
+    season: Option<String>,
+    season_year: Option<i32>,
+    min_score: Option<i64>,
+    max_score: Option<i64>,
+    adult: Option<bool>,
+}
+
+fn anilist_media_page(page: i32, sfw: bool, q: AnilistMediaQuery) -> Result<SearchResults, String> {
+    let query = format!(
+        "query ($page: Int, $search: String, $sort: [MediaSort], $status: MediaStatus, $formats: [MediaFormat], $genres: [String], $season: MediaSeason, $seasonYear: Int, $minScore: Int, $maxScore: Int, $adult: Boolean) {{ Page(page: $page, perPage: 25) {{ pageInfo {{ hasNextPage }} media(type: ANIME, search: $search, sort: $sort, status: $status, format_in: $formats, genre_in: $genres, season: $season, seasonYear: $seasonYear, averageScore_greater: $minScore, averageScore_lesser: $maxScore, isAdult: $adult) {{ {} }} }} }}",
+        ANILIST_MEDIA_FIELDS
+    );
+    // Unset filters must be left out of the variables entirely: AniList treats
+    // an explicit null as a filter value (empty results, 400s or 500s).
+    let mut vars = serde_json::Map::new();
+    let mut set = |key: &str, value: serde_json::Value| {
+        if !value.is_null() {
+            vars.insert(key.to_string(), value);
+        }
+    };
+    let search = q.search.filter(|s| !s.trim().is_empty());
+    set("page", page.max(1).into());
+    set("sort", serde_json::json!([q.sort.unwrap_or(if search.is_some() { "SEARCH_MATCH" } else { "POPULARITY_DESC" })]));
+    set("search", serde_json::json!(search));
+    set("status", serde_json::json!(q.status));
+    set("formats", serde_json::json!(q.formats));
+    set("genres", serde_json::json!(q.genres));
+    set("season", serde_json::json!(q.season));
+    set("seasonYear", serde_json::json!(q.season_year));
+    set("minScore", serde_json::json!(q.min_score));
+    set("maxScore", serde_json::json!(q.max_score));
+    set("adult", serde_json::json!(if sfw { Some(false) } else { q.adult }));
+    let response = anilist_post(serde_json::json!({ "query": query, "variables": vars }))?;
+    let page_data = response
+        .pointer("/data/Page")
+        .ok_or_else(|| format!("AniList error: {}", response.get("errors").unwrap_or(&response)))?;
+    Ok(SearchResults {
+        results: page_data
+            .get("media")
+            .and_then(|v| v.as_array())
+            .map(|m| m.iter().filter_map(|x| anilist_media_to_search_result(x, sfw)).collect())
+            .unwrap_or_default(),
+        has_next_page: page_data
+            .pointer("/pageInfo/hasNextPage")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    })
+}
+
+/// Use Jikan's answer, or AniList's when Jikan fails for any reason but a 404.
+fn or_anilist<T>(jikan: Result<T, String>, what: &str, anilist: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    match jikan {
+        Err(e) if !e.contains("Jikan API error 404") => {
+            log::warn!("Jikan {} failed: {}; using AniList", what, e);
+            anilist().map_err(|a| format!("{} (AniList fallback: {})", e, a))
+        }
+        other => other,
+    }
+}
+
+fn anilist_status_filter(jikan_status: &str) -> Option<&'static str> {
+    match jikan_status {
+        "airing" => Some("RELEASING"),
+        "complete" => Some("FINISHED"),
+        "upcoming" => Some("NOT_YET_RELEASED"),
+        _ => None,
+    }
+}
+
+fn anilist_formats(jikan_type: &str) -> Option<Vec<&'static str>> {
+    Some(match jikan_type.to_ascii_lowercase().as_str() {
+        "tv" => vec!["TV", "TV_SHORT"],
+        "movie" => vec!["MOVIE"],
+        "ova" => vec!["OVA"],
+        "ona" => vec!["ONA"],
+        "special" | "tv_special" => vec!["SPECIAL"],
+        "music" => vec!["MUSIC"],
+        _ => return None,
+    })
+}
+
+/// Jikan order_by + sort to an AniList MediaSort. Jikan's popularity and rank
+/// are positions (1 = best), so their ascending order is AniList's descending.
+fn anilist_sort(order_by: Option<&str>, sort: Option<&str>) -> &'static str {
+    let asc = sort == Some("asc");
+    match order_by.unwrap_or("popularity") {
+        "popularity" | "members" => if asc { "POPULARITY_DESC" } else { "POPULARITY" },
+        "rank" => if asc { "SCORE_DESC" } else { "SCORE" },
+        "score" => if asc { "SCORE" } else { "SCORE_DESC" },
+        "start_date" => if asc { "START_DATE" } else { "START_DATE_DESC" },
+        "title" => if asc { "TITLE_ROMAJI" } else { "TITLE_ROMAJI_DESC" },
+        "episodes" => if asc { "EPISODES" } else { "EPISODES_DESC" },
+        "favorites" => if asc { "FAVOURITES" } else { "FAVOURITES_DESC" },
+        _ => "POPULARITY_DESC",
+    }
+}
+
+/// MAL genre ids (what the genre picker sends) and their AniList names.
+/// AniList has only these genres; MAL themes/demographics have no equivalent.
+const MAL_ANILIST_GENRES: &[(i64, &str)] = &[
+    (1, "Action"), (2, "Adventure"), (4, "Comedy"), (8, "Drama"), (9, "Ecchi"),
+    (10, "Fantasy"), (12, "Hentai"), (14, "Horror"), (7, "Mystery"), (18, "Mecha"),
+    (19, "Music"), (22, "Romance"), (24, "Sci-Fi"), (30, "Sports"), (36, "Slice of Life"),
+    (37, "Supernatural"), (40, "Psychological"), (41, "Thriller"), (66, "Mahou Shoujo"),
+];
+
+fn anilist_genre(mal_id: &str) -> Option<&'static str> {
+    let id: i64 = mal_id.trim().parse().ok()?;
+    MAL_ANILIST_GENRES.iter().find(|(m, _)| *m == id).map(|(_, name)| *name)
+}
+
+fn current_anilist_season() -> (String, i32) {
+    use chrono::Datelike;
+    let now = chrono::Utc::now();
+    let season = match now.month() {
+        1..=3 => "WINTER",
+        4..=6 => "SPRING",
+        7..=9 => "SUMMER",
+        _ => "FALL",
+    };
+    (season.to_string(), now.year())
+}
+
 pub fn schedules(day: Option<&str>, page: i32, sfw: bool) -> Result<SearchResults, String> {
     let (from, to) = schedule_window(day, chrono::Utc::now())?;
     let body = serde_json::json!({
@@ -927,7 +1180,50 @@ pub fn anime_news(mal_id: i64) -> Result<Vec<JikanNews>, String> {
 
 // --- Filtered search ---
 
+#[allow(clippy::too_many_arguments)]
 pub fn search_anime_filtered(
+    query: Option<&str>,
+    page: i32,
+    sfw: bool,
+    genres: Option<&str>,
+    order_by: Option<&str>,
+    sort: Option<&str>,
+    status: Option<&str>,
+    anime_type: Option<&str>,
+    min_score: Option<&str>,
+    max_score: Option<&str>,
+    rating: Option<&str>,
+) -> Result<SearchResults, String> {
+    let jikan = jikan_search_anime_filtered(
+        query, page, sfw, genres, order_by, sort, status, anime_type, min_score, max_score, rating,
+    );
+    or_anilist(jikan, "filtered search", || {
+        let genre_names = match genres.filter(|g| !g.trim().is_empty()) {
+            Some(g) => Some(
+                g.split(',')
+                    .map(|id| anilist_genre(id).ok_or_else(|| format!("genre {} has no AniList equivalent", id)))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            None => None,
+        };
+        let score = |v: Option<&str>| v.and_then(|s| s.parse::<f64>().ok()).map(|s| (s * 10.0).round() as i64);
+        anilist_media_page(page, sfw, AnilistMediaQuery {
+            search: query,
+            sort: Some(anilist_sort(order_by, sort)),
+            status: status.and_then(anilist_status_filter),
+            formats: anime_type.and_then(anilist_formats),
+            genres: genre_names,
+            // AniList's bounds are exclusive.
+            min_score: score(min_score).map(|s| s - 1),
+            max_score: score(max_score).map(|s| s + 1),
+            adult: rating.map(|r| r == "rx"),
+            ..Default::default()
+        })
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn jikan_search_anime_filtered(
     query: Option<&str>,
     page: i32,
     sfw: bool,
@@ -1108,6 +1404,39 @@ mod schedule_tests {
             println!("live details: {} eps={} in {:?}", d.title, d.episodes.len(), started.elapsed());
             assert!(!d.episodes.is_empty());
         }
+    }
+
+    #[test]
+    fn maps_jikan_list_filters_to_anilist() {
+        assert_eq!(anilist_sort(Some("popularity"), Some("asc")), "POPULARITY_DESC");
+        assert_eq!(anilist_sort(Some("score"), Some("desc")), "SCORE_DESC");
+        assert_eq!(anilist_sort(Some("title"), Some("asc")), "TITLE_ROMAJI");
+        assert_eq!(anilist_formats("tv"), Some(vec!["TV", "TV_SHORT"]));
+        assert_eq!(anilist_status_filter("complete"), Some("FINISHED"));
+        assert_eq!(anilist_genre("1"), Some("Action"));
+        assert_eq!(anilist_genre("27"), None); // Shounen is a MAL demographic
+    }
+
+    #[test]
+    #[ignore = "hits api.jikan.moe and graphql.anilist.co"]
+    fn live_list_fallbacks() {
+        let show = |label: &str, r: Result<SearchResults, String>| {
+            let r = r.unwrap();
+            println!("live {}: {} results, next={}, first={:?}", label, r.results.len(), r.has_next_page,
+                r.results.first().map(|x| (&x.id, &x.title)));
+            assert!(!r.results.is_empty(), "{} empty", label);
+        };
+        show("search juju", search_anime("juju", 1, true));
+        show("filtered action+score>=8", search_anime_filtered(
+            None, 1, true, Some("1"), Some("popularity"), Some("asc"), None, Some("tv"), Some("8"), None, None));
+        show("filtered query", search_anime_filtered(
+            Some("jujutsu"), 1, true, None, Some("popularity"), Some("asc"), None, None, None, None, None));
+        show("top airing", top_anime(1, None, Some("airing"), true));
+        show("season now", season_now(1, true));
+        show("season fall 2025", season(2025, "fall", 1, true));
+        show("upcoming", season_upcoming(1, true));
+        show("popular episodes", watch_episodes_popular());
+        assert_eq!(genres_anime().unwrap().genres.len(), MAL_ANILIST_GENRES.len());
     }
 
     #[test]

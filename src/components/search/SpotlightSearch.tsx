@@ -82,10 +82,18 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
       try {
         // Search both anime and manga in parallel via Jikan
         // nsfwFilter=true means "hide adult", so sfw should be nsfwFilter
-        const [animeResults, mangaResults] = await Promise.all([
+        // allSettled: one source failing (manga has no fallback when Jikan
+        // is down) must not blank the other's results.
+        const [animeSettled, mangaSettled] = await Promise.allSettled([
           jikanSearchAnime(query, 1, nsfwFilter),
           jikanSearchManga(query, 1, nsfwFilter)
         ])
+        if (animeSettled.status === 'rejected' && mangaSettled.status === 'rejected') {
+          throw animeSettled.reason
+        }
+        const empty = { results: [], has_next_page: false }
+        const animeResults = animeSettled.status === 'fulfilled' ? animeSettled.value : empty
+        const mangaResults = mangaSettled.status === 'fulfilled' ? mangaSettled.value : empty
 
         // Filter NSFW content on frontend as well
         // Filter NSFW using both genres and title keywords
