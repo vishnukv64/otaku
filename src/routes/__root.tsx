@@ -18,7 +18,10 @@ import { OfflineGuard } from '@/components/layout/OfflineGuard'
 import { Home, Search, ArrowLeft } from 'lucide-react'
 import { isMobile } from '@/utils/platform'
 
+import { NotFound } from '@/components/mobile/NotFound'
+
 function NotFoundPage() {
+  if (isMobile()) return <NotFound />
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-8">
       <div className="text-center max-w-md">

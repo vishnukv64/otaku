@@ -9,6 +9,7 @@ import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
 import { addToLibrary, setMediaFeedback } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { isMobile } from '@/utils/platform'
+import { requestDetailIntent } from '@/components/mobile/detail/intent'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import type { SearchResult } from '@/types/extension'
 
@@ -60,11 +61,14 @@ export function PosterQuickActions({
   isOpen,
   onClose,
   onDetails,
+  onDownload,
 }: {
   media: SearchResult
   isOpen: boolean
   onClose: () => void
   onDetails?: () => void
+  /** Override for "Download episodes". Default: open details on Episodes in Select mode. */
+  onDownload?: () => void
 }) {
   const navigate = useNavigate()
   const { isOnline } = useNetworkStatus()
@@ -114,7 +118,11 @@ export function PosterQuickActions({
         Details
       </SheetOption>
       {!isManga && (
-        <SheetOption icon={<Download size={20} />} disabled={!isOnline} onClick={run(() => onDetails?.())}>
+        <SheetOption icon={<Download size={20} />} disabled={!isOnline} onClick={run(() => {
+          if (onDownload) return onDownload()
+          requestDetailIntent({ mediaId: media.id, selectEpisodes: true })
+          onDetails?.()
+        })}>
           Download episodes
         </SheetOption>
       )}

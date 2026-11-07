@@ -100,6 +100,7 @@ import { useMediaStatusContext } from '@/contexts/MediaStatusContext'
 import { useSettingsStore } from '@/store/settingsStore'
 import { PushedScreen } from './PushedScreen'
 import { chunkRanges, isRecentlyReleased } from './helpers'
+import { takeDetailIntent } from './intent'
 
 const RANGE_SIZE = 50
 const STATUS_LABEL: Record<LibraryStatus, string> = {
@@ -224,6 +225,17 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
     setSelected(new Set())
     loadedTabs.current = new Set()
   }, [media.id])
+
+  // ---- entry-point intent (e.g. quick-actions "Download episodes"): open on Episodes in Select ----
+  // Declared after the reset effect so it wins when both run for a new media.
+  useEffect(() => {
+    if (!isOpen) return
+    const intent = takeDetailIntent(media.id)
+    if (intent?.selectEpisodes) {
+      setTab('episodes')
+      setSelecting(true)
+    }
+  }, [isOpen, media.id])
 
   // ---- details: cache first, then Jikan (same flow as MediaDetailModal) ----
   useEffect(() => {

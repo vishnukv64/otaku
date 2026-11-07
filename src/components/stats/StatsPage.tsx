@@ -5,6 +5,9 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { Link } from '@tanstack/react-router'
+import { BarChart3, RefreshCw } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
 import {
   getWatchStatsSummary,
   getReadingStatsSummary,
@@ -147,6 +150,9 @@ export function StatsPage() {
   const [ratingComparison, setRatingComparison] = useState<RatingComparisonEntry[] | null>(null)
   const [topGenres, setTopGenres] = useState<GenreStat[] | null>(null)
 
+  const [summaryFailed, setSummaryFailed] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
+
   // ── Scroll-spy ──────────────────────────────────────────
   const [activeSection, setActiveSection] = useState<SectionId>('overview')
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map())
@@ -190,8 +196,14 @@ export function StatsPage() {
   useEffect(() => {
     const err = (name: string) => (e: unknown) => console.error(`Stats [${name}] failed:`, e)
 
-    getWatchStatsSummary().then(setWatchStats).catch(err('watchStats'))
-    getReadingStatsSummary().then(setReadingStats).catch(err('readingStats'))
+    setSummaryFailed(false)
+    let failures = 0
+    const summaryErr = (name: string) => (e: unknown) => {
+      err(name)(e)
+      if (++failures === 2) setSummaryFailed(true)
+    }
+    getWatchStatsSummary().then(setWatchStats).catch(summaryErr('watchStats'))
+    getReadingStatsSummary().then(setReadingStats).catch(summaryErr('readingStats'))
     getCompletionStats().then(setCompletionStats).catch(err('completion'))
     getTopWatchedAnime(5).then(setTopAnime).catch(err('topAnime'))
     getTopReadManga(5).then(setTopManga).catch(err('topManga'))
@@ -210,9 +222,47 @@ export function StatsPage() {
     getMonthlyRecap().then(setMonthlyRecap).catch(err('monthlyRecap'))
     getRatingComparison().then(setRatingComparison).catch(err('ratingComparison'))
     getGenreStats().then(setTopGenres).catch(err('topGenres'))
-  }, [])
+  }, [reloadKey])
+
+  const noHistory =
+    !!watchStats &&
+    !!readingStats &&
+    watchStats.total_episodes_started === 0 &&
+    readingStats.total_chapters_started === 0
+  const mobileState = isMobile() ? (summaryFailed ? 'error' : noHistory ? 'empty' : null) : null
 
   // ── Render ──────────────────────────────────────────────
+  if (mobileState) {
+    return (
+      <div className="flex flex-col items-center text-center px-8 pt-24 gap-3">
+        <BarChart3 size={40} className="text-[var(--color-text-muted)]" />
+        <h2 className="font-display text-lg font-bold text-[var(--color-text-primary)]">
+          {mobileState === 'error' ? 'Could not load stats' : 'No history yet'}
+        </h2>
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          {mobileState === 'error'
+            ? 'Something went wrong reading your local data.'
+            : 'Stats appear once you have watched or read something.'}
+        </p>
+        {mobileState === 'error' ? (
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="mt-2 min-h-[44px] px-5 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] text-white font-semibold flex items-center gap-2"
+          >
+            <RefreshCw size={16} /> Retry
+          </button>
+        ) : (
+          <Link
+            to="/anime"
+            className="mt-2 min-h-[44px] px-5 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] text-white font-semibold flex items-center"
+          >
+            Browse anime
+          </Link>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-sm:py-2 max-w-4k mx-auto">
       <div className="max-w-6xl mx-auto">

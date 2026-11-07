@@ -13,6 +13,8 @@ import {
   Maximize,
   Minimize,
   Pause,
+  PictureInPicture2,
+  Cast,
   Play,
   Settings,
   SkipForward,
@@ -24,7 +26,7 @@ import { LockControls, SeekBack10, SeekFwd10 } from '@/components/ui/OtakuIcons'
 import { SEEK_STEP, usePlayerGestures } from '@/hooks/usePlayerGestures'
 import type { SubtitleFontFamily } from '@/store/playerStore'
 
-export type PlayerMenu = 'settings' | 'quality' | 'server' | 'audio' | 'subs' | 'speed' | 'episodes'
+export type PlayerMenu = 'settings' | 'quality' | 'server' | 'audio' | 'subs' | 'speed' | 'episodes' | 'tracks'
 
 interface EpisodeLite {
   id: string
@@ -223,6 +225,78 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
     subs: 'Subtitles',
     speed: 'Playback speed',
     episodes: 'Episodes',
+    tracks: 'Audio & subtitles',
+  }
+  const audioBody = p.audioModes.map((m) => (
+    <SheetOption key={m} checked={m === p.audioMode} onClick={pick(() => p.onAudio(m as 'sub' | 'dub'))}>
+      {m === 'dub' ? 'Dub' : 'Sub'}
+    </SheetOption>
+  ))
+  const subsList = (
+    <>
+      <SheetOption checked={p.selectedSubtitleUrl === 'off'} onClick={pick(() => p.onSubtitle('off'))}>
+        Off
+      </SheetOption>
+      {p.subtitleTracks.map((t) => (
+        <SheetOption key={t.url} checked={t.url === p.selectedSubtitleUrl} onClick={pick(() => p.onSubtitle(t.url))}>
+          {t.label}
+        </SheetOption>
+      ))}
+    </>
+  )
+  const subsStyle = (
+    <>
+      <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">Subtitle style</div>
+      <div className="flex items-center gap-3 px-[18px] pb-3 text-sm text-white">
+        <span className="w-12">Size</span>
+        <input
+          type="range"
+          min={75}
+          max={200}
+          step={5}
+          value={p.subtitleFontScale}
+          onChange={(e) => p.onSubtitleStyle({ subtitleFontScale: Number(e.target.value) })}
+          className="flex-1 accent-[var(--color-accent-primary)]"
+          aria-label="Subtitle size"
+        />
+        <span className="w-10 text-right tabular-nums">{p.subtitleFontScale}%</span>
+      </div>
+      <div className="flex flex-wrap gap-2 px-[18px] pb-4">
+        {(Object.keys(FONT_LABELS) as SubtitleFontFamily[]).map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => p.onSubtitleStyle({ subtitleFontFamily: f })}
+            className={`min-h-[40px] rounded-full px-4 text-sm ${
+              f === p.subtitleFontFamily ? 'bg-[var(--color-accent-primary)] text-white' : 'bg-white/10 text-white/80'
+            }`}
+          >
+            {FONT_LABELS[f]}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+  // Picture-in-Picture / AirPlay: WebKit (iOS) first, standard API otherwise; hidden when unsupported.
+  type WebkitVideo = HTMLVideoElement & {
+    webkitSupportsPresentationMode?: (m: string) => boolean
+    webkitSetPresentationMode?: (m: string) => void
+    webkitPresentationMode?: string
+    webkitShowPlaybackTargetPicker?: () => void
+  }
+  const wk = p.videoRef.current as WebkitVideo | null
+  const canPip = !!wk && (!!wk.webkitSupportsPresentationMode?.('picture-in-picture') || document.pictureInPictureEnabled === true)
+  const canAirPlay = !!wk?.webkitShowPlaybackTargetPicker
+  const togglePip = () => {
+    const v = p.videoRef.current as WebkitVideo | null
+    if (!v) return
+    if (v.webkitSetPresentationMode) {
+      v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture')
+    } else if (document.pictureInPictureElement) {
+      void document.exitPictureInPicture().catch(() => {})
+    } else {
+      void v.requestPictureInPicture().catch(() => {})
+    }
   }
   let body: React.ReactNode = null
   if (menu === 'settings') {
@@ -252,53 +326,25 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       </SheetOption>
     ))
   } else if (menu === 'audio') {
-    body = p.audioModes.map((m) => (
-      <SheetOption key={m} checked={m === p.audioMode} onClick={pick(() => p.onAudio(m as 'sub' | 'dub'))}>
-        {m === 'dub' ? 'Dub' : 'Sub'}
-      </SheetOption>
-    ))
+    body = audioBody
+  } else if (menu === 'tracks') {
+    body = (
+      <>
+        {p.audioModes.length > 1 && (
+          <>
+            <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">Audio</div>
+            {audioBody}
+            <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">Subtitles</div>
+          </>
+        )}
+        {subsList}
+      </>
+    )
   } else if (menu === 'subs') {
     body = (
       <>
-        <SheetOption checked={p.selectedSubtitleUrl === 'off'} onClick={pick(() => p.onSubtitle('off'))}>
-          Off
-        </SheetOption>
-        {p.subtitleTracks.map((t) => (
-          <SheetOption key={t.url} checked={t.url === p.selectedSubtitleUrl} onClick={pick(() => p.onSubtitle(t.url))}>
-            {t.label}
-          </SheetOption>
-        ))}
-        <div className="px-[18px] py-3 text-xs font-semibold uppercase tracking-wide text-white/50">
-          Subtitle style
-        </div>
-        <div className="flex items-center gap-3 px-[18px] pb-3 text-sm text-white">
-          <span className="w-12">Size</span>
-          <input
-            type="range"
-            min={75}
-            max={200}
-            step={5}
-            value={p.subtitleFontScale}
-            onChange={(e) => p.onSubtitleStyle({ subtitleFontScale: Number(e.target.value) })}
-            className="flex-1 accent-[var(--color-accent-primary)]"
-            aria-label="Subtitle size"
-          />
-          <span className="w-10 text-right tabular-nums">{p.subtitleFontScale}%</span>
-        </div>
-        <div className="flex flex-wrap gap-2 px-[18px] pb-4">
-          {(Object.keys(FONT_LABELS) as SubtitleFontFamily[]).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => p.onSubtitleStyle({ subtitleFontFamily: f })}
-              className={`min-h-[40px] rounded-full px-4 text-sm ${
-                f === p.subtitleFontFamily ? 'bg-[var(--color-accent-primary)] text-white' : 'bg-white/10 text-white/80'
-              }`}
-            >
-              {FONT_LABELS[f]}
-            </button>
-          ))}
-        </div>
+        {subsList}
+        {subsStyle}
       </>
     )
   } else if (menu === 'speed') {
@@ -530,12 +576,17 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
           </div>
           <div className="mt-1 flex items-center justify-between">
             <div className="flex items-center">
+              {!p.landscape && (
+                <button type="button" className="pointer-events-auto flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm text-white active:bg-white/15" onClick={() => setMenu('tracks')}>
+                  <Captions size={20} /> Audio &amp; subs
+                </button>
+              )}
               {p.landscape && (
                 <>
                   <button type="button" className="pointer-events-auto flex min-h-[44px] items-center gap-1 rounded-full px-3 text-sm text-white active:bg-white/15" onClick={() => setMenu('quality')}>
                     {p.selectedQuality}
                   </button>
-                  <button type="button" aria-label="Audio and subtitles" className={iconBtn} onClick={() => setMenu('subs')}>
+                  <button type="button" aria-label="Audio and subtitles" className={iconBtn} onClick={() => setMenu('tracks')}>
                     <Captions size={22} />
                   </button>
                   {p.episodes && p.episodes.length > 1 && (
@@ -552,6 +603,16 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
               )}
             </div>
             <div className="flex items-center">
+              {canAirPlay && (
+                <button type="button" aria-label="AirPlay" className={iconBtn} onClick={() => wk?.webkitShowPlaybackTargetPicker?.()}>
+                  <Cast size={22} />
+                </button>
+              )}
+              {canPip && (
+                <button type="button" aria-label="Picture in picture" className={iconBtn} onClick={togglePip}>
+                  <PictureInPicture2 size={22} />
+                </button>
+              )}
               <button type="button" aria-label="Lock controls" className={iconBtn} onClick={() => setLocked(true)}>
                 <LockControls size={22} />
               </button>

@@ -3,7 +3,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { Search, Loader2, X, WifiOff } from 'lucide-react'
-import { jikanSearchAnime, jikanSearchManga, getLibraryWithMedia } from '@/utils/tauri-commands'
+import { jikanSearchAnime, jikanSearchManga, jikanSeasonNow, getLibraryWithMedia } from '@/utils/tauri-commands'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -47,6 +47,8 @@ export function MobileSearch({ isOpen, onClose }: { isOpen: boolean; onClose: ()
   const [retry, setRetry] = useState(0)
   const [recent, setRecent] = useState<string[]>(loadRecent)
   const [selected, setSelected] = useState<Hit | null>(null)
+  const [trending, setTrending] = useState<Hit[] | null>(null) // null = loading
+  const [trendingFailed, setTrendingFailed] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -56,6 +58,26 @@ export function MobileSearch({ isOpen, onClose }: { isOpen: boolean; onClose: ()
       setError(null)
     }
   }, [isOpen])
+
+  // Trending = currently airing season (same source the Anime tab uses).
+  useEffect(() => {
+    if (!isOpen || !isOnline || trending) return
+    let stale = false
+    setTrendingFailed(false)
+    jikanSeasonNow(1, nsfwFilter)
+      .then((r) => {
+        if (stale) return
+        setTrending(
+          filterNsfwContent(r.results, (i) => i.genres, nsfwFilter, (i) => i.title)
+            .slice(0, 8)
+            .map((x) => ({ ...x, mediaType: 'anime' as const }))
+        )
+      })
+      .catch(() => !stale && setTrendingFailed(true))
+    return () => {
+      stale = true
+    }
+  }, [isOpen, isOnline, nsfwFilter, trending])
 
   useEffect(() => {
     const q = query.trim()
@@ -121,9 +143,11 @@ export function MobileSearch({ isOpen, onClose }: { isOpen: boolean; onClose: ()
   }, [query, nsfwFilter, isOpen, isOnline, retry])
 
   const select = (hit: Hit) => {
-    const next = [query.trim(), ...recent.filter((r) => r !== query.trim())].slice(0, 8)
-    setRecent(next)
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+    if (query.trim()) {
+      const next = [query.trim(), ...recent.filter((r) => r !== query.trim())].slice(0, 8)
+      setRecent(next)
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+    }
     setSelected(hit)
     onClose()
   }
@@ -231,6 +255,26 @@ export function MobileSearch({ isOpen, onClose }: { isOpen: boolean; onClose: ()
                         {r}
                       </button>
                     ))}
+                  </div>
+                )}
+                {isOnline && !trendingFailed && (
+                  <div className="mt-6">
+                    <span className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">Trending</span>
+                    {trending === null
+                      ? [0, 1, 2, 3].map((i) => (
+                          <div key={i} className="h-12 animate-pulse border-b border-[var(--color-glass-border)] py-3">
+                            <div className="h-full w-2/3 rounded bg-[var(--color-glass-bg)]" />
+                          </div>
+                        ))
+                      : trending.map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => select(t)}
+                            className="flex min-h-[48px] w-full items-center gap-3 border-b border-[var(--color-glass-border)] text-left text-[15px] text-white"
+                          >
+                            <span className="line-clamp-1">{t.title}</span>
+                          </button>
+                        ))}
                   </div>
                 )}
               </div>

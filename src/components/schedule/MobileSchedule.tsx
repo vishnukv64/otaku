@@ -4,7 +4,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Bell, BellOff, ChevronDown, Loader2, CalendarX, WifiOff, Play } from 'lucide-react'
-import { jikanSchedules, getLibraryEntry } from '@/utils/tauri-commands'
+import { jikanSchedules, getLibraryEntry, initializeReleaseTrackingV2 } from '@/utils/tauri-commands'
 import type { SearchResult } from '@/types/extension'
 import { DayTabs, getTodayKey, type DayKey } from './DayTabs'
 import { getNextBroadcastDate, formatCountdown } from './ScheduleCard'
@@ -127,7 +127,12 @@ export function MobileSchedule(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDay, fetchDay])
 
+  // Turning on registers the show with the release checker (initializeReleaseTrackingV2, the same
+  // call the detail screens use). There is no untrack command, so turning off only clears the local flag.
   const toggleNotify = (id: string) => {
+    if (!notify.has(id)) {
+      initializeReleaseTrackingV2(id, 'jikan', 'anime', 0).catch((e) => console.error('Release tracking failed:', e))
+    }
     setNotify((prev) => {
       const next = new Set(prev)
       if (!next.delete(id)) next.add(id)
