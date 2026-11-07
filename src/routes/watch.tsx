@@ -295,7 +295,7 @@ function WatchPage() {
             const metadata = await loadExtension(slugExtension)
             setAnikotoExtId(metadata.id)
             const match = await resolveAnikotoSlug(result, (query) =>
-              searchAnime(metadata.id, query, 5)
+              searchAnime(metadata.id, query, 1)
             )
             const queries = buildAnikotoSearchQueries(result)
             if (match?.id) {

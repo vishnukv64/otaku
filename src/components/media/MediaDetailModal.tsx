@@ -321,7 +321,7 @@ export function MediaDetailModal({
             ),
           }
           const match = await resolveAnikotoSlug(anikotoDetails, (query) =>
-            searchAnime(metadata.id, query, 5)
+            searchAnime(metadata.id, query, 1)
           )
           if (cancelled) return
           if (match?.id) {
