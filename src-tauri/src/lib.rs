@@ -64,8 +64,8 @@ pub fn run() {
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_notification::init());
 
-  // Updater plugin is desktop-only (Android updates via Play Store / sideload)
-  #[cfg(not(target_os = "android"))]
+  // Updater plugin is desktop-only (mobile updates come from the store / sideload)
+  #[cfg(desktop)]
   {
     builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
   }

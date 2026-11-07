@@ -649,6 +649,10 @@ export function VideoPlayer({
             levelLoadingMaxRetry: 3,
             fragLoadingTimeOut: 60000, // 60 seconds for fragments (large segments)
             fragLoadingMaxRetry: 5,
+            // Resume by starting the load at the saved position. Seeking from
+            // MANIFEST_PARSED races the first fragment load (and the quality
+            // switch below) and could leave playback at 0 or stuck buffering.
+            startPosition: initialTime > 0 ? initialTime : -1,
           })
 
           hlsRef.current = hls
@@ -670,34 +674,29 @@ export function VideoPlayer({
             // Apply preferred quality now that levels are known. pickSource
             // would have returned the HLS master (adaptive) for qualityPref
             // 'Auto'; for an explicit numeric preference we need to tell
-            // HLS.js which variant to lock to.
+            // HLS.js which variant to lock to. loadLevel (not currentLevel)
+            // picks the level for the first load; currentLevel forces an
+            // immediate switch that flushes the buffer mid-startup.
             if (typeof qualityPref === 'number') {
               const idx = data.levels.findIndex((lvl) => lvl.height === qualityPref)
-              if (idx !== -1) hls.currentLevel = idx
+              if (idx !== -1) hls.loadLevel = idx
             } else if (qualityPref === 'best') {
               const maxIdx = data.levels.reduce(
                 (best, lvl, i) => (lvl.height > data.levels[best].height ? i : best),
                 0
               )
-              hls.currentLevel = maxIdx
+              hls.loadLevel = maxIdx
             } else if (qualityPref === 'worst') {
               const minIdx = data.levels.reduce(
                 (worst, lvl, i) => (lvl.height < data.levels[worst].height ? i : worst),
                 0
               )
-              hls.currentLevel = minIdx
-            } else {
-              // 'Auto' - let HLS.js ABR decide.
-              hls.currentLevel = -1
+              hls.loadLevel = minIdx
             }
+            // 'Auto' needs nothing: ABR is the default.
 
             if (autoPlay) {
               video.play().catch((e) => console.error('Autoplay failed:', e))
-            }
-
-            // Seek to initial time if provided
-            if (initialTime > 0) {
-              video.currentTime = initialTime
             }
           })
 

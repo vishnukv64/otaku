@@ -2125,12 +2125,12 @@ pub async fn get_proxy_video_url(
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Event names for streaming
-#[cfg(not(target_os = "android"))]
+#[cfg(desktop)]
 pub const SYSTEM_STATS_EVENT: &str = "system-stats";
 pub const APP_LOGS_EVENT: &str = "app-logs";
 
 /// Global flags for streaming control
-#[cfg(not(target_os = "android"))]
+#[cfg(desktop)]
 static STATS_STREAMING: AtomicBool = AtomicBool::new(false);
 static LOGS_STREAMING: AtomicBool = AtomicBool::new(false);
 
@@ -2160,8 +2160,8 @@ pub struct SystemStats {
 /// Get real-time system statistics for developer debugging
 #[tauri::command]
 pub async fn get_system_stats() -> Result<SystemStats, String> {
-    // sysinfo is not available on Android
-    #[cfg(target_os = "android")]
+    // sysinfo is not available on mobile (it does not build for iOS)
+    #[cfg(mobile)]
     {
         return Ok(SystemStats {
             memory_used: 0, memory_total: 0, memory_percent: 0.0,
@@ -2171,7 +2171,7 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
         });
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(desktop)]
     {
         use sysinfo::{System, Pid, Disks};
 
@@ -2249,14 +2249,14 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
 /// Start streaming system stats via events (emits every second)
 #[tauri::command]
 pub async fn start_stats_stream(app: tauri::AppHandle) -> Result<(), String> {
-    // No-op on Android (sysinfo not available)
-    #[cfg(target_os = "android")]
+    // No-op on mobile (sysinfo not available)
+    #[cfg(mobile)]
     {
         let _ = app;
         return Ok(());
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(desktop)]
     {
         // Check if already streaming
         if STATS_STREAMING.swap(true, Ordering::SeqCst) {
@@ -2348,7 +2348,7 @@ pub async fn start_stats_stream(app: tauri::AppHandle) -> Result<(), String> {
 /// Stop streaming system stats
 #[tauri::command]
 pub async fn stop_stats_stream() -> Result<(), String> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(desktop)]
     {
         STATS_STREAMING.store(false, Ordering::SeqCst);
     }

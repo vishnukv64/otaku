@@ -9,6 +9,13 @@ const MAX_PER_MINUTE: usize = 60;
 const RETRY_DELAY_MS: u64 = 1000;
 const MAX_RETRIES: u32 = 5;
 const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+// Without these, ureq waits 30s to connect and forever to read, and a dead
+// Jikan host stalled every call for minutes before callers could fall back.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
+// After Jikan is unreachable once, skip it for this long so every screen
+// goes straight to its fallback instead of each paying the connect timeout.
+const UNREACHABLE_BACKOFF: Duration = Duration::from_secs(5 * 60);
 
 fn is_mal_unavailable_body(body: &str) -> bool {
     let lower = body.to_lowercase();
@@ -22,15 +29,22 @@ struct CacheEntry {
 }
 
 pub struct JikanClient {
+    agent: ureq::Agent,
     request_times: Mutex<VecDeque<Instant>>,
     cache: Mutex<HashMap<String, CacheEntry>>,
+    unreachable_until: Mutex<Option<Instant>>,
 }
 
 impl JikanClient {
     pub fn new() -> Self {
         Self {
+            agent: ureq::AgentBuilder::new()
+                .timeout_connect(CONNECT_TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
+                .build(),
             request_times: Mutex::new(VecDeque::new()),
             cache: Mutex::new(HashMap::new()),
+            unreachable_until: Mutex::new(None),
         }
     }
 
@@ -103,6 +117,12 @@ impl JikanClient {
             }
         };
 
+        if let Some(until) = *self.unreachable_until.lock().unwrap() {
+            if Instant::now() < until {
+                return Err("Jikan request failed: unreachable (backing off)".to_string());
+            }
+        }
+
         let mut last_error = String::new();
 
         for attempt in 0..MAX_RETRIES {
@@ -110,7 +130,7 @@ impl JikanClient {
 
             log::debug!("Jikan request: {} (attempt {})", url, attempt + 1);
 
-            let mut request = ureq::get(&url).set("Accept", "application/json");
+            let mut request = self.agent.get(&url).set("Accept", "application/json");
             if let Some(ref etag) = cached_etag {
                 request = request.set("If-None-Match", etag);
             }
@@ -177,9 +197,11 @@ impl JikanClient {
                     }
                     return Err(last_error);
                 }
+                // Transport failure (DNS, connect, timeout): the host is unreachable,
+                // and retrying only delays the caller's fallback.
                 Err(e) => {
-                    last_error = format!("Jikan request failed: {}", e);
-                    std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+                    *self.unreachable_until.lock().unwrap() = Some(Instant::now() + UNREACHABLE_BACKOFF);
+                    return Err(format!("Jikan request failed: {}", e));
                 }
             }
         }

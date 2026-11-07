@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MediaDetails, SearchResult } from '@/types/extension'
-import { pickBestAnikotoMatch, scoreAnikotoCandidate } from './anikotoResolver'
+import { buildAnikotoSearchQueries, pickBestAnikotoMatch, scoreAnikotoCandidate } from './anikotoResolver'
 
 function details(overrides: Partial<MediaDetails>): MediaDetails {
   return {
@@ -63,5 +63,34 @@ describe('Anikoto resolver', () => {
     })
 
     expect(pickBestAnikotoMatch(target, [candidate])?.id).toBe('dan-da-dan-season-2-hhxir')
+  })
+
+  it('accepts an arc-named season that matches exactly but carries no season number', () => {
+    const target = details({
+      title: 'Jujutsu Kaisen: Shimetsu Kaiyuu - Zenpen',
+      english_name: 'JUJUTSU KAISEN Season 3: The Culling Game Part 1',
+      title_synonyms: ['Jujutsu Kaisen 3rd Season', 'JJK3'],
+    })
+    const exact = result({
+      id: 'jujutsu-kaisen-shimetsu-kaiyuu-zoku-hen-29dd',
+      title: 'Jujutsu Kaisen: Shimetsu Kaiyuu - Zenpen',
+      title_synonyms: ['Jujutsu Kaisen: The Culling Game Part 1'],
+      media_type: 'tv',
+    })
+    const firstSeason = result({ id: 'jujutsu-kaisen-650f', title: 'Jujutsu Kaisen', available_episodes: 24, media_type: 'tv' })
+
+    expect(scoreAnikotoCandidate(target, firstSeason)).toBe(0)
+    expect(pickBestAnikotoMatch(target, [firstSeason, exact])?.id).toBe('jujutsu-kaisen-shimetsu-kaiyuu-zoku-hen-29dd')
+  })
+
+  it('searches spellings that differ only in punctuation', () => {
+    const queries = buildAnikotoSearchQueries(details({ title: 'One Punch Man', english_name: 'One-Punch Man' }))
+    expect(queries.slice(0, 2)).toEqual(['One-Punch Man', 'One Punch Man'])
+  })
+
+  it('ignores provider labels such as (Uncensored)', () => {
+    const target = details({ title: 'Tokyo Revengers: Santen Sensou-hen', english_name: undefined, episode_count: undefined })
+    const candidate = result({ id: 'tr', title: 'Tokyo Revengers: Santen Sensou-hen (Uncensored)', media_type: 'tv' })
+    expect(pickBestAnikotoMatch(target, [candidate])?.id).toBe('tr')
   })
 })

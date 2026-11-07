@@ -23,7 +23,12 @@ import {
 // Database key for all settings
 const DB_KEY_SETTINGS = 'app_settings'
 
-export type StreamingProviderMode = 'allanime' | 'anikoto'
+export type StreamingProviderMode = 'kaa' | 'allanime' | 'anikoto'
+
+const STREAMING_PROVIDER_MODES: StreamingProviderMode[] = ['kaa', 'allanime', 'anikoto']
+
+// Bump when the default provider changes and existing installs should move to it once.
+const PROVIDER_DEFAULT_VERSION = 2
 
 interface SettingsData {
   // Appearance
@@ -47,6 +52,7 @@ interface SettingsData {
   anikotoApiBaseUrl: string
   anikotoSiteBaseUrl: string
   anikotoYotochanBaseUrl: string
+  providerDefaultVersion: number
 
   // Onboarding
   onboardingCompleted: boolean
@@ -81,10 +87,11 @@ const defaultSettings: SettingsData = {
   defaultVolume: 1.0,
   defaultPlaybackSpeed: 1.0,
   markWatchedThreshold: 90,
-  streamingProvider: 'allanime',
+  streamingProvider: 'kaa',
   anikotoApiBaseUrl: ANIKOTO_DEFAULT_API_BASE_URL,
   anikotoSiteBaseUrl: ANIKOTO_DEFAULT_SITE_BASE_URL,
   anikotoYotochanBaseUrl: ANIKOTO_DEFAULT_YOTOCHAN_BASE_URL,
+  providerDefaultVersion: PROVIDER_DEFAULT_VERSION,
 
   // Onboarding
   onboardingCompleted: false,
@@ -118,6 +125,7 @@ const extractSettingsData = (state: SettingsState): SettingsData => ({
   anikotoApiBaseUrl: state.anikotoApiBaseUrl,
   anikotoSiteBaseUrl: state.anikotoSiteBaseUrl,
   anikotoYotochanBaseUrl: state.anikotoYotochanBaseUrl,
+  providerDefaultVersion: state.providerDefaultVersion,
   onboardingCompleted: state.onboardingCompleted,
 })
 
@@ -154,7 +162,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         const anikotoApiBaseUrl = !parsed.anikotoApiBaseUrl || parsed.anikotoApiBaseUrl === ANIKOTO_LEGACY_LOCAL_API_BASE_URL
           ? ANIKOTO_DEFAULT_API_BASE_URL
           : parsed.anikotoApiBaseUrl
-        const streamingProvider: StreamingProviderMode = parsed.streamingProvider === 'anikoto' ? 'anikoto' : 'allanime'
+        // Installs saved before KAA existed move to the new default once;
+        // a provider picked after that is kept.
+        const providerOutdated = (parsed.providerDefaultVersion ?? 1) < PROVIDER_DEFAULT_VERSION
+        const streamingProvider: StreamingProviderMode =
+          !providerOutdated && parsed.streamingProvider && STREAMING_PROVIDER_MODES.includes(parsed.streamingProvider)
+            ? parsed.streamingProvider
+            : defaultSettings.streamingProvider
         // Merge with defaults to handle new settings added in updates
         const mergedSettings = {
           ...defaultSettings,
@@ -163,11 +177,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           anikotoApiBaseUrl,
           anikotoSiteBaseUrl: parsed.anikotoSiteBaseUrl || ANIKOTO_DEFAULT_SITE_BASE_URL,
           anikotoYotochanBaseUrl: parsed.anikotoYotochanBaseUrl || ANIKOTO_DEFAULT_YOTOCHAN_BASE_URL,
+          providerDefaultVersion: PROVIDER_DEFAULT_VERSION,
           // Existing users upgrading won't have this field — skip onboarding for them
           onboardingCompleted: parsed.onboardingCompleted ?? true,
         }
         set({ ...mergedSettings, _initialized: true })
         if (
+          providerOutdated ||
           streamingProvider !== parsed.streamingProvider ||
           anikotoApiBaseUrl !== parsed.anikotoApiBaseUrl ||
           !parsed.anikotoSiteBaseUrl ||

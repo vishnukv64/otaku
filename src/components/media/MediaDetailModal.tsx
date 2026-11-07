@@ -85,8 +85,8 @@ import {
   searchAnime,
 } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { createAnikotoExtension } from '@/extensions/anikoto-extension'
 import { resolveAnikotoSlug } from '@/utils/anikotoResolver'
+import { slugProviderExtension, streamingProviderLabel } from '@/utils/streamingProviders'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -284,7 +284,7 @@ export function MediaDetailModal({
   const [downloadExtId, setDownloadExtId] = useState<string | null>(null)
   const [downloadProviderMediaId, setDownloadProviderMediaId] = useState<string | null>(null)
   const [bridgeFailed, setBridgeFailed] = useState(false)
-  const downloadProviderLabel = streamingProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+  const downloadProviderLabel = streamingProviderLabel(streamingProvider)
   const downloadProviderResolving =
     !!details && !bridgeFailed && (!downloadExtId || !downloadProviderMediaId)
 
@@ -298,14 +298,13 @@ export function MediaDetailModal({
 
     const loadSelectedProvider = async () => {
       try {
-        if (streamingProvider === 'anikoto') {
-          const metadata = await loadExtension(
-            createAnikotoExtension({
-              apiBaseUrl: anikotoApiBaseUrl,
-              siteBaseUrl: anikotoSiteBaseUrl,
-              yotochanBaseUrl: anikotoYotochanBaseUrl,
-            })
-          )
+        const slugExtension = slugProviderExtension(streamingProvider, {
+          anikotoApiBaseUrl,
+          anikotoSiteBaseUrl,
+          anikotoYotochanBaseUrl,
+        })
+        if (slugExtension) {
+          const metadata = await loadExtension(slugExtension)
           if (cancelled) return
           setDownloadExtId(metadata.id)
           const anikotoDetails = {
@@ -322,7 +321,7 @@ export function MediaDetailModal({
             ),
           }
           const match = await resolveAnikotoSlug(anikotoDetails, (query) =>
-            searchAnime(metadata.id, query, 5)
+            searchAnime(metadata.id, query, 1)
           )
           if (cancelled) return
           if (match?.id) {
