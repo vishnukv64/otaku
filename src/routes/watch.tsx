@@ -32,13 +32,17 @@ import {
   type VideoServerUrls,
 } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { createAnikotoExtension } from '@/extensions/anikoto-extension'
 import type { MediaDetails, VideoSources } from '@/types/extension'
 import { toastInfo } from '@/utils/notify'
 import { isAndroid } from '@/utils/platform'
 import { usePipStore } from '@/store/pipStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { buildAnikotoSearchQueries, resolveAnikotoSlug } from '@/utils/anikotoResolver'
+import {
+  nextStreamingProvider,
+  slugProviderExtension,
+  streamingProviderLabel,
+} from '@/utils/streamingProviders'
 import {
   canSeekLocalDownload,
   getInitialPlaybackTime,
@@ -280,22 +284,22 @@ function WatchPage() {
           }
         }
 
-        if (streamingProvider === 'anikoto') {
+        const slugExtension = slugProviderExtension(streamingProvider, {
+          anikotoApiBaseUrl,
+          anikotoSiteBaseUrl,
+          anikotoYotochanBaseUrl,
+        })
+        const providerName = streamingProviderLabel(streamingProvider)
+        if (slugExtension) {
           try {
-            const metadata = await loadExtension(
-              createAnikotoExtension({
-                apiBaseUrl: anikotoApiBaseUrl,
-                siteBaseUrl: anikotoSiteBaseUrl,
-                yotochanBaseUrl: anikotoYotochanBaseUrl,
-              })
-            )
+            const metadata = await loadExtension(slugExtension)
             setAnikotoExtId(metadata.id)
             const match = await resolveAnikotoSlug(result, (query) =>
               searchAnime(metadata.id, query, 5)
             )
             const queries = buildAnikotoSearchQueries(result)
             if (match?.id) {
-              console.log('[Watch] Resolved Anikoto slug:', {
+              console.log(`[Watch] Resolved ${providerName} slug:`, {
                 query: match.query,
                 slug: match.id,
                 title: match.title,
@@ -304,17 +308,17 @@ function WatchPage() {
               setAnikotoSlug(match.id)
               setAnikotoResolveError(null)
             } else if (queries.length > 0) {
-              setAnikotoResolveError(`No Anikoto match found for: ${queries.join(', ')}`)
-              console.warn('[Watch] Could not resolve Anikoto slug from queries:', queries)
+              setAnikotoResolveError(`No ${providerName} match found for: ${queries.join(', ')}`)
+              console.warn(`[Watch] Could not resolve ${providerName} slug from queries:`, queries)
             } else if (!queries.length) {
-              setAnikotoResolveError(`No Anikoto search query available for ${result.title}`)
-              console.warn('[Watch] No Anikoto search queries for:', result.title)
+              setAnikotoResolveError(`No ${providerName} search query available for ${result.title}`)
+              console.warn(`[Watch] No ${providerName} search queries for:`, result.title)
             }
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : typeof err === 'string' ? err : String(err)
-            setAnikotoResolveError(`Search failed against ${anikotoApiBaseUrl}: ${msg}`)
-            console.warn('[Watch] Failed to resolve Anikoto slug:', err)
+            setAnikotoResolveError(`${providerName} search failed: ${msg}`)
+            console.warn(`[Watch] Failed to resolve ${providerName} slug:`, err)
           }
         }
       } finally {
@@ -545,14 +549,14 @@ function WatchPage() {
         if (!localSourceLoaded) {
           setIsLegacyLocalTsDownload(false)
           const canUseAllAnime = streamingProvider === 'allanime' && !!allanimeExtId && !!allanimeId
-          const canUseAnikoto = streamingProvider === 'anikoto' && !!anikotoExtId && !!anikotoSlug
+          const canUseAnikoto = streamingProvider !== 'allanime' && !!anikotoExtId && !!anikotoSlug
 
           if (!canUseAllAnime && !canUseAnikoto) {
             if (providersResolved) {
-              if (anikotoResolveError && streamingProvider === 'anikoto') {
-                throw new Error(`Anikoto provider failed: ${anikotoResolveError}`)
+              if (anikotoResolveError && streamingProvider !== 'allanime') {
+                throw new Error(`${streamingProviderLabel(streamingProvider)} provider failed: ${anikotoResolveError}`)
               }
-              const providerName = streamingProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+              const providerName = streamingProviderLabel(streamingProvider)
               throw new Error(
                 `${providerName} could not resolve this anime. Switch provider in Settings or use the button here.`
               )
@@ -603,7 +607,7 @@ function WatchPage() {
           const hasFinalPlayableSources =
             result?.sources.some((s) => s.url && s.url.length > 0) ?? false
           if (!hasFinalPlayableSources) {
-            const providerName = streamingProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+            const providerName = streamingProviderLabel(streamingProvider)
             throw new Error(
               `${providerName} returned no playable sources. Switch provider in Settings or use the button here.`
             )
@@ -678,8 +682,8 @@ function WatchPage() {
 
   const { isMobile, isPortrait } = useMobileLayout()
   const mobilePortrait = isMobile && isPortrait
-  const alternateProvider = streamingProvider === 'anikoto' ? 'allanime' : 'anikoto'
-  const alternateProviderLabel = alternateProvider === 'anikoto' ? 'Anikoto' : 'AllAnime'
+  const alternateProvider = nextStreamingProvider(streamingProvider)
+  const alternateProviderLabel = streamingProviderLabel(alternateProvider)
   const switchProvider = () => {
     setError(null)
     setSources(null)

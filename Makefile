@@ -1,6 +1,7 @@
 # Otaku — Build targets for desktop, Android, and iOS
 #
 # Usage:
+#   make install        — Install JS deps (dev/build run it when the lockfile changes)
 #   make dev            — Run desktop dev server
 #   make build          — Build desktop release
 #   make android        — Build Android APK (aarch64)
@@ -50,12 +51,18 @@ export BINDGEN_EXTRA_CLANG_ARGS_i686_linux_android := --sysroot=$(NDK_TOOLCHAIN)
 TAURI := pnpm exec tauri
 
 # ─── Desktop ─────────────────────────────────────────────────────
-.PHONY: dev build
+.PHONY: install dev build
 
-dev:
+# pnpm writes this file on every install, so it only reruns when the lockfile is newer.
+node_modules/.modules.yaml: package.json pnpm-lock.yaml
+	pnpm install --frozen-lockfile
+
+install: node_modules/.modules.yaml
+
+dev: install
 	$(TAURI) dev
 
-build:
+build: install
 	$(TAURI) build
 
 # ─── Android ─────────────────────────────────────────────────────

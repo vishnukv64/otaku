@@ -32,6 +32,7 @@ import {
 import { Link } from '@tanstack/react-router'
 import { isMobile } from '@/utils/platform'
 import { ApiStatusIndicator } from '@/components/layout/ApiStatusIndicator'
+import { STREAMING_PROVIDERS } from '@/utils/streamingProviders'
 
 type SettingsPage =
   | 'appearance'
@@ -345,10 +346,7 @@ function SettingsScreen() {
               >
                 <SettingDropdown
                   value={settings.streamingProvider}
-                  options={[
-                    { value: 'allanime', label: 'AllAnime' },
-                    { value: 'anikoto', label: 'Anikoto' },
-                  ]}
+                  options={STREAMING_PROVIDERS}
                   onChange={(value) =>
                     settings.updateSettings({
                       streamingProvider: value as typeof settings.streamingProvider,
