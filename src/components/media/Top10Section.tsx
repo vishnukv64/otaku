@@ -80,7 +80,7 @@ export function Top10Section({ items, onItemClick }: Top10SectionProps) {
         {/* Embla Viewport */}
         <div
           className="overflow-x-hidden"
-          style={{ overflowY: 'clip', touchAction: 'pan-x' }}
+          style={{ overflowY: 'clip', touchAction: 'pan-y pinch-zoom' }}
           ref={emblaRef}
         >
           <div className="flex gap-3 py-2">

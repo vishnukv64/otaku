@@ -138,7 +138,7 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
           className="overflow-x-hidden"
           style={{ 
             overflowY: 'clip',
-            touchAction: 'pan-x',
+            touchAction: 'pan-y pinch-zoom',
             contain: 'layout style'
           }}
           ref={emblaRef}

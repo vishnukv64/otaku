@@ -187,6 +187,8 @@ ios-device: install
 	pnpm build
 	cd src-tauri && IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo rustc --target aarch64-apple-ios --lib \
 		--crate-type staticlib --features tauri/custom-protocol
+	# ios init leaves Tauri's placeholder AppIcon; use the Otaku set (same file names).
+	cp src-tauri/icons/ios/*.png $(IOS_APPLE)/Assets.xcassets/AppIcon.appiconset/
 	mkdir -p $(IOS_APPLE)/Externals/arm64/release
 	cp src-tauri/target/aarch64-apple-ios/debug/libapp_lib.a $(IOS_APPLE)/Externals/arm64/release/libapp.a
 	sed -i '' -E 's/shellScript = "[^"]*tauri ios xcode-script.*";/shellScript = "exit 0";/' \
