@@ -39,14 +39,17 @@ function normalizeTitle(value: string): string {
     .trim()
 }
 
-function dedupe(values: Array<string | null | undefined>): string[] {
+function dedupe(
+  values: Array<string | null | undefined>,
+  keyOf: (value: string) => string = normalizeTitle,
+): string[] {
   const seen = new Set<string>()
   const out: string[] = []
 
   for (const value of values) {
     const trimmed = value?.trim()
     if (!trimmed) continue
-    const key = normalizeTitle(trimmed)
+    const key = keyOf(trimmed)
     if (!key || seen.has(key)) continue
     seen.add(key)
     out.push(trimmed)
@@ -56,12 +59,14 @@ function dedupe(values: Array<string | null | undefined>): string[] {
 }
 
 export function buildAnikotoSearchQueries(details: MediaDetails): string[] {
+  // Keep spellings that only differ in punctuation: provider search engines
+  // treat "One-Punch Man" and "One Punch Man" differently.
   return dedupe([
     details.english_name,
     details.title,
     details.native_name,
     ...(details.title_synonyms || []),
-  ]).slice(0, 8)
+  ], (value) => value.toLowerCase()).slice(0, 8)
 }
 
 function compactTitle(value: string): string {
@@ -117,12 +122,14 @@ function titleVariants(details: MediaDetails): string[] {
   ])
 }
 
+// Provider-side labels such as "(Uncensored)" or "(Dub)" are not part of the title.
+function withoutTrailingLabel(value: string | null | undefined): string | undefined {
+  return value?.replace(/\s*\([^()]*\)\s*$/, '')
+}
+
 function candidateVariants(candidate: SearchResult): string[] {
-  return dedupe([
-    candidate.title,
-    candidate.native_name,
-    ...(candidate.title_synonyms || []),
-  ])
+  const titles = [candidate.title, candidate.native_name, ...(candidate.title_synonyms || [])]
+  return dedupe([...titles, ...titles.map(withoutTrailingLabel)])
 }
 
 function tokenScore(a: string, b: string): number {
@@ -182,10 +189,15 @@ export function scoreAnikotoCandidate(details: MediaDetails, candidate: SearchRe
 
   const targetSeason = firstSeason(targets)
   const candidateSeason = firstSeason(candidates)
-  if (!seasonsCompatible(targetSeason, candidateSeason)) return 0
-
   let score = bestTitleScore(targets, candidates)
   if (score <= 0) return 0
+
+  if (!seasonsCompatible(targetSeason, candidateSeason)) {
+    // Arc-named seasons ("Shimetsu Kaiyuu - Zenpen") carry no season number on
+    // one side; accept those only on an exact title match.
+    if (targetSeason != null && candidateSeason != null) return 0
+    if (score < 115) return 0
+  }
 
   if (targetSeason != null && candidateSeason === targetSeason) score += 20
   if (details.episode_count && candidate.available_episodes) {
@@ -231,13 +243,27 @@ export async function resolveAnikotoSlug(
 ): Promise<AnikotoResolvedSlug | null> {
   const byId = new Map<string, SearchResult & { query?: string }>()
 
+  let lastError: unknown = null
+  let anySucceeded = false
   for (const query of buildAnikotoSearchQueries(details)) {
-    const result = await search(query)
+    // One failed query (timeout, odd characters) must not sink the others.
+    let result: SearchResults
+    try {
+      result = await search(query)
+      anySucceeded = true
+    } catch (error) {
+      lastError = error
+      continue
+    }
     for (const item of result.results || []) {
       if (!item.id || byId.has(item.id)) continue
       byId.set(item.id, { ...item, query })
     }
   }
+
+  // Every query failed: the provider is down, which callers report differently
+  // from "no match".
+  if (!anySucceeded && lastError) throw lastError
 
   return pickBestAnikotoMatch(details, [...byId.values()])
 }
