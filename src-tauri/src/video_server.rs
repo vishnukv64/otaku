@@ -746,7 +746,10 @@ fn should_normalize_hls_segment(url: &str, content_type: &str) -> bool {
     let lower_content_type = content_type.to_ascii_lowercase();
     lower_url.contains(".ts")
         || lower_url.contains("/seg-")
-        || lower_content_type.starts_with("image/png")
+        // Some CDNs disguise TS segments as images (Anikoto: PNG-prefixed,
+        // KAA: plain TS named .jpg). MSE ignores the type, but native HLS
+        // (iOS/macOS AVFoundation) needs video/mp2t to play them.
+        || lower_content_type.starts_with("image/")
 }
 
 fn normalize_hls_segment(bytes: Vec<u8>) -> Vec<u8> {
@@ -823,6 +826,12 @@ mod tests {
         let stripped = normalize_hls_segment(bytes.clone());
 
         assert_eq!(stripped, bytes);
+    }
+
+    #[test]
+    fn treats_image_typed_segments_as_ts() {
+        assert!(should_normalize_hls_segment("https://st1.cdn.test/a/000.jpg", "image/jpeg"));
+        assert!(!should_normalize_hls_segment("https://cdn.test/video.mp4", "video/mp4"));
     }
 
     #[test]
@@ -983,4 +992,5 @@ mod live_kaa_playback {
         assert_eq!(segment[0], 0x47, "expected MPEG-TS sync byte");
     }
 }
+
 
