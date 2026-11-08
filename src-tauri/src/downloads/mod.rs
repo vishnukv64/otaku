@@ -923,11 +923,19 @@ impl DownloadManager {
     ) -> Option<u64> {
         use futures_util::{stream, StreamExt};
 
-        const HEAD_CONCURRENCY: usize = 24;
+        // HEAD-ing every segment (hundreds, 24 at a time) gets CDNs like KAA's to answer
+        // 429 and then refuse the download itself. Sample a few evenly spaced segments
+        // and extrapolate instead.
+        // ponytail: average-based estimate; progress corrects itself as bytes arrive.
+        const SAMPLES: usize = 6;
+        const HEAD_CONCURRENCY: usize = 2;
+        let step = segments.len().div_ceil(SAMPLES).max(1);
         let urls = segments
             .iter()
+            .step_by(step)
             .map(|segment| segment.url.clone())
             .collect::<Vec<_>>();
+        let sampled = urls.len();
         let lengths: Vec<Option<u64>> = stream::iter(urls.into_iter().map(|url| {
             let client = client.clone();
             let referrer = referrer.to_string();
@@ -949,7 +957,45 @@ impl DownloadManager {
         .collect()
         .await;
 
-        Self::sum_hls_content_lengths(lengths)
+        let sum = Self::sum_hls_content_lengths(lengths)?;
+        if sampled == segments.len() {
+            return Some(sum);
+        }
+        Some(sum / sampled as u64 * segments.len() as u64)
+    }
+
+    /// GET a segment, backing off on 429/503 (honours Retry-After, capped at 30s).
+    async fn fetch_hls_segment(
+        client: &reqwest::Client,
+        url: &str,
+        referrer: &str,
+    ) -> Result<reqwest::Response> {
+        const MAX_TRIES: u32 = 6;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let response = client
+                .get(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", referrer)
+                .header("Origin", crate::video_server::origin_from_referrer(referrer))
+                .send()
+                .await?;
+            let status = response.status();
+            let throttled = status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+            if !throttled || attempt >= MAX_TRIES {
+                return Ok(response);
+            }
+            let wait = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(1u64 << attempt)
+                .min(30);
+            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+        }
     }
 
     async fn remove_hls_segments(file_path: &str) {
@@ -1187,16 +1233,18 @@ impl DownloadManager {
                 }
             }
 
-            let response = client
-                .get(&segment.url)
-                .header("User-Agent", "Mozilla/5.0")
-                .header("Referer", &referrer)
-                .header("Origin", crate::video_server::origin_from_referrer(&referrer))
-                .send()
+            let response = Self::fetch_hls_segment(&client, &segment.url, &referrer)
                 .await
-                .with_context(|| format!("Failed to fetch HLS segment {}", index + 1))?
-                .error_for_status()
-                .with_context(|| format!("HLS segment {} request failed", index + 1))?;
+                .with_context(|| format!("Failed to fetch HLS segment {}", index + 1))?;
+            let status = response.status();
+            if !status.is_success() {
+                anyhow::bail!(
+                    "HLS segment {} request failed: HTTP {} from {}",
+                    index + 1,
+                    status.as_u16(),
+                    reqwest::Url::parse(&segment.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default()
+                );
+            }
 
             let data = Self::normalize_hls_segment(
                 response
@@ -2187,6 +2235,25 @@ v/720.m3u8
         println!("video segs {} audio segs {}", video.len(), audio.len());
         assert!(!video.is_empty());
         assert!(!audio.is_empty(), "audio rendition dropped");
+        // Full real path (same client setup as perform_download), first segments only.
+        let dir = std::env::temp_dir().join("otaku-kaa-dl-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("t.otaku").to_string_lossy().to_string();
+        let downloads = Arc::new(RwLock::new(HashMap::new()));
+        let dl_client = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(30)).build().unwrap();
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            DownloadManager::perform_hls_download(
+                "t".into(), downloads, None, None, dl_client, manifest.clone(),
+                "https://krussdomi.com/".into(), file, None, None, None,
+            ),
+        )
+        .await;
+        match res {
+            Err(_) => println!("full path: still downloading after 20s (ok)"),
+            Ok(r) => println!("full path result: {:?}", r),
+        }
         for seg in [&video[0], &audio[0]] {
             let r = client.get(&seg.url).header("Referer", "https://krussdomi.com/").header("Origin", "https://krussdomi.com").header("User-Agent", "Mozilla/5.0").send().await.unwrap();
             assert!(r.status().is_success(), "{} -> {}", seg.url, r.status());

@@ -108,7 +108,7 @@ export function notify(options: NotifyOptions): string {
   return id
 }
 
-/** Show a toast popup (desktop: in-app toast, mobile: system notification) */
+/** In-app toast; a phone in the background gets a system notification instead. */
 function showToast(
   id: string,
   type: NotificationType,
@@ -116,9 +116,9 @@ function showToast(
   message: string,
   duration: number = 4000
 ) {
-  // On mobile, send a system notification instead of an in-app toast
-  if (isMobile()) {
-    sendMobileNotification(title, message)
+  // Phone in the background: system notification. In the foreground: in-app toast.
+  if (isMobile() && appInBackground()) {
+    void sendMobileNotification(title, message)
     return
   }
 
@@ -148,8 +148,13 @@ function showToast(
   toast(toastContent, toastOptions)
 }
 
-/** Send a native system notification on Android */
-async function sendMobileNotification(title: string, body: string) {
+/** True while the app is not on screen (phone backgrounded / locked). */
+export function appInBackground(): boolean {
+  return document.visibilityState === 'hidden'
+}
+
+/** Native system notification (phones); callers only use it while the app is in the background. */
+export async function sendMobileNotification(title: string, body: string) {
   try {
     let granted = await isPermissionGranted()
     if (!granted) {

@@ -191,6 +191,8 @@ ios-device: install
 	cp src-tauri/icons/ios/*.png $(IOS_APPLE)/Assets.xcassets/AppIcon.appiconset/
 	# The Tauri CLI merges src-tauri/Info.ios.plist into the app's Info.plist; we bypass it, so merge here.
 	/usr/libexec/PlistBuddy -c "Merge src-tauri/Info.ios.plist" $(IOS_APPLE)/app_iOS/Info.plist
+	# Fresh build number per install: iOS keys its icon caches (home screen, notification banners) on it.
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $$(date +%Y%m%d.%H%M)" $(IOS_APPLE)/app_iOS/Info.plist
 	mkdir -p $(IOS_APPLE)/Externals/arm64/release
 	cp src-tauri/target/aarch64-apple-ios/debug/libapp_lib.a $(IOS_APPLE)/Externals/arm64/release/libapp.a
 	sed -i '' -E 's/shellScript = "[^"]*tauri ios xcode-script.*";/shellScript = "exit 0";/' \

@@ -299,18 +299,41 @@ export function ContinueReadingSection() {
                     }
                     setSelectedManga({ manga: media, extensionId: effectiveExtensionId })
                   }}
-                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  aria-label={`Details for ${media.title}`}
+                  className={
+                    isMobile()
+                      ? 'absolute left-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
+                      : 'absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto'
+                  }
                   title="View Details"
                 >
-                  <Info className="w-4 h-4" />
+                  {/* Phones have no hover: keep it visible there. */}
+                  {isMobile() ? (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <Info size={18} />
+                    </span>
+                  ) : (
+                    <Info className="w-4 h-4" />
+                  )}
                 </button>
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title, entry.media.cover_url)}
-                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  aria-label={`Remove ${media.title} from Continue Reading`}
+                  className={
+                    isMobile()
+                      ? 'absolute right-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
+                      : 'absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto'
+                  }
                   title="Remove from Continue Reading"
                 >
-                  <X className="w-4 h-4" />
+                  {isMobile() ? (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <X size={16} />
+                    </span>
+                  ) : (
+                    <X className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             )
