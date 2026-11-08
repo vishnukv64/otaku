@@ -5,6 +5,11 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-11-08
+
+### Fixed
+- Release builds: `Cargo.toml` now declares Tauri 2.12 to match `@tauri-apps/api`/`cli` 2.12. With no committed `Cargo.lock`, the Tauri CLI version check read the old `2.11.1` requirement and stopped every v1.6.3 build. No app changes beyond 1.6.3.
+
 ## [1.6.3] - 2026-11-08
 
 ### Added
