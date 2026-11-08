@@ -4,6 +4,7 @@
  * Full-screen manga reader with chapter navigation
  */
 
+import { searchString } from '@/utils/mediaHelpers'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { Loader2, X, Home, FileText, CircleAlert, RefreshCw } from 'lucide-react'
@@ -41,10 +42,10 @@ export const Route = createFileRoute('/read')({
   component: ReadPage,
   validateSearch: (search: Record<string, unknown>): ReadSearch => {
     return {
-      extensionId: (search.extensionId as string) || '',
-      mangaId: (search.mangaId as string) || '',
-      chapterId: search.chapterId as string | undefined,
-      malId: search.malId as string | undefined,
+      extensionId: searchString(search.extensionId) ?? '',
+      mangaId: searchString(search.mangaId) ?? '',
+      chapterId: searchString(search.chapterId),
+      malId: searchString(search.malId),
     }
   },
 })

@@ -131,3 +131,8 @@ export async function getNextEpisodeToWatch(
 export function displayTitle(m: { title: string; english_name?: string | null }): string {
   return m.english_name?.trim() || m.title
 }
+
+/** A URL search param as a string: the router turns numeric-looking values into numbers. */
+export function searchString(value: unknown): string | undefined {
+  return value === undefined || value === null || value === '' ? undefined : String(value)
+}

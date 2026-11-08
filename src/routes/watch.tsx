@@ -4,6 +4,7 @@
  * Full-screen video player with episode list sidebar
  */
 
+import { searchString } from '@/utils/mediaHelpers'
 import { audioModeLabel } from '@/utils/providerExtras'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
@@ -80,12 +81,12 @@ const fmtMmSs = (t: number) =>
 
 export const Route = createFileRoute('/watch')({
   component: WatchPage,
-  validateSearch: (search: Record<string, unknown>): WatchSearch => {
-    return {
-      malId: (search.malId as string) || '',
-      episodeId: search.episodeId as string | undefined,
-    }
-  },
+  // The router parses `?malId=21` as the number 21; Rust commands reject a number
+  // where they expect a string (offline episodes silently fell back to streaming).
+  validateSearch: (search: Record<string, unknown>): WatchSearch => ({
+    malId: searchString(search.malId) ?? '',
+    episodeId: searchString(search.episodeId),
+  }),
 })
 
 function WatchPage() {
@@ -433,6 +434,10 @@ function WatchPage() {
   useEffect(() => {
     if (!currentEpisodeId || !currentEpisode) return
 
+    // This effect re-runs as details, the video server and the provider match arrive.
+    // An older run must not finish last: it would replace a downloaded file with a
+    // network stream (offline episodes buffering) or show a stale error.
+    let cancelled = false
     const loadProgressAndSources = async () => {
       setLoading(true)
       setError(null)
@@ -515,6 +520,11 @@ function WatchPage() {
           : []
         const localSourceType = filePath && isLocalHlsPlaylist(filePath) ? 'hls' : 'video/mp4'
 
+        if (cancelled) return
+        // Desktop/iOS play downloads through the local video server: wait for its
+        // address (this effect re-runs when it arrives) instead of streaming.
+        if (filePath && !isAndroid() && !videoServerInfo) return
+
         if (filePath && isAndroid() && !localIsLegacyTsDownload) {
           // Android: Use convertFileSrc for directly playable downloads. Legacy
           // .otaku TS files must use the video server so bytes are decrypted.
@@ -560,6 +570,7 @@ function WatchPage() {
           // Fallback: Try getLocalVideoUrl command with full path
           try {
             const localUrl = await getLocalVideoUrl(filePath)
+            if (cancelled) return
             setIsLegacyLocalTsDownload(localIsLegacyTsDownload)
             setSources({
               sources: [
@@ -653,6 +664,7 @@ function WatchPage() {
             )
           }
 
+          if (cancelled) return
           setSources(result)
         }
         didComplete = true
@@ -668,6 +680,7 @@ function WatchPage() {
               : err && typeof err === 'object' && 'message' in err
                 ? String((err as { message: unknown }).message)
                 : `Failed to load video sources (${String(err)})`
+        if (cancelled) return
         setError(msg)
         didComplete = true
       } finally {
@@ -679,6 +692,9 @@ function WatchPage() {
     }
 
     loadProgressAndSources()
+    return () => {
+      cancelled = true
+    }
   }, [
     currentEpisodeId,
     currentEpisode,

@@ -8,3 +8,13 @@ describe('displayTitle', () => {
     expect(displayTitle({ title: 'X', english_name: null })).toBe('X')
   })
 })
+
+describe('searchString', () => {
+  it('turns router-parsed numbers back into strings and drops empties', async () => {
+    const { searchString } = await import('./mediaHelpers')
+    expect(searchString(21)).toBe('21')
+    expect(searchString('21-1')).toBe('21-1')
+    expect(searchString('')).toBeUndefined()
+    expect(searchString(undefined)).toBeUndefined()
+  })
+})
