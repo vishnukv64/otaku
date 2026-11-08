@@ -84,6 +84,10 @@ pub async fn dial_relay(link: &Link, role: &str, token: &str) -> Result<Chan, Di
         }
     }
     req.headers_mut().insert("X-Praxis-Purpose", HeaderValue::from_static("otaku-sync"));
+    // The relay serves rooms with Go's x/net/websocket Handler, which answers 403 to a
+    // handshake without a parseable Origin (non-browser clients send none). Same value
+    // as the Praxis Go client.
+    req.headers_mut().insert("Origin", HeaderValue::from_static("https://omp.sh/"));
     let (mut ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(req))
         .await
         .map_err(|_| DialError::Unreachable("timeout".into()))?
@@ -226,5 +230,30 @@ mod tests {
     fn refusal_codes() {
         assert_eq!(DialError::Refused("domain not allowed".into()).code(), "wrong_account");
         assert_eq!(DialError::Unreachable("x".into()).code(), "relay_unreachable");
+    }
+}
+
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    /// OTAKU_RELAY_TOKEN=<prxr1…> cargo test --lib sync::net::live -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn relay_host_and_guest_exchange() {
+        let token = std::env::var("OTAKU_RELAY_TOKEN").expect("token");
+        let link = Link::generate(super::super::link::DEFAULT_RELAY, true);
+        let host = dial_relay(&link, "host", &token).await;
+        println!("host: {:?}", host.as_ref().err().map(|e| e.to_string()));
+        let mut host = host.unwrap();
+        let guest = dial_relay(&link, "guest", &token).await;
+        println!("guest: {:?}", guest.as_ref().err().map(|e| e.to_string()));
+        let mut guest = guest.unwrap();
+        guest.tx.send("hello-from-guest".into()).unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(10), host.rx.recv()).await;
+        println!("host received: {:?}", got);
+        host.tx.send("hello-from-host".into()).unwrap();
+        let got2 = tokio::time::timeout(Duration::from_secs(10), guest.rx.recv()).await;
+        println!("guest received: {:?}", got2);
     }
 }
