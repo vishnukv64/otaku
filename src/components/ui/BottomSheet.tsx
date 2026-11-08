@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, X } from 'lucide-react'
 
 interface BottomSheetProps {
@@ -79,7 +80,9 @@ export function BottomSheet({ isOpen, onClose, children, maxHeight = '88vh', tit
 
   if (!isOpen && !closing) return null
 
-  return (
+  // Portal: a transformed/contained ancestor (e.g. the video player) would otherwise
+  // make `fixed` relative to itself and clip the sheet to that box.
+  return createPortal(
     <div className="fixed inset-0 z-[200]">
       {/* Backdrop */}
       <div
@@ -140,7 +143,8 @@ export function BottomSheet({ isOpen, onClose, children, maxHeight = '88vh', tit
           <div className="flex shrink-0 gap-2.5 border-t border-[var(--color-glass-border)] px-4 pt-3 pb-4">{footer}</div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
