@@ -5,9 +5,9 @@
  */
 
 import { searchString } from '@/utils/mediaHelpers'
-import { audioModeLabel } from '@/utils/providerExtras'
+import { audioModeLabel, useProviderExtras, withProviderEpisodes } from '@/utils/providerExtras'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import {
   Captions,
   Check,
@@ -99,7 +99,7 @@ function WatchPage() {
     return () => void invoke('set_orientation', { mode: 'app' }).catch(() => {})
   }, [])
 
-  const [details, setDetails] = useState<MediaDetails | null>(null)
+  const [rawDetails, setDetails] = useState<MediaDetails | null>(null)
   const [sources, setSources] = useState<VideoSources | null>(null)
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string>(initialEpisodeId || '')
   const [loading, setLoading] = useState(true)
@@ -113,6 +113,16 @@ function WatchPage() {
   const [anikotoSlug, setAnikotoSlug] = useState<string | null>(null)
   const [anikotoResolveError, setAnikotoResolveError] = useState<string | null>(null)
   const [providersResolved, setProvidersResolved] = useState(false)
+  // Provider (KAA) stills, real titles and runtimes over MAL's bare "Episode N",
+  // matched by episode number; the same merge the detail pages use.
+  const providerExtras = useProviderExtras(anikotoExtId, anikotoSlug)
+  const details = useMemo(
+    () =>
+      rawDetails && providerExtras?.episodes?.length
+        ? { ...rawDetails, episodes: withProviderEpisodes(rawDetails.episodes, providerExtras.episodes) }
+        : rawDetails,
+    [rawDetails, providerExtras]
+  )
   const shownResumeToastRef = useRef<string | null>(null)
   const shownOfflineToastRef = useRef<string | null>(null)
   /** When expanding from PiP, skip the DB resume time (pip time takes priority) */
@@ -695,11 +705,13 @@ function WatchPage() {
     return () => {
       cancelled = true
     }
+    // rawDetails, not the provider-merged copy: stills arriving must not reload the stream.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentEpisodeId,
-    currentEpisode,
+    currentEpisode?.id,
     malId,
-    details,
+    rawDetails,
     videoServerInfo,
     allanimeExtId,
     allanimeId,
