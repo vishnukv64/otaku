@@ -207,6 +207,12 @@ fn jikan_anime_to_media_details(anime: &JikanAnime, episodes: Vec<Episode>, last
         aired_start,
         last_update_end: compute_last_update_end(anime, &last_aired),
         broadcast_interval: compute_broadcast_interval(anime, &last_aired),
+        age_rating: None,
+        audio_locales: None,
+        banner_url: None,
+        start_date: None,
+        end_date: None,
+        broadcast: None,
     }
 }
 
@@ -970,6 +976,12 @@ fn anilist_media_to_details(mal_id: i64, media: &serde_json::Value) -> Option<Me
             })
         }),
         broadcast_interval: last_update_end.as_ref().map(|_| (WEEK_SECS * 1000) as u64),
+        age_rating: None,
+        audio_locales: None,
+        banner_url: None,
+        start_date: None,
+        end_date: None,
+        broadcast: None,
         last_update_end,
     })
 }

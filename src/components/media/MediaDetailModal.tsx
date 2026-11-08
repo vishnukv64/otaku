@@ -8,6 +8,7 @@
  * - Action buttons (Watch, Add to List)
  */
 
+import { audioSummary, countdownFromBroadcast, formatBroadcast, formatDateRange, useProviderExtras } from '@/utils/providerExtras'
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -288,6 +289,15 @@ function MediaDetailModalDesktop({
   // Selected streaming extension for video sources (downloads).
   const [downloadExtId, setDownloadExtId] = useState<string | null>(null)
   const [downloadProviderMediaId, setDownloadProviderMediaId] = useState<string | null>(null)
+  const kaa = useProviderExtras(downloadExtId, downloadProviderMediaId)
+  const kaaCountdown = kaa?.broadcast ? countdownFromBroadcast(kaa.broadcast) : null
+  const kaaFacts = (
+    [
+      ['Audio', audioSummary(kaa?.audio_locales)],
+      ['Airs', kaa?.broadcast && details && isAiring(details.status) ? formatBroadcast(kaa.broadcast.day, kaa.broadcast.time) : ''],
+      ['Dates', details?.aired_start ? '' : formatDateRange(kaa?.start_date, kaa?.end_date)],
+    ] as [string, string][]
+  ).filter(([, v]) => v)
   const [bridgeFailed, setBridgeFailed] = useState(false)
   const downloadProviderLabel = streamingProviderLabel(streamingProvider)
   const downloadProviderResolving =
@@ -1651,6 +1661,7 @@ function MediaDetailModalDesktop({
               )}
               <div className="flex flex-wrap gap-2">
                 {details.type && <span className="chip">{details.type}</span>}
+                {kaa?.age_rating && <span className="chip">{kaa.age_rating}</span>}
                 {details.year && <span className="chip">{details.year}</span>}
                 {details.rating && (
                   <span className="chip chip-gold">★ {details.rating.toFixed(2)}</span>
@@ -1863,12 +1874,12 @@ function MediaDetailModalDesktop({
               </button>
             )}
             {/* Next episode timer */}
-            {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
+            {isAiring(details.status) && ((details.last_update_end && details.broadcast_interval) || kaaCountdown) && (
               <div className="ml-auto hidden md:flex items-center">
                 <NextEpisodeCountdown
                   latestEpisodeDate={media.latest_episode_date}
-                  lastUpdateEnd={details.last_update_end}
-                  broadcastInterval={details.broadcast_interval}
+                  lastUpdateEnd={details.last_update_end || kaaCountdown!.lastUpdateEnd}
+                  broadcastInterval={details.broadcast_interval || kaaCountdown!.broadcastInterval}
                   status={details.status}
                 />
               </div>
@@ -1880,9 +1891,9 @@ function MediaDetailModalDesktop({
             {/* Sidebar */}
             <div className="hidden md:block w-[220px] shrink-0 p-5 border-r border-[var(--color-glass-border)]">
               {/* Poster */}
-              {details.cover_url && (
+              {(kaa?.banner_url || details.cover_url) && (
                 <img
-                  src={details.cover_url}
+                  src={kaa?.banner_url || details.cover_url}
                   alt={details.title}
                   className="w-full aspect-[2/3] rounded-lg object-cover shadow-xl"
                 />
@@ -2084,6 +2095,14 @@ function MediaDetailModalDesktop({
                           </div>
                         </div>
                       )}
+                      {kaaFacts.map(([label, value]) => (
+                        <div key={label}>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                            {label}
+                          </div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">{value}</div>
+                        </div>
+                      ))}
                       {details.season && (
                         <div>
                           <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">

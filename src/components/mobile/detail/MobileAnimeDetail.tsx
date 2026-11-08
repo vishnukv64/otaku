@@ -2,6 +2,7 @@
  * Phone anime detail (mock: design/files/detail.html).
  * Same props and data logic as MediaDetailModal; rendered as a pushed full screen.
  */
+import { audioSummary, countdownFromBroadcast, formatBroadcast, formatDateRange, useProviderExtras } from '@/utils/providerExtras'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -208,7 +209,8 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
     onComplete: (d) => setDownloaded((p) => new Set(p).add(d.episode_number)),
   })
 
-  const { src: coverSrc } = useProxiedImage(details?.cover_url || media.cover_url || '')
+  const kaa = useProviderExtras(extId, providerMediaId)
+  const { src: coverSrc } = useProxiedImage(kaa?.banner_url || details?.cover_url || media.cover_url || '')
 
   // ---- reset on media change ----
   useEffect(() => {
@@ -910,6 +912,12 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
     }`
   const statusOk = details.status && details.status.toLowerCase() !== 'unknown' ? details.status : ''
   const epCount = details.episode_count || episodes.length
+  const kaaInfo = [
+    audioSummary(kaa?.audio_locales),
+    kaa?.broadcast && isAiring(details.status) ? formatBroadcast(kaa.broadcast.day, kaa.broadcast.time) : '',
+    details.aired_start ? '' : formatDateRange(kaa?.start_date, kaa?.end_date),
+  ].filter(Boolean)
+  const kaaCountdown = kaa?.broadcast ? countdownFromBroadcast(kaa.broadcast) : null
 
   const subs = choicesForAudioTab(choices, 'sub')
   const dubs = choicesForAudioTab(choices, 'dub')
@@ -943,6 +951,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
           <div className="mt-2 flex flex-wrap gap-1.5">
             {details.rating ? <span className="chip chip-gold">★ {details.rating.toFixed(1)}</span> : null}
             {details.type && <span className="chip">{details.type}</span>}
+            {kaa?.age_rating && <span className="chip">{kaa.age_rating}</span>}
             {details.year ? <span className="chip">{details.year}</span> : null}
             {statusOk && (
               <span className={`chip ${isAiring(statusOk) ? 'chip-green' : ''}`}>{statusOk}</span>
@@ -950,6 +959,9 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
             {epCount ? <span className="chip">{epCount} eps</span> : null}
             {showNew && <span className="chip chip-green">NEW EP {media.latest_episode}</span>}
           </div>
+          {(kaaInfo.length > 0) && (
+            <p className="mt-2 text-xs leading-relaxed text-white/60">{kaaInfo.join(' · ')}</p>
+          )}
           {details.genres.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {details.genres.slice(0, 5).map((g) => (
@@ -1075,12 +1087,12 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
           onTagsChange={() => getMediaTags(media.id).then(setTags).catch(() => {})}
           anchorRef={tagButtonRef}
         />
-        {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
+        {isAiring(details.status) && ((details.last_update_end && details.broadcast_interval) || kaaCountdown) && (
           <div className="flex items-center gap-2 rounded-xl bg-[var(--color-bg-secondary)] px-3 py-2.5">
             <NextEpisodeCountdown
               latestEpisodeDate={media.latest_episode_date}
-              lastUpdateEnd={details.last_update_end}
-              broadcastInterval={details.broadcast_interval}
+              lastUpdateEnd={details.last_update_end || kaaCountdown!.lastUpdateEnd}
+              broadcastInterval={details.broadcast_interval || kaaCountdown!.broadcastInterval}
               status={details.status}
             />
           </div>

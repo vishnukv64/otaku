@@ -4,6 +4,7 @@
  * Full-screen video player with episode list sidebar
  */
 
+import { audioModeLabel } from '@/utils/providerExtras'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import {
@@ -832,6 +833,11 @@ function WatchPage() {
                   {currentEpisode.title ? ` · ${currentEpisode.title}` : ''}
                 </p>
               )}
+              {sources?.sources[0]?.episode_synopsis && (
+                <p className="mt-2 text-[13px] leading-relaxed text-white/60 line-clamp-4">
+                  {sources.sources[0].episode_synopsis}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => setAudioSubsOpen(true)}
@@ -840,7 +846,7 @@ function WatchPage() {
                 <span className="truncate">
                   {streamingProviderLabel(streamingProvider)}
                   {sources?.sources[0]
-                    ? ` · ${[sources.sources[0].server, sources.sources[0].audio_type && (sources.sources[0].audio_type === 'dub' ? 'Dub' : 'Sub'), sources.sources[0].type.toUpperCase()].filter(Boolean).join(' · ')}`
+                    ? ` · ${[sources.sources[0].server, sources.sources[0].audio_type && audioModeLabel(sources.sources[0].audio_locale ?? sources.sources[0].audio_type), sources.sources[0].type.toUpperCase()].filter(Boolean).join(' · ')}`
                     : ''}
                 </span>
                 <ChevronRight size={18} className="shrink-0 text-white/50" />

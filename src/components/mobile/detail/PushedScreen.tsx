@@ -26,7 +26,7 @@ export function PushedScreen({ onClose, shareTitle, onMenu, children }: PushedSc
       role="dialog"
       aria-modal="true"
       aria-label={shareTitle}
-      className="fixed inset-0 z-[200] overflow-y-auto bg-[var(--color-bg-primary)] animate-in slide-in-from-right duration-200"
+      className="fixed inset-0 z-[200] overflow-y-auto overflow-x-hidden bg-[var(--color-bg-primary)] animate-in slide-in-from-right duration-200"
       style={{ paddingBottom: 'var(--sab)' }}
     >
       <div

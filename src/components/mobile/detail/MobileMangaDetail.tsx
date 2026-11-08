@@ -632,16 +632,20 @@ export function MobileMangaDetail({ manga, extensionId = '', onClose }: Props) {
               <button
                 onClick={() => sendFeedback('liked')}
                 aria-pressed={feedback === 'liked'}
+                aria-label="Like"
                 className={pillBtn(feedback === 'liked')}
               >
-                <ThumbsUp size={16} aria-hidden="true" /> Like
+                {/* Icon-only: with labels the row is wider than a 390pt screen. */}
+                <ThumbsUp size={16} aria-hidden="true" />
               </button>
               <button
                 onClick={() => sendFeedback('disliked')}
                 aria-pressed={feedback === 'disliked'}
+                aria-label="Dislike"
                 className={pillBtn(feedback === 'disliked')}
               >
-                <ThumbsDown size={16} aria-hidden="true" /> Dislike
+                {/* Icon-only: with labels the row is wider than a 390pt screen. */}
+                <ThumbsDown size={16} aria-hidden="true" />
               </button>
               <button ref={tagButtonRef} onClick={() => setShowTagSelector((v) => !v)} className={pillBtn(false)}>
                 <Tag size={16} aria-hidden="true" />

@@ -49,9 +49,14 @@ function fakeKaa(): Fetch {
     }
     if (url.endsWith('/frieren-1/episodes?lang=ja-JP&ep=1')) return ok({ pages, result: [ep(1), ep(2)] })
     if (url.endsWith('/frieren-1/episodes?lang=ja-JP&ep=3')) return ok({ pages, result: [ep(3)] })
-    if (url.endsWith('/api/show/frieren-1')) return ok({ title: 'Sousou no Frieren', title_en: 'Frieren', type: 'tv' })
+    if (url.endsWith('/api/show/frieren-1')) return ok({ title: 'Sousou no Frieren', title_en: 'Frieren', type: 'tv', rating: 'PG-13', locales: ['ja-JP', 'en-US'], banner: { hq: 'b-hq' }, start_date: '2023-09-29T00:00:00.000Z' })
+    if (url.endsWith('/frieren-1/episodes?lang=en-US&ep=1')) return ok({ pages: [{ number: 1, eps: [3] }], result: [{ ...ep(3), slug: 'd3' }] })
+    if (url.endsWith('/api/show/frieren-1/episode/ep-3-d3')) return ok({ episode_synopsis: 'dub syn', servers: [{ name: 'VidStreaming', src: 'https://player.test/cat-player/player?id=abc123&ln=en-US' }] })
     if (url.endsWith('/api/show/frieren-1/episode/ep-3-h3')) {
       return ok({
+        episode_synopsis: 'syn',
+        broadcast_day: 'friday',
+        broadcast_time: '14:00',
         servers: [
           { name: 'VidStreaming', src: 'https://player.test/cat-player/player?id=abc123&ln=ja-JP' },
           { name: 'BirdStream', src: 'https://player.test/cat-player/player?id=zzz&type=dash' },
@@ -101,9 +106,23 @@ describe('KAA extension', () => {
         type: 'hls',
         server: 'VidStreaming',
         referrer: 'https://krussdomi.com/',
+        audio_type: 'sub',
+        audio_locale: 'ja-JP',
+        episode_synopsis: 'syn',
       }),
+      expect.objectContaining({ audio_type: 'dub', audio_locale: 'en-US', episode_synopsis: 'dub syn' }),
     ])
     expect(subtitles).toEqual([{ url: 'https://subst.test/en.vtt', language: 'en', label: 'English' }])
+  })
+
+  it('fills age rating, audio locales, banner, dates and broadcast slot', () => {
+    expect(loadExtension(fakeKaa()).getDetails('frieren-1')).toMatchObject({
+      age_rating: 'PG-13',
+      audio_locales: ['ja-JP', 'en-US'],
+      banner_url: 'https://kaa.lt/image/banner/b-hq.webp',
+      start_date: '2023-09-29T00:00:00.000Z',
+      broadcast: { day: 'friday', time: '14:00' },
+    })
   })
 
   it('falls back to watch_uri for movies without an episode list', () => {

@@ -14,6 +14,7 @@
  * - Keyboard shortcuts hint (auto-fades)
  */
 
+import { audioModeLabel } from '@/utils/providerExtras'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
@@ -43,7 +44,8 @@ import {
   type QualityPreference,
 } from '@/utils/pickSource'
 
-type AudioMode = 'sub' | 'dub'
+/** 'sub' | 'dub', or a provider locale tag (ja-JP, en-US ...) when the provider reports one. */
+type AudioMode = string
 interface ParsedSubtitleCue {
   start: number
   end: number
@@ -95,6 +97,7 @@ function createPlayableHlsUrl(
 }
 
 function sourceAudioMode(source: VideoSource): AudioMode | null {
+  if (source.audio_locale) return source.audio_locale
   if (!source.audio_type) return null
   return source.audio_type.toLowerCase().includes('dub') ? 'dub' : 'sub'
 }
@@ -356,7 +359,7 @@ export function VideoPlayer({
   )
 
   useEffect(() => {
-    const defaultMode = audioModes.includes('sub') ? 'sub' : audioModes[0]
+    const defaultMode = audioModes.includes('sub') ? 'sub' : audioModes.includes('ja-JP') ? 'ja-JP' : audioModes[0]
     if (defaultMode) setSelectedAudioMode(defaultMode)
     // Reset to the preferred audio mode only when the episode/source set changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2859,7 +2862,7 @@ export function VideoPlayer({
                       e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
                     }}
                   >
-                    {selectedAudioMode.toUpperCase()}
+                    {audioModeLabel(selectedAudioMode)}
                     <svg
                       width="10"
                       height="10"
@@ -2906,7 +2909,7 @@ export function VideoPlayer({
                             }
                           }}
                         >
-                          {mode.toUpperCase()}
+                          {audioModeLabel(mode)}
                           {selectedAudioMode === mode && (
                             <span
                               className="w-[6px] h-[6px] rounded-full"
@@ -3586,6 +3589,11 @@ export function VideoPlayer({
                     >
                       {ep.title || `Episode ${ep.number}`}
                     </div>
+                    {isActive && sources[0]?.episode_synopsis && (
+                      <p className="mt-1 text-[0.7rem] leading-snug line-clamp-4 text-white/50">
+                        {sources[0].episode_synopsis}
+                      </p>
+                    )}
                   </div>
                 </div>
               )

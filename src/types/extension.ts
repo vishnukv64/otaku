@@ -104,6 +104,16 @@ export interface MediaDetails {
   }
   last_update_end?: string // ISO 8601 timestamp of last episode release
   broadcast_interval?: number // Interval between episodes in milliseconds
+  /** Age rating (PG-13, R ...) from the provider. */
+  age_rating?: string
+  /** Audio locales the provider offers (ja-JP first). */
+  audio_locales?: string[]
+  banner_url?: string
+  /** ISO start/end dates from the provider. */
+  start_date?: string
+  end_date?: string
+  /** Weekly broadcast slot; time is UTC HH:mm. */
+  broadcast?: { day: string; time: string }
   /** MAL rank */
   rank?: number
   /** MAL popularity rank */
@@ -136,6 +146,10 @@ export interface VideoSource {
   subtitles?: Subtitle[]
   /** WebVTT sprite map for seek-bar previews. */
   preview_vtt?: string
+  /** BCP-47 audio locale (KAA: ja-JP, en-US, es-ES ...). */
+  audio_locale?: string
+  /** Current-episode synopsis, when the provider has one. */
+  episode_synopsis?: string
 }
 
 export interface Subtitle {

@@ -2,6 +2,7 @@
  * Phone control layer for VideoPlayer (mock: design/files/player.html).
  * Owns only UI state (visibility, lock, menus, HUD); playback stays in VideoPlayer.
  */
+import { audioModeLabel } from '@/utils/providerExtras'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
@@ -74,7 +75,7 @@ export interface MobilePlayerControlsProps {
   onServer: (i: number) => void
   audioModes: string[]
   audioMode: string
-  onAudio: (m: 'sub' | 'dub') => void
+  onAudio: (m: string) => void
   subtitleTracks: { url: string; label: string }[]
   selectedSubtitleUrl: string
   onSubtitle: (url: string) => void
@@ -263,9 +264,9 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
     <SheetOption
       key={m}
       checked={m === p.audioMode}
-      onClick={pick(() => p.onAudio(m as 'sub' | 'dub'))}
+      onClick={pick(() => p.onAudio(m))}
     >
-      {m === 'dub' ? 'Dub' : 'Sub'}
+      {audioModeLabel(m)}
     </SheetOption>
   ))
   const subsList = (
@@ -383,7 +384,7 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
         {p.servers.length > 0 &&
           row('Server', p.servers[p.selectedServer] ?? '', 'server', <Download size={20} />)}
         {p.audioModes.length > 1 &&
-          row('Audio', p.audioMode.toUpperCase(), 'audio', <Volume2 size={20} />)}
+          row('Audio', audioModeLabel(p.audioMode), 'audio', <Volume2 size={20} />)}
         {row('Subtitles', subLabel, 'subs', <Captions size={20} />)}
         {row('Playback speed', `${p.speed}×`, 'speed', <Gauge size={20} />)}
       </>

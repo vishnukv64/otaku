@@ -28,13 +28,32 @@ function decodeEntities(value: string): string {
 
 function normalizeTitle(value: string): string {
   return decodeEntities(value)
+    .normalize('NFKC')
     .toLowerCase()
     .replace(/\b2nd\b/g, 'second')
     .replace(/\b3rd\b/g, 'third')
     .replace(/\b4th\b/g, 'fourth')
     .replace(/['’]/g, '')
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/×/g, ' x ')
+    .replace(/°/g, ' degree ')
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Looser key for "same title, different spelling": ordinal seasons, "Cour" vs
+// "Part" and "The Movie" labels differ between MAL/AniList and the provider.
+function canonTitle(value: string): string {
+  return normalizeTitle(value)
+    .replace(/\b(?:second|2) season\b/g, 'season 2')
+    .replace(/\b(?:third|3) season\b/g, 'season 3')
+    .replace(/\b(?:fourth|4) season\b/g, 'season 4')
+    .replace(/\b(\d+)(?:st|th) season\b/g, 'season $1')
+    .replace(/\bcour\b/g, 'part')
+    .replace(/\b(?:the )?movie\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -61,12 +80,17 @@ function dedupe(
 export function buildAnikotoSearchQueries(details: MediaDetails): string[] {
   // Keep spellings that only differ in punctuation: provider search engines
   // treat "One-Punch Man" and "One Punch Man" differently.
-  return dedupe([
+  const titles = dedupe([
     details.english_name,
     details.title,
     details.native_name,
     ...(details.title_synonyms || []),
-  ], (value) => value.toLowerCase()).slice(0, 8)
+  ], (value) => value.toLowerCase())
+  // Provider search chokes on symbols such as "×" or "°": also try a plain form.
+  return dedupe(
+    [...titles.slice(0, 8), ...titles.slice(0, 4).map(normalizeTitle)],
+    (value) => value.toLowerCase(),
+  )
 }
 
 function compactTitle(value: string): string {
@@ -192,13 +216,25 @@ export function scoreAnikotoCandidate(details: MediaDetails, candidate: SearchRe
   let score = bestTitleScore(targets, candidates)
   if (score <= 0) return 0
 
-  if (!seasonsCompatible(targetSeason, candidateSeason)) {
+  // Any title (native/romaji/English/synonym) equal to any provider title is
+  // decisive; the aggregated season gate would misfire on cross-language mixes.
+  const canonCandidates = new Set(candidates.map(canonTitle).filter(Boolean))
+  const exact = targets.some((t) => canonCandidates.has(canonTitle(t)))
+  if (exact) {
+    score = 120
+  } else if (!seasonsCompatible(targetSeason, candidateSeason)) {
     // Arc-named seasons ("Shimetsu Kaiyuu - Zenpen") carry no season number on
     // one side; accept those only on an exact title match.
     if (targetSeason != null && candidateSeason != null) return 0
     if (score < 115) return 0
   }
 
+  if (details.year && candidate.year) {
+    const gap = Math.abs(details.year - candidate.year)
+    // Same title, different decade: a remake/reboot, not this show.
+    if (gap >= 3) return 0
+    score += gap === 0 ? 8 : 0
+  }
   if (targetSeason != null && candidateSeason === targetSeason) score += 20
   if (details.episode_count && candidate.available_episodes) {
     if (details.episode_count === candidate.available_episodes) {
@@ -210,6 +246,8 @@ export function scoreAnikotoCandidate(details: MediaDetails, candidate: SearchRe
 
   const targetType = normalizeMediaType(details.type)
   const candidateType = normalizeMediaType(candidate.media_type)
+  // A film and a TV series sharing a name are different entries.
+  if ((targetType === 'movie') !== (candidateType === 'movie') && targetType && candidateType) return 0
   if (targetType && candidateType && targetType === candidateType) score += 5
 
   return score

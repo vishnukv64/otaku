@@ -233,6 +233,19 @@ pub fn run() {
       #[cfg(desktop)]
       app_handle.manage(tray::TrayLifecycleState::default());
 
+      // iOS: edge swipe from the left goes back (WKWebView's own gesture; it walks the
+      // pushState history the router writes, so every in-app page gets it).
+      #[cfg(target_os = "ios")]
+      if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.with_webview(|wv| unsafe {
+          use objc2::{msg_send, runtime::AnyObject};
+          let webview = wv.inner() as *mut AnyObject;
+          if !webview.is_null() {
+            let _: () = msg_send![webview, setAllowsBackForwardNavigationGestures: true];
+          }
+        });
+      }
+
       // Dev-build only: OTAKU_DEV_EVAL=<js> runs that script in the main webview a few
       // seconds after launch. Used to drive screens on a real iPhone for screenshot
       // checks (`devicectl device process launch --environment-variables`). Not in

@@ -93,4 +93,55 @@ describe('Anikoto resolver', () => {
     const candidate = result({ id: 'tr', title: 'Tokyo Revengers: Santen Sensou-hen (Uncensored)', media_type: 'tv' })
     expect(pickBestAnikotoMatch(target, [candidate])?.id).toBe('tr')
   })
+
+  describe('exact title matching', () => {
+    const pick = (d: Partial<MediaDetails>, c: SearchResult[]) => pickBestAnikotoMatch(details(d), c)?.id
+
+    it('matches "×" and "Cour" spellings against "x" and "Part"', () => {
+      const d = { title: 'SPY×FAMILY Part 2', english_name: 'SPY x FAMILY Cour 2', year: 2022, type: 'TV' }
+      expect(pick(d, [
+        result({ id: 'part1', title: 'Spy x Family', year: 2022, media_type: 'tv' }),
+        result({ id: 'part2', title: 'Spy x Family Part 2', year: 2022, media_type: 'tv' }),
+      ])).toBe('part2')
+      expect(buildAnikotoSearchQueries(details(d))).toContain('spy x family part 2')
+    })
+
+    it('matches a native title against the provider original title', () => {
+      expect(pick(
+        { title: 'Nope', english_name: undefined, native_name: '銀魂゜', year: 2015 },
+        [result({ id: 'g', title: 'Other', native_name: '銀魂゜', year: 2015 })],
+      )).toBe('g')
+    })
+
+    it('matches "Gintama°" despite a season number only in the English title', () => {
+      expect(pick(
+        { title: 'Gintama°', english_name: 'Gintama Season 3', native_name: undefined, year: 2015 },
+        [
+          result({ id: 'base', title: 'Gintama', year: 2006 }),
+          result({ id: 'deg', title: 'Gintama°', title_synonyms: ['Gintama Season 4'], year: 2015 }),
+        ],
+      )).toBe('deg')
+    })
+
+    it('ignores "The Movie" labels and diacritics', () => {
+      expect(pick(
+        { title: 'Kanketsu', english_name: 'Gintama: The Final Chapter - Be Forever Yorozuya', type: 'Movie', year: 2013 },
+        [result({ id: 'm', title: 'x', title_synonyms: ['Gintama: The Movie: The Final Chapter: Be Forever Yorozuya'], media_type: 'movie', year: 2013 })],
+      )).toBe('m')
+    })
+
+    it('rejects a same-title remake from another decade', () => {
+      expect(pick(
+        { title: 'Fruits Basket', english_name: 'Fruits Basket', year: 2019 },
+        [result({ id: 'old', title: 'Fruits Basket', year: 2001 })],
+      )).toBeUndefined()
+    })
+
+    it('rejects a TV entry for a movie of the same name', () => {
+      expect(pick(
+        { title: 'Mugen Ressha-hen', english_name: undefined, type: 'Movie', year: 2020 },
+        [result({ id: 'tv', title: 'Mugen Ressha-hen', media_type: 'tv', year: 2021 })],
+      )).toBeUndefined()
+    })
+  })
 })
