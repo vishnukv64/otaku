@@ -40,6 +40,8 @@ vi.mock('@/utils/tauri-commands', () => ({
   pauseDownload: vi.fn(),
   resumeDownload: vi.fn(),
   deleteDownload: mockDeleteDownload,
+  retryDownload: vi.fn(),
+  getFreeStorage: vi.fn().mockResolvedValue(0),
   getTotalStorageUsed: mockGetTotalStorageUsed,
   clearCompletedDownloads: vi.fn(),
   clearFailedDownloads: vi.fn(),

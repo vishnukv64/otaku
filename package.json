@@ -35,12 +35,15 @@
     "embla-carousel-react": "^8.6.0",
     "embla-carousel-wheel-gestures": "^8.1.0",
     "hls.js": "^1.6.15",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.563.0",
     "mpegts.js": "1.8.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.6.0",
     "recharts": "^3.8.0",
+    "shaka-player": "^5.3.4",
     "zustand": "^5.0.10"
   },
   "devDependencies": {

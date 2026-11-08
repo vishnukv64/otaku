@@ -15,11 +15,7 @@ import { listen } from '@tauri-apps/api/event'
 import { Loader2, Tv, BookOpen, X, Square } from 'lucide-react'
 import { stopReleaseCheck } from '@/utils/tauri-commands'
 import { isMobile } from '@/utils/platform'
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification as sendSystemNotification,
-} from '@tauri-apps/plugin-notification'
+import { appInBackground, sendMobileNotification } from '@/utils/notify'
 
 interface ReleaseCheckProgress {
   current_index: number
@@ -29,22 +25,6 @@ interface ReleaseCheckProgress {
   is_complete: boolean
   status: 'checking' | 'success' | 'failed' | 'complete'
   error_message: string | null
-}
-
-/** Send a native system notification for release check progress on mobile */
-async function sendMobileReleaseNotification(title: string, body: string) {
-  try {
-    let granted = await isPermissionGranted()
-    if (!granted) {
-      const permission = await requestPermission()
-      granted = permission === 'granted'
-    }
-    if (granted) {
-      sendSystemNotification({ title, body })
-    }
-  } catch (err) {
-    console.error('Failed to send mobile release notification:', err)
-  }
 }
 
 export function ReleaseCheckOverlay() {
@@ -78,7 +58,6 @@ export function ReleaseCheckOverlay() {
   useEffect(() => {
     let hideTimeout: ReturnType<typeof setTimeout> | null = null
     let staleTimeout: ReturnType<typeof setTimeout> | null = null
-    let lastNotifiedIndex = 0
 
     const resetStaleTimer = () => {
       if (staleTimeout) clearTimeout(staleTimeout)
@@ -94,18 +73,13 @@ export function ReleaseCheckOverlay() {
         const data = event.payload
 
         if (mobile) {
-          if (data.is_complete) {
-            sendMobileReleaseNotification(
+          // Phones: no progress chatter. Found releases notify through the normal
+          // notification path; this only reports completion, and only when backgrounded.
+          if (data.is_complete && appInBackground()) {
+            void sendMobileNotification(
               'Release Check Complete',
               `Checked ${data.total_count} items for new releases`
             )
-            lastNotifiedIndex = 0
-          } else if (data.status === 'checking' && data.current_index - lastNotifiedIndex >= 5) {
-            sendMobileReleaseNotification(
-              'Checking Releases...',
-              `${data.current_index}/${data.total_count}: ${data.media_title}`
-            )
-            lastNotifiedIndex = data.current_index
           }
           return
         }

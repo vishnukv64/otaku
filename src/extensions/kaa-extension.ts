@@ -54,10 +54,27 @@ const extensionObject = {
     return image && image.hq ? extensionObject.baseUrl + '/image/poster/' + image.hq + '.webp' : null;
   },
 
+  thumbnail: function(image) {
+    const key = image && (image.sm || image.hq);
+    return key ? extensionObject.baseUrl + '/image/thumbnail/' + key + '.webp' : null;
+  },
+
   // All ja-JP episodes. The API pages by episode range: ?ep=N returns the
   // page containing episode N plus the list of every page's episode numbers.
-  episodes: function(slug) {
-    const path = extensionObject.showPath(slug) + '/episodes?lang=ja-JP&ep=';
+  banner: function(image) {
+    const key = image && (image.hq || image.sm);
+    return key ? extensionObject.baseUrl + '/image/banner/' + key + '.webp' : null;
+  },
+
+  // Audio locales KAA offers for a show; ja-JP (sub) always first.
+  locales: function(show) {
+    const list = Array.isArray(show && show.locales) ? show.locales.filter(l => typeof l === 'string') : [];
+    const rest = list.filter(l => l !== 'ja-JP');
+    return list.length ? (list.indexOf('ja-JP') >= 0 ? ['ja-JP'] : []).concat(rest) : ['ja-JP'];
+  },
+
+  episodes: function(slug, lang) {
+    const path = extensionObject.showPath(slug) + '/episodes?lang=' + (lang || 'ja-JP') + '&ep=';
     const first = extensionObject.api(path + '1') || {};
     const out = Array.isArray(first.result) ? first.result.slice() : [];
     const pages = Array.isArray(first.pages) ? first.pages : [];
@@ -71,9 +88,9 @@ const extensionObject = {
   },
 
   // Find "ep-{n}-{hash}" for one episode, fetching only the page that holds it.
-  episodeSlug: function(slug, number) {
+  episodeSlug: function(slug, number, lang) {
     const target = Number(number);
-    const path = extensionObject.showPath(slug) + '/episodes?lang=ja-JP&ep=';
+    const path = extensionObject.showPath(slug) + '/episodes?lang=' + (lang || 'ja-JP') + '&ep=';
     const first = extensionObject.api(path + '1') || {};
     let list = Array.isArray(first.result) ? first.result : [];
     let found = list.find(ep => Number(ep.episode_number) === target);
@@ -88,7 +105,7 @@ const extensionObject = {
     if (found && found.slug) return 'ep-' + found.episode_string + '-' + found.slug;
 
     // Movies have no episode list; the show's watch_uri points at the single episode.
-    if (!list.length) {
+    if (!list.length && (!lang || lang === 'ja-JP')) {
       const show = extensionObject.api(extensionObject.showPath(slug)) || {};
       const match = String(show.watch_uri || '').match(/\/(ep-[\d.]+-[a-f0-9]+)$/i);
       if (match) return match[1];
@@ -105,17 +122,35 @@ const extensionObject = {
       html = extensionObject.request(playerUrl, { accept: 'text/html' });
     } catch (error) {
       try { __log('[KAA] player page failed: ' + (error && error.message ? error.message : String(error))); } catch (_) {}
-      return { manifest: null, subtitles: [] };
+      return { manifest: null, previewVtt: null, subtitles: [] };
     }
     const props = html.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const manifest = props.match(/"manifest":\[0,"([^"]+)"\]/);
-    const re = /\{"language":\[0,"([^"]*)"\],"name":\[0,"([^"]*)"\],"src":\[0,"([^"]+)"\]\}/g;
+    // Each track is [0,{...}] inside "subtitles". Fields vary by source (older
+    // episodes add format/filename/source between them), so read them individually:
+    // a fixed-order pattern missed those tracks and episodes played with no subtitles.
     const subtitles = [];
+    const block = props.match(/"subtitles":\[1,\[([\s\S]*?\}\])\]\]/);
+    const objRe = /\[0,\{([^{}]*)\}\]/g;
+    const field = function(obj, name) {
+      const f = obj.match(new RegExp('"' + name + '":\\[0,"([^"]*)"\\]'));
+      return f ? f[1] : '';
+    };
     let m;
-    while ((m = re.exec(props)) !== null) {
-      subtitles.push({ url: m[3], language: m[1] || m[2], label: m[2] || m[1] });
+    while (block && (m = objRe.exec(block[1])) !== null) {
+      const src = field(m[1], 'src');
+      if (!src) continue;
+      const language = field(m[1], 'language');
+      const name = field(m[1], 'name');
+      subtitles.push({
+        url: src.indexOf('//') === 0 ? 'https:' + src : src,
+        language: language || name,
+        label: name || language
+      });
     }
+    const preview = props.match(/"thumbnails":\[0,"([^"]+\.vtt[^"]*)"\]/);
     return {
+      previewVtt: preview ? preview[1] : null,
       manifest: manifest ? (manifest[1].indexOf('//') === 0 ? 'https:' + manifest[1] : manifest[1]) : null,
       subtitles: subtitles
     };
@@ -132,13 +167,25 @@ const extensionObject = {
         year: item.year || null,
         rating: null,
         available_episodes: item.episode_count || null,
+        audio_locales: Array.isArray(item.locales) ? item.locales : [],
         media_type: item.type || null,
         genres: Array.isArray(item.genres) ? item.genres : [],
-        native_name: null,
+        native_name: item.title_original || null,
         title_synonyms: item.title_en ? [item.title_en] : []
       })).filter(item => item.id && item.title),
       has_next_page: (data.maxPage || 1) > (page || 1)
     };
+  },
+
+  // Broadcast day/time (UTC, verified against Frieren: Fri 23:00 JST = 14:00) live on the episode endpoint.
+  broadcast: function(slug) {
+    try {
+      const list = extensionObject.episodes(slug);
+      const last = list[list.length - 1];
+      if (!last) return null;
+      const ep = extensionObject.api(extensionObject.showPath(slug) + '/episode/' + encodeURIComponent('ep-' + last.episode_string + '-' + last.slug)) || {};
+      return ep.broadcast_day && ep.broadcast_time ? { day: ep.broadcast_day, time: ep.broadcast_time } : null;
+    } catch (e) { return null; }
   },
 
   getDetails: (id) => {
@@ -148,7 +195,8 @@ const extensionObject = {
       id: id + '::' + ep.episode_number,
       number: Number(ep.episode_number),
       title: ep.title || ('Episode ' + ep.episode_string),
-      thumbnail: null
+      thumbnail: extensionObject.thumbnail(ep.thumbnail),
+      duration: ep.duration_ms ? Math.round(ep.duration_ms / 1000) : null
     }));
     if (!episodes.length && show.watch_uri) {
       episodes.push({ id: id + '::1', number: 1, title: show.title_en || show.title, thumbnail: null });
@@ -170,6 +218,12 @@ const extensionObject = {
       type: show.type || null,
       season: null,
       episode_duration: null,
+      age_rating: show.rating || null,
+      audio_locales: extensionObject.locales(show),
+      banner_url: extensionObject.banner(show.banner),
+      start_date: show.start_date || null,
+      end_date: show.end_date || null,
+      broadcast: extensionObject.broadcast(id),
       episode_count: show.episode_count || episodes.length || null,
       aired_start: null,
       last_update_end: null,
@@ -184,30 +238,35 @@ const extensionObject = {
       const number = parts[1];
       if (!slug || !number) return { sources: [], subtitles: [] };
 
-      const epSlug = extensionObject.episodeSlug(slug, number);
-      if (!epSlug) return { sources: [], subtitles: [] };
-
-      const data = extensionObject.api(extensionObject.showPath(slug) + '/episode/' + encodeURIComponent(epSlug)) || {};
-      const servers = Array.isArray(data.servers) ? data.servers : [];
+      const show = extensionObject.api(extensionObject.showPath(slug)) || {};
       const sources = [];
       const subtitles = [];
-      for (const server of servers) {
-        const src = String((server && server.src) || '');
-        // DASH servers (BirdStream) have no HLS manifest.
-        if (!src || /[?&]type=dash\b/.test(src)) continue;
-        const player = extensionObject.player(src);
-        if (!player.manifest) continue;
-        // Every server carries the same tracks; list them once.
-        if (!subtitles.length) for (const sub of player.subtitles) subtitles.push(sub);
-        sources.push({
-          url: player.manifest,
-          quality: 'Auto',
-          type: 'hls',
-          server: server.name || 'KAA',
-          referrer: extensionObject.streamReferer,
-          audio_type: 'sub',
-          subtitles: player.subtitles
-        });
+      for (const locale of extensionObject.locales(show)) {
+        const epSlug = extensionObject.episodeSlug(slug, number, locale);
+        if (!epSlug) continue;
+        let data;
+        try { data = extensionObject.api(extensionObject.showPath(slug) + '/episode/' + encodeURIComponent(epSlug)) || {}; } catch (e) { continue; }
+        const servers = Array.isArray(data.servers) ? data.servers : [];
+        const dub = locale !== 'ja-JP';
+        for (const server of servers) {
+          const src = String((server && server.src) || '');
+          if (!src || /[?&]type=dash/.test(src)) continue;
+          const player = extensionObject.player(src);
+          if (!player.manifest) continue;
+          if (!dub && !subtitles.length) for (const sub of player.subtitles) subtitles.push(sub);
+          sources.push({
+            url: player.manifest,
+            quality: 'Auto',
+            type: 'hls',
+            server: server.name || 'KAA',
+            referrer: extensionObject.streamReferer,
+            audio_type: dub ? 'dub' : 'sub',
+            audio_locale: locale,
+            episode_synopsis: data.episode_synopsis || null,
+            subtitles: player.subtitles,
+            preview_vtt: player.previewVtt
+          });
+        }
       }
       return { sources: sources, subtitles: subtitles };
     } catch (error) {

@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { Download, Check, X, Loader2, Star } from 'lucide-react'
 import type { Subtitle, VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
+import { isDashUrl } from './dashPlayer'
 import { useSettingsStore } from '@/store/settingsStore'
 import {
   audioTypeLabel,
@@ -27,6 +28,10 @@ interface DownloadButtonProps {
   episodeNumber: number
   subtitles?: Subtitle[]
   className?: string
+  /** Optional text shown under the icon (phone action tile) */
+  label?: string
+  /** Episode is already on the device: show it as done instead of offering a download. */
+  downloaded?: boolean
 }
 
 const EMPTY_SUBTITLES: Subtitle[] = []
@@ -39,6 +44,8 @@ export function DownloadButton({
   episodeNumber,
   subtitles = EMPTY_SUBTITLES,
   className = '',
+  label,
+  downloaded = false,
 }: DownloadButtonProps) {
   const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
@@ -130,6 +137,7 @@ export function DownloadButton({
     }
   }
   if (!hasAnySource) return null
+  const dashOnly = sources.every((s) => !s.url || isDashUrl(s.url))
 
   const subOptions = choicesForAudioTab(downloadOptions, 'sub')
   const dubOptions = choicesForAudioTab(downloadOptions, 'dub')
@@ -144,17 +152,24 @@ export function DownloadButton({
       <button
         type="button"
         onClick={() => setShowOptions(!showOptions)}
-        disabled={!!downloading}
-        className={`w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-        title="Download Episode"
+        disabled={!!downloading || dashOnly || downloaded}
+        className={`w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors disabled:cursor-not-allowed ${downloaded ? '' : 'disabled:opacity-50'} ${className}`}
+        title={
+          downloaded
+            ? 'Downloaded'
+            : dashOnly
+              ? 'Downloads are not available for DASH streams'
+              : 'Download Episode'
+        }
       >
         {downloading ? (
           <Loader2 size={20} className="animate-spin" />
-        ) : completed ? (
+        ) : completed || downloaded ? (
           <Check size={20} className="text-green-400" />
         ) : (
           <Download size={20} />
         )}
+        {label && downloaded ? 'Downloaded' : label}
       </button>
 
       {/* Download Options Menu */}

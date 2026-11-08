@@ -65,7 +65,8 @@ fn build_trailer_url(trailer: &Option<JikanTrailer>) -> Option<String> {
 fn jikan_anime_to_search_result(anime: &JikanAnime) -> SearchResult {
     SearchResult {
         id: anime.mal_id.to_string(),
-        title: anime.title.clone(),
+        // Lists and search show the English title; romaji stays as a synonym for matching.
+        title: anime.title_english.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| anime.title.clone()),
         cover_url: extract_image_url(&anime.images),
         trailer_url: build_trailer_url(&anime.trailer),
         description: anime.synopsis.clone(),
@@ -78,7 +79,11 @@ fn jikan_anime_to_search_result(anime: &JikanAnime) -> SearchResult {
         media_type: anime.anime_type.clone(),
         genres: Some(extract_genre_names(&anime.genres)),
         native_name: None,
-        title_synonyms: None,
+        title_synonyms: anime
+            .title_english
+            .as_ref()
+            .filter(|e| !e.is_empty() && **e != anime.title)
+            .map(|_| vec![anime.title.clone()]),
         rank: anime.rank,
         popularity: anime.popularity,
         views: None,
@@ -207,6 +212,12 @@ fn jikan_anime_to_media_details(anime: &JikanAnime, episodes: Vec<Episode>, last
         aired_start,
         last_update_end: compute_last_update_end(anime, &last_aired),
         broadcast_interval: compute_broadcast_interval(anime, &last_aired),
+        age_rating: None,
+        audio_locales: None,
+        banner_url: None,
+        start_date: None,
+        end_date: None,
+        broadcast: None,
     }
 }
 
@@ -217,6 +228,7 @@ fn jikan_episode_to_episode(anime_mal_id: i64, ep: &JikanEpisode) -> Episode {
         title: ep.title.clone(),
         thumbnail: None,
         aired: ep.aired.clone(),
+        duration: None,
     }
 }
 
@@ -463,6 +475,7 @@ pub fn anime_details(mal_id: i64) -> Result<MediaDetails, String> {
                     title: Some(format!("Episode {}", n)),
                     thumbnail: None,
                     aired: None,
+                    duration: None,
                 })
                 .collect();
         }
@@ -533,6 +546,7 @@ fn fill_synthetic_episodes(
             title: Some(format!("Episode {}", n)),
             thumbnail: None,
             aired: Some(ep_date.to_rfc3339()),
+            duration: None,
         });
     }
 }
@@ -745,6 +759,10 @@ fn anilist_format(format: Option<&str>) -> Option<String> {
         "MOVIE" => "Movie".to_string(),
         "SPECIAL" => "Special".to_string(),
         "MUSIC" => "Music".to_string(),
+        // Manga formats, worded like Jikan's manga types.
+        "MANGA" => "Manga".to_string(),
+        "NOVEL" => "Light Novel".to_string(),
+        "ONE_SHOT" => "One-shot".to_string(),
         other => other.to_string(), // OVA, ONA
     })
 }
@@ -754,11 +772,13 @@ fn anilist_status(status: Option<&str>) -> Option<String> {
         "RELEASING" => "Releasing".to_string(),
         "FINISHED" => "Completed".to_string(),
         "NOT_YET_RELEASED" => "Not Yet Released".to_string(),
+        "HIATUS" => "On Hiatus".to_string(),
+        "CANCELLED" => "Discontinued".to_string(),
         other => other.to_string(),
     })
 }
 
-fn strip_html(text: &str) -> String {
+pub(crate) fn strip_html(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_tag = false;
     for c in text.chars() {
@@ -774,7 +794,7 @@ fn strip_html(text: &str) -> String {
 
 /// Map AniList Media to a SearchResult. Entries without a MAL id are
 /// dropped: library, details and playback all key on it.
-fn anilist_media_to_search_result(media: &serde_json::Value, sfw: bool) -> Option<SearchResult> {
+pub(crate) fn anilist_media_to_search_result(media: &serde_json::Value, sfw: bool) -> Option<SearchResult> {
     let mal_id = media.get("idMal")?.as_i64()?;
     if sfw && media.get("isAdult").and_then(|v| v.as_bool()).unwrap_or(false) {
         return None;
@@ -786,20 +806,31 @@ fn anilist_media_to_search_result(media: &serde_json::Value, sfw: bool) -> Optio
 
     Some(SearchResult {
         id: mal_id.to_string(),
-        title: romaji.clone().or_else(|| english.clone())?,
+        // English first for display; the other title stays a synonym for matching.
+        title: english.clone().or_else(|| romaji.clone())?,
         cover_url: media.get("coverImage").and_then(|c| str_at(c, "large")),
         trailer_url: None,
         description: str_at(media, "description").map(|d| strip_html(&d)),
-        year: media.get("seasonYear").and_then(|v| v.as_u64()).map(|y| y as u32),
+        // Manga have no season: fall back to the start year.
+        year: media
+            .get("seasonYear")
+            .and_then(|v| v.as_u64())
+            .or_else(|| media.pointer("/startDate/year").and_then(|v| v.as_u64()))
+            .map(|y| y as u32),
         status: anilist_status(media.get("status").and_then(|v| v.as_str())),
         rating: media.get("averageScore").and_then(|v| v.as_f64()).map(|s| (s / 10.0) as f32),
         latest_episode: None,
         latest_episode_date: None,
-        available_episodes: media.get("episodes").and_then(|v| v.as_u64()).map(|e| e as u32),
+        // Episodes for anime, chapters for manga (the field the app shows as "eps"/"chs").
+        available_episodes: media
+            .get("episodes")
+            .and_then(|v| v.as_u64())
+            .or_else(|| media.get("chapters").and_then(|v| v.as_u64()))
+            .map(|e| e as u32),
         media_type: anilist_format(media.get("format").and_then(|v| v.as_str())),
         genres: media.get("genres").and_then(|g| serde_json::from_value(g.clone()).ok()),
         native_name: None,
-        title_synonyms: english.filter(|e| Some(e) != romaji.as_ref()).map(|e| vec![e]),
+        title_synonyms: romaji.filter(|r| english.is_some() && Some(r) != english.as_ref()).map(|r| vec![r]),
         rank: None,
         popularity: media.get("popularity").and_then(|v| v.as_i64()).map(|p| p as i32),
         views: None,
@@ -828,7 +859,7 @@ fn anilist_airing_to_search_result(entry: &serde_json::Value, sfw: bool) -> Opti
 
 /// POST a GraphQL body to AniList. AniList rate-limits per minute (30/min
 /// while degraded), so a 429 waits out its Retry-After (capped) and retries.
-fn anilist_post(body: serde_json::Value) -> Result<serde_json::Value, String> {
+pub(crate) fn anilist_post(body: serde_json::Value) -> Result<serde_json::Value, String> {
     const MAX_ATTEMPTS: u32 = 3;
     const MAX_WAIT_SECS: u64 = 15;
     for attempt in 1..=MAX_ATTEMPTS {
@@ -905,6 +936,7 @@ fn anilist_media_to_details(mal_id: i64, media: &serde_json::Value) -> Option<Me
             title: Some(format!("Episode {}", n)),
             thumbnail: None,
             aired: None,
+            duration: None,
         })
         .collect();
 
@@ -950,6 +982,12 @@ fn anilist_media_to_details(mal_id: i64, media: &serde_json::Value) -> Option<Me
             })
         }),
         broadcast_interval: last_update_end.as_ref().map(|_| (WEEK_SECS * 1000) as u64),
+        age_rating: None,
+        audio_locales: None,
+        banner_url: None,
+        start_date: None,
+        end_date: None,
+        broadcast: None,
         last_update_end,
     })
 }
@@ -966,27 +1004,30 @@ fn anilist_anime_details(mal_id: i64) -> Result<MediaDetails, String> {
         .ok_or_else(|| format!("AniList has no anime with MAL id {}", mal_id))
 }
 
-const ANILIST_MEDIA_FIELDS: &str = "idMal title { romaji english } coverImage { large } description(asHtml: false) seasonYear status averageScore episodes format genres isAdult popularity studios(isMain: true) { nodes { name } }";
+const ANILIST_MEDIA_FIELDS: &str = "idMal title { romaji english } coverImage { large } description(asHtml: false) seasonYear startDate { year } status averageScore episodes chapters format genres isAdult popularity studios(isMain: true) { nodes { name } }";
 
 /// Filters for AniList's Page.media, mirroring what the Jikan list endpoints
 /// accept. Unset fields are sent as null, which AniList treats as "no filter".
 #[derive(Default)]
-struct AnilistMediaQuery<'a> {
-    search: Option<&'a str>,
-    sort: Option<&'a str>,
-    status: Option<&'a str>,
-    formats: Option<Vec<&'a str>>,
-    genres: Option<Vec<&'a str>>,
-    season: Option<String>,
-    season_year: Option<i32>,
-    min_score: Option<i64>,
-    max_score: Option<i64>,
-    adult: Option<bool>,
+pub(crate) struct AnilistMediaQuery<'a> {
+    /// Read manga instead of anime.
+    pub manga: bool,
+    pub search: Option<&'a str>,
+    pub sort: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub formats: Option<Vec<&'a str>>,
+    pub genres: Option<Vec<&'a str>>,
+    pub season: Option<String>,
+    pub season_year: Option<i32>,
+    pub min_score: Option<i64>,
+    pub max_score: Option<i64>,
+    pub adult: Option<bool>,
 }
 
-fn anilist_media_page(page: i32, sfw: bool, q: AnilistMediaQuery) -> Result<SearchResults, String> {
+pub(crate) fn anilist_media_page(page: i32, sfw: bool, q: AnilistMediaQuery) -> Result<SearchResults, String> {
     let query = format!(
-        "query ($page: Int, $search: String, $sort: [MediaSort], $status: MediaStatus, $formats: [MediaFormat], $genres: [String], $season: MediaSeason, $seasonYear: Int, $minScore: Int, $maxScore: Int, $adult: Boolean) {{ Page(page: $page, perPage: 25) {{ pageInfo {{ hasNextPage }} media(type: ANIME, search: $search, sort: $sort, status: $status, format_in: $formats, genre_in: $genres, season: $season, seasonYear: $seasonYear, averageScore_greater: $minScore, averageScore_lesser: $maxScore, isAdult: $adult) {{ {} }} }} }}",
+        "query ($page: Int, $search: String, $sort: [MediaSort], $status: MediaStatus, $formats: [MediaFormat], $genres: [String], $season: MediaSeason, $seasonYear: Int, $minScore: Int, $maxScore: Int, $adult: Boolean) {{ Page(page: $page, perPage: 25) {{ pageInfo {{ hasNextPage }} media(type: {}, search: $search, sort: $sort, status: $status, format_in: $formats, genre_in: $genres, season: $season, seasonYear: $seasonYear, averageScore_greater: $minScore, averageScore_lesser: $maxScore, isAdult: $adult) {{ {} }} }} }}",
+        if q.manga { "MANGA" } else { "ANIME" },
         ANILIST_MEDIA_FIELDS
     );
     // Unset filters must be left out of the variables entirely: AniList treats
@@ -1027,7 +1068,7 @@ fn anilist_media_page(page: i32, sfw: bool, q: AnilistMediaQuery) -> Result<Sear
 }
 
 /// Use Jikan's answer, or AniList's when Jikan fails for any reason but a 404.
-fn or_anilist<T>(jikan: Result<T, String>, what: &str, anilist: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+pub(crate) fn or_anilist<T>(jikan: Result<T, String>, what: &str, anilist: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     match jikan {
         Err(e) if !e.contains("Jikan API error 404") => {
             log::warn!("Jikan {} failed: {}; using AniList", what, e);
@@ -1060,7 +1101,7 @@ fn anilist_formats(jikan_type: &str) -> Option<Vec<&'static str>> {
 
 /// Jikan order_by + sort to an AniList MediaSort. Jikan's popularity and rank
 /// are positions (1 = best), so their ascending order is AniList's descending.
-fn anilist_sort(order_by: Option<&str>, sort: Option<&str>) -> &'static str {
+pub(crate) fn anilist_sort(order_by: Option<&str>, sort: Option<&str>) -> &'static str {
     let asc = sort == Some("asc");
     match order_by.unwrap_or("popularity") {
         "popularity" | "members" => if asc { "POPULARITY_DESC" } else { "POPULARITY" },
@@ -1069,6 +1110,7 @@ fn anilist_sort(order_by: Option<&str>, sort: Option<&str>) -> &'static str {
         "start_date" => if asc { "START_DATE" } else { "START_DATE_DESC" },
         "title" => if asc { "TITLE_ROMAJI" } else { "TITLE_ROMAJI_DESC" },
         "episodes" => if asc { "EPISODES" } else { "EPISODES_DESC" },
+        "chapters" => if asc { "CHAPTERS" } else { "CHAPTERS_DESC" },
         "favorites" => if asc { "FAVOURITES" } else { "FAVOURITES_DESC" },
         _ => "POPULARITY_DESC",
     }
@@ -1076,14 +1118,14 @@ fn anilist_sort(order_by: Option<&str>, sort: Option<&str>) -> &'static str {
 
 /// MAL genre ids (what the genre picker sends) and their AniList names.
 /// AniList has only these genres; MAL themes/demographics have no equivalent.
-const MAL_ANILIST_GENRES: &[(i64, &str)] = &[
+pub(crate) const MAL_ANILIST_GENRES: &[(i64, &str)] = &[
     (1, "Action"), (2, "Adventure"), (4, "Comedy"), (8, "Drama"), (9, "Ecchi"),
     (10, "Fantasy"), (12, "Hentai"), (14, "Horror"), (7, "Mystery"), (18, "Mecha"),
     (19, "Music"), (22, "Romance"), (24, "Sci-Fi"), (30, "Sports"), (36, "Slice of Life"),
     (37, "Supernatural"), (40, "Psychological"), (41, "Thriller"), (66, "Mahou Shoujo"),
 ];
 
-fn anilist_genre(mal_id: &str) -> Option<&'static str> {
+pub(crate) fn anilist_genre(mal_id: &str) -> Option<&'static str> {
     let id: i64 = mal_id.trim().parse().ok()?;
     MAL_ANILIST_GENRES.iter().find(|(m, _)| *m == id).map(|(_, name)| *name)
 }
@@ -1345,7 +1387,9 @@ mod schedule_tests {
         assert_eq!(r.rating, Some(9.1));
         assert_eq!(r.media_type.as_deref(), Some("TV"));
         assert_eq!(r.status.as_deref(), Some("Releasing"));
-        assert_eq!(r.title_synonyms, Some(vec!["Frieren".to_string()]));
+        // English for display, romaji kept for provider matching.
+        assert_eq!(r.title, "Frieren");
+        assert_eq!(r.title_synonyms, Some(vec!["Sousou no Frieren".to_string()]));
         assert_eq!(r.studios, Some(vec!["Madhouse".to_string()]));
     }
 

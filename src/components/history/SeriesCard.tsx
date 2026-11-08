@@ -5,6 +5,7 @@
  * progress bar, last activity. Expands inline to show individual entries.
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { useState } from 'react'
 import { ChevronDown, Play, Clock } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
@@ -107,7 +108,7 @@ export function SeriesCard({ summary, onEntryRemoved }: SeriesCardProps) {
         {/* Cover */}
         <div className="flex-shrink-0 w-14 h-20 rounded-[var(--radius-sm)] overflow-hidden bg-[var(--color-panel)]">
           {coverSrc ? (
-            <img src={coverSrc} alt={summary.media.title} className="w-full h-full object-cover" loading="lazy" />
+            <img src={coverSrc} alt={displayTitle(summary.media)} className="w-full h-full object-cover" loading="lazy" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[var(--color-text-dim)]">
               <Play size={18} />
@@ -118,7 +119,7 @@ export function SeriesCard({ summary, onEntryRemoved }: SeriesCardProps) {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
-            {summary.media.title}
+            {displayTitle(summary.media)}
           </h3>
           <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{progressText}</p>
 

@@ -1267,6 +1267,26 @@ pub async fn open_downloads_folder(
     }
 }
 
+/// Retry a failed download from scratch
+#[tauri::command]
+pub async fn retry_download(
+    download_manager: State<'_, DownloadManager>,
+    download_id: String,
+) -> Result<(), String> {
+    download_manager
+        .retry_download(&download_id)
+        .await
+        .map_err(|e| format!("Failed to retry download: {}", e))
+}
+
+/// Free bytes on the downloads filesystem
+#[tauri::command]
+pub async fn get_free_storage(
+    download_manager: State<'_, DownloadManager>,
+) -> Result<u64, String> {
+    Ok(download_manager.free_space())
+}
+
 /// Remove a download from the list
 #[tauri::command]
 pub async fn remove_download(

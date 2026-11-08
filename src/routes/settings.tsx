@@ -15,6 +15,7 @@ import { DangerButton } from '../components/settings/DangerButton'
 import { UpdateSection } from '../components/settings/UpdateSection'
 import { ExportImportSection } from '../components/settings/ExportImportSection'
 import { AutoBackupSection } from '../components/settings/AutoBackupSection'
+import { DevicesSection } from '../components/settings/DevicesSection'
 import { DeveloperStats } from '@/components/settings/DeveloperStats'
 import {
   HardDrive,
@@ -28,11 +29,14 @@ import {
   Bell,
   Shield,
   HelpCircle,
+  Smartphone,
 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
+import { ChevronLeft } from 'lucide-react'
+import { clearCompletedDownloads, clearCompletedChapterDownloads } from '@/utils/tauri-commands'
 import { isMobile } from '@/utils/platform'
 import { ApiStatusIndicator } from '@/components/layout/ApiStatusIndicator'
-import { STREAMING_PROVIDERS } from '@/utils/streamingProviders'
+import { streamingProviders } from '@/utils/streamingProviders'
 
 type SettingsPage =
   | 'appearance'
@@ -41,16 +45,21 @@ type SettingsPage =
   | 'downloads'
   | 'notifications'
   | 'privacy'
+  | 'devices'
   | 'about'
 
-const settingsNavItems: { key: SettingsPage; label: string; icon: typeof Palette }[] = [
-  { key: 'appearance', label: 'Appearance', icon: Palette },
-  { key: 'playback', label: 'Playback', icon: Play },
-  { key: 'reader', label: 'Reader', icon: BookOpen },
-  { key: 'downloads', label: 'Downloads', icon: Download },
-  { key: 'notifications', label: 'Notifications', icon: Bell },
-  { key: 'privacy', label: 'Privacy', icon: Shield },
-  { key: 'about', label: 'About', icon: HelpCircle },
+const settingsNavItems: { key: SettingsPage; label: string; icon: typeof Palette; sub: string; group: 'Preferences' | 'Data' }[] = [
+  { key: 'appearance', label: 'Appearance', icon: Palette, sub: 'Grid density, home sections', group: 'Preferences' },
+  { key: 'playback', label: 'Playback', icon: Play, sub: 'Player defaults, subtitles, provider', group: 'Preferences' },
+  { key: 'reader', label: 'Reader', icon: BookOpen, sub: 'Reading mode and behavior', group: 'Preferences' },
+  { key: 'downloads', label: 'Downloads', icon: Download, sub: 'Storage and limits', group: 'Preferences' },
+  { key: 'notifications', label: 'Notifications', icon: Bell, sub: 'When to notify you', group: 'Preferences' },
+  { key: 'privacy', label: 'Privacy', icon: Shield, sub: 'Control your data and privacy settings', group: 'Data' },
+  // Mac side of Pair & sync; the phone pairs from You › Pair with Mac instead.
+  ...(isMobile()
+    ? []
+    : [{ key: 'devices' as const, label: 'Devices', icon: Smartphone, sub: 'Pair your iPhone and sync progress', group: 'Data' as const }]),
+  { key: 'about', label: 'About', icon: HelpCircle, sub: 'App information and credits', group: 'Data' },
 ]
 
 export const Route = createFileRoute('/settings')({
@@ -65,10 +74,11 @@ interface StorageUsage {
 
 function SettingsScreen() {
   const settings = useSettingsStore()
+  const mobile = isMobile()
   const playerSettings = usePlayerStore((state) => state.settings)
   const updatePlayerSettings = usePlayerStore((state) => state.updateSettings)
 
-  const [activePage, setActivePage] = useState<SettingsPage>('appearance')
+  const [activePage, setActivePage] = useState<SettingsPage | null>(isMobile() ? null : 'appearance')
   const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
   const [appVersion, setAppVersion] = useState<string>('')
   const [tauriVersion, setTauriVersion] = useState<string>('')
@@ -178,10 +188,20 @@ function SettingsScreen() {
     }
   }
 
-  return (
+  const handleClearDownloads = async () => {
+    try {
+      await Promise.all([clearCompletedDownloads(), clearCompletedChapterDownloads()])
+      notifySuccess('Downloads Cleared', 'Downloaded files have been removed')
+      loadStorageUsage()
+    } catch (error) {
+      notifyError('Clear Failed', `Failed to clear downloads: ${error}`)
+    }
+  }
+
+    return (
     <div className="flex min-h-screen bg-[var(--color-background)]">
       {/* Settings Sidebar Navigation */}
-      <aside className="w-[220px] flex-shrink-0 border-r border-[var(--color-glass-border)] bg-[rgba(26,26,26,0.6)] sticky top-[var(--nav-height)] h-[calc(100vh-var(--nav-height))] overflow-y-auto px-3 py-5">
+      {!mobile && <aside className="w-[220px] flex-shrink-0 border-r border-[var(--color-glass-border)] bg-[rgba(26,26,26,0.6)] sticky top-[var(--nav-height)] h-[calc(100vh-var(--nav-height))] overflow-y-auto px-3 py-5">
         <div className="px-3 pb-4 font-display font-bold text-base">Settings</div>
         {settingsNavItems.map((item) => {
           const Icon = item.icon
@@ -200,15 +220,47 @@ function SettingsScreen() {
             </button>
           )
         })}
-      </aside>
+      </aside>}
 
       {/* Settings Content */}
-      <main className="flex-1 px-6 sm:px-9 py-7 max-w-[680px]">
+      <main className={mobile ? 'flex-1 min-w-0 px-4 pt-2 pb-24' : 'flex-1 px-6 sm:px-9 py-7 max-w-[680px]'}>
+        {/* Phone: master list of sections; each pushes its page */}
+        {mobile && activePage === null && (
+          <div>
+            {(['Preferences', 'Data'] as const).map((group) => (
+              <section key={group} className="mb-5">
+                <h3 className="px-4 pb-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">{group}</h3>
+                <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] [&>*+*]:border-t [&>*+*]:border-[var(--color-glass-border)]">
+                  {settingsNavItems.filter((i) => i.group === group).map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <button key={item.key} onClick={() => setActivePage(item.key)} className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left active:bg-[var(--color-glass-bg-hover)]">
+                        <Icon size={20} className="shrink-0 text-[var(--color-accent-light)]" aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[15px] font-medium text-white">{item.label}</span>
+                          <span className="block truncate text-xs text-[var(--color-text-muted)]">{item.sub}</span>
+                        </span>
+                        <ChevronRight size={18} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+        {mobile && activePage !== null && (
+          <button onClick={() => setActivePage(null)} className="-ml-2 mb-2 flex min-h-[44px] items-center gap-1 px-2 text-[15px] text-[var(--color-accent-light)]">
+            <ChevronLeft size={20} aria-hidden="true" />
+            Settings
+          </button>
+        )}
+
         {/* Appearance Page */}
         {activePage === 'appearance' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">Appearance</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">Appearance</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               Customize how Otaku looks and feels
             </p>
 
@@ -236,6 +288,7 @@ function SettingsScreen() {
             <SettingSection title="Grid & Layout" description="Card and grid display options">
               <SettingRow label="Grid Density" description="Spacing and size of media cards">
                 <SettingDropdown
+                  title="Grid Density"
                   value={settings.gridDensity}
                   options={[
                     { value: 'compact', label: 'Compact' },
@@ -256,8 +309,8 @@ function SettingsScreen() {
         {/* Playback Page */}
         {activePage === 'playback' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">Playback</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">Playback</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               Control how videos are played
             </p>
 
@@ -325,6 +378,7 @@ function SettingsScreen() {
                 description="Choose the font used for player subtitles"
               >
                 <SettingDropdown
+                  title="Subtitle Font"
                   value={playerSettings.subtitleFontFamily ?? 'system'}
                   options={[
                     { value: 'system', label: 'System' },
@@ -345,8 +399,9 @@ function SettingsScreen() {
                 description="Use only the selected provider for playback"
               >
                 <SettingDropdown
+                  title="Streaming Provider"
                   value={settings.streamingProvider}
-                  options={STREAMING_PROVIDERS}
+                  options={streamingProviders(settings.adultMode)}
                   onChange={(value) =>
                     settings.updateSettings({
                       streamingProvider: value as typeof settings.streamingProvider,
@@ -364,7 +419,7 @@ function SettingsScreen() {
                   onChange={(event) =>
                     settings.updateSettings({ anikotoApiBaseUrl: event.target.value })
                   }
-                  className="w-[240px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:ring-opacity-50"
+                  className="w-[240px] max-sm:w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)] focus:ring-opacity-50"
                   placeholder="https://your-app.vercel.app/api"
                 />
               </SettingRow>
@@ -403,8 +458,8 @@ function SettingsScreen() {
         {/* Reader Page */}
         {activePage === 'reader' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">Reader</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">Reader</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               Manga and light novel reading preferences
             </p>
 
@@ -417,6 +472,7 @@ function SettingsScreen() {
                 description="Direction for page navigation"
               >
                 <SettingDropdown
+                  title="Default Reading Direction"
                   value="vertical"
                   options={[
                     { value: 'vertical', label: 'Vertical' },
@@ -428,6 +484,7 @@ function SettingsScreen() {
               </SettingRow>
               <SettingRow label="Page Fit" description="How pages fit within the viewport">
                 <SettingDropdown
+                  title="Page Fit"
                   value="width"
                   options={[
                     { value: 'width', label: 'Width' },
@@ -459,8 +516,8 @@ function SettingsScreen() {
         {/* Downloads Page */}
         {activePage === 'downloads' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">Downloads</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">Downloads</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               Configure download behavior and storage
             </p>
 
@@ -511,6 +568,15 @@ function SettingsScreen() {
                   </div>
                 </SettingRow>
               )}
+              {mobile && (
+                <SettingRow label="Clear Downloads" description="Remove completed downloads from this device">
+                  <DangerButton
+                    onClick={handleClearDownloads}
+                    label="Clear Downloads"
+                    confirmMessage="This deletes all completed downloads from this device. Continue?"
+                  />
+                </SettingRow>
+              )}
             </SettingSection>
 
             {/* Export & Import */}
@@ -522,8 +588,8 @@ function SettingsScreen() {
         {/* Notifications Page */}
         {activePage === 'notifications' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">Notifications</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">Notifications</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               Manage notification preferences
             </p>
 
@@ -565,8 +631,8 @@ function SettingsScreen() {
         {/* Privacy Page */}
         {activePage === 'privacy' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">Privacy</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">Privacy</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               Control your data and privacy settings
             </p>
 
@@ -616,17 +682,37 @@ function SettingsScreen() {
               </SettingRow>
             </SettingSection>
 
-            {/* Developer Section — hidden on mobile */}
-            {!isMobile() && (
+            <SettingSection title="Content" description="Adult content is hidden unless you opt in">
+              <SettingRow
+                label="18+ Providers"
+                description="Show adult streaming providers (hstream.moe) in the provider picker"
+              >
+                {settings.adultMode ? (
+                  <SettingToggle
+                    value
+                    onChange={() => settings.updateSettings({ adultMode: false })}
+                  />
+                ) : (
+                  <DangerButton
+                    onClick={() => settings.updateSettings({ adultMode: true })}
+                    label="Enable"
+                    confirmMessage="This enables adult (18+) content providers. Confirm that you are 18 or older and that viewing such content is legal where you live."
+                  />
+                )}
+              </SettingRow>
+            </SettingSection>
+
+            {/* Developer Section — full tools on desktop; logs link only on phone */}
+            {(
               <SettingSection title="Developer" description="Debugging and diagnostic tools">
-                <DeveloperStats />
+                {!mobile && <DeveloperStats />}
                 <SettingRow
                   label="Application Logs"
                   description="View error logs and debug information"
                 >
                   <Link
                     to="/logs"
-                    className="flex items-center gap-2 bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] rounded-lg px-4 py-2 font-medium transition-colors"
+                    className="flex items-center gap-2 max-sm:min-h-[44px] bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] rounded-lg px-4 py-2 font-medium transition-colors"
                   >
                     <FileText size={16} />
                     View Logs
@@ -641,11 +727,22 @@ function SettingsScreen() {
           </div>
         )}
 
+        {/* Devices (Mac): pair a phone by QR, approve, revoke */}
+        {activePage === 'devices' && (
+          <div>
+            <h2 className="font-display font-bold text-xl mb-1.5">Devices</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+              Pair Otaku on your iPhone to sync watch and reading progress
+            </p>
+            <DevicesSection />
+          </div>
+        )}
+
         {/* About Page */}
         {activePage === 'about' && (
           <div>
-            <h2 className="font-display font-bold text-xl mb-1.5">About</h2>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6">
+            <h2 className="font-display font-bold text-xl mb-1.5 max-sm:px-1">About</h2>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 max-sm:mb-4">
               App information and credits
             </p>
 

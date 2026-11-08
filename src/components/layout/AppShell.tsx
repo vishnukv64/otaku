@@ -3,6 +3,7 @@ import { useRouterState } from '@tanstack/react-router'
 import { TopNav } from './TopNav'
 import { Footer } from './Footer'
 import { BottomTabBar } from './BottomTabBar'
+import { MobileAppBar } from './MobileAppBar'
 import { SpotlightSearch } from '@/components/search/SpotlightSearch'
 import { useSpotlightSearch } from '@/hooks/useSpotlightSearch'
 import { isMobile } from '@/utils/platform'
@@ -36,7 +37,7 @@ export function AppShell({ children }: AppShellProps) {
     // so `fixed inset-0` fills the entire screen including behind safe areas.
     return (
       <div className="fixed inset-0 flex flex-col bg-[var(--color-bg-primary)]">
-        <TopNav onSearchClick={spotlight.open} />
+        <MobileAppBar onSearchClick={spotlight.open} />
         <main className="flex-1 overflow-y-auto min-h-0">{children}</main>
         <BottomTabBar />
         <SpotlightSearch isOpen={spotlight.isOpen} onClose={spotlight.close} />

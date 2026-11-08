@@ -17,6 +17,8 @@ import { MangaDetailModal } from '@/components/media/MangaDetailModal'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import type { SearchResult } from '@/types/extension'
+import { isMobile } from '@/utils/platform'
+import { MobileSearch } from './MobileSearch'
 
 // Extended result with media type
 interface GlobalSearchResult extends SearchResult {
@@ -28,7 +30,11 @@ interface SpotlightSearchProps {
   onClose: () => void
 }
 
-export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
+export function SpotlightSearch(props: SpotlightSearchProps) {
+  return isMobile() ? <MobileSearch {...props} /> : <DesktopSpotlightSearch {...props} />
+}
+
+function DesktopSpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GlobalSearchResult[]>([])

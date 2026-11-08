@@ -1,5 +1,7 @@
-import { useRef } from 'react'
-import { Play, Info } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Play, Plus, Check } from 'lucide-react'
+import { addToLibrary } from '@/utils/tauri-commands'
+import { notifyError } from '@/utils/notify'
 import type { SearchResult } from '@/types/extension'
 
 interface MobileHeroSectionProps {
@@ -9,6 +11,8 @@ interface MobileHeroSectionProps {
   totalItems?: number
   currentIndex?: number
   onIndexChange?: (index: number) => void
+  /** 1-based rank in Anime Top 10 today, shown as a badge */
+  rank?: number
 }
 
 export function MobileHeroSection({
@@ -18,8 +22,18 @@ export function MobileHeroSection({
   totalItems = 1,
   currentIndex = 0,
   onIndexChange,
+  rank,
 }: MobileHeroSectionProps) {
   const touchStartX = useRef(0)
+  const [added, setAdded] = useState(false)
+  const addToList = async () => {
+    try {
+      await addToLibrary(media.id, 'plan_to_watch')
+      setAdded(true)
+    } catch {
+      notifyError('Failed', 'Could not add to My List')
+    }
+  }
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX
@@ -43,8 +57,8 @@ export function MobileHeroSection({
 
   return (
     <div
-      className="relative w-full rounded-lg overflow-hidden mb-6"
-      style={{ height: '60vh' }}
+      className="relative mx-auto mb-6 w-full overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-glass-border)] shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+      style={{ height: '62vh', maxHeight: 560 }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -60,11 +74,17 @@ export function MobileHeroSection({
       )}
 
       {/* Gradient overlay at bottom */}
-      <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-black/50 to-transparent" />
+      <div onClick={onMoreInfo} className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-black/50 to-transparent" />
 
       {/* Content overlaid at bottom */}
       <div className="absolute bottom-0 left-0 right-0 p-5">
         {/* Title */}
+        {rank != null && rank <= 10 && (
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white">
+            <em className="rounded-[3px] bg-[var(--color-accent-primary)] px-1.5 py-px font-display font-extrabold not-italic">TOP 10</em>
+            #{rank} in Anime today
+          </div>
+        )}
         <h1 className="text-2xl font-bold mb-1.5 drop-shadow-lg line-clamp-2">
           {media.title}
         </h1>
@@ -103,17 +123,18 @@ export function MobileHeroSection({
         <div className="flex items-center gap-3">
           <button
             onClick={onWatch}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-white text-black font-semibold rounded text-sm"
+            className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full bg-white px-5 text-sm font-semibold text-black"
           >
             <Play size={16} fill="currentColor" />
-            Watch Now
+            Play
           </button>
           <button
-            onClick={onMoreInfo}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-white/20 text-white font-semibold rounded text-sm backdrop-blur-sm"
+            onClick={() => void addToList()}
+            disabled={added}
+            className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full bg-white/20 px-5 text-sm font-semibold text-white backdrop-blur-sm"
           >
-            <Info size={16} />
-            More Info
+            {added ? <Check size={16} /> : <Plus size={16} />}
+            My List
           </button>
         </div>
 

@@ -5,6 +5,7 @@
  * Converts RecommendationEntry (MediaEntry-based) to SearchResult for MediaCarousel.
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { MediaCarousel } from '@/components/media/MediaCarousel'
 import type { SearchResult } from '@/types/extension'
 import type { RecommendationEntry, SimilarToGroup } from '@/utils/tauri-commands'
@@ -17,7 +18,8 @@ function toSearchResult(entry: RecommendationEntry): SearchResult {
   const { media } = entry
   return {
     id: media.id,
-    title: media.title,
+    title: displayTitle(media),
+    title_synonyms: media.english_name && media.english_name !== media.title ? [media.title] : undefined,
     cover_url: media.cover_url ?? undefined,
     description: media.description ?? undefined,
     year: media.year ?? undefined,

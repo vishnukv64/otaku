@@ -9,7 +9,9 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getAppLogs, clearAppLogs, getLogFilePath, startLogsStream, stopLogsStream, APP_LOGS_EVENT, type LogEntry } from '../utils/tauri-commands'
-import { ArrowLeft, RefreshCw, Trash2, FolderOpen, Download, Filter } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Trash2, FolderOpen, Download, Filter, Copy, Pause, Play, Search, ScrollText } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
+import { ChipRow, ConfirmSheet, EmptyState, Spinner } from '@/components/mobile/you/ui'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -26,6 +28,8 @@ function LogsScreen() {
   const [filter, setFilter] = useState<LogLevel>('all')
   const [logFilePath, setLogFilePath] = useState<string>('')
   const logsEndRef = useRef<HTMLDivElement>(null)
+  const [query, setQuery] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const loadLogs = useCallback(async () => {
     try {
@@ -133,10 +137,23 @@ function LogsScreen() {
     notifySuccess('Logs Exported', 'Logs have been exported')
   }
 
+  const q = query.trim().toLowerCase()
   const filteredLogs = logs.filter((log) => {
+    if (q && !log.message.toLowerCase().includes(q)) return false
     if (filter === 'all') return true
     return log.level.toLowerCase() === filter
   })
+
+  const handleCopyLogs = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        filteredLogs.map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join('\n')
+      )
+      notifySuccess('Copied', `${filteredLogs.length} log lines copied`)
+    } catch (error) {
+      notifyError('Copy Failed', `${error}`)
+    }
+  }
 
   const getLevelColor = (level: string): string => {
     switch (level.toLowerCase()) {
@@ -162,6 +179,69 @@ function LogsScreen() {
       default:
         return ''
     }
+  }
+
+  if (isMobile()) {
+    const icon = 'flex h-11 w-11 items-center justify-center rounded-full text-[var(--color-text-primary)] disabled:opacity-40'
+    return (
+      <div className="flex min-h-screen flex-col bg-[var(--color-background)] px-4 pb-24 pt-2">
+        <div className="mb-3 flex items-center gap-1">
+          <div className="relative flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" aria-hidden="true" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search logs"
+              aria-label="Search logs"
+              className="min-h-[44px] w-full rounded-[var(--radius-lg)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] pl-9 pr-3 text-[15px] text-white"
+            />
+          </div>
+          <button aria-label={autoRefresh ? 'Pause live logs' : 'Resume live logs'} aria-pressed={autoRefresh} onClick={() => setAutoRefresh(!autoRefresh)} className={icon}>
+            {autoRefresh ? <Pause size={18} /> : <Play size={18} />}
+          </button>
+          <button aria-label="Copy logs" onClick={handleCopyLogs} disabled={filteredLogs.length === 0} className={icon}><Copy size={18} /></button>
+          <button aria-label="Export logs" onClick={handleExportLogs} disabled={logs.length === 0} className={icon}><Download size={18} /></button>
+          <button aria-label="Clear logs" onClick={() => setConfirmClear(true)} disabled={logs.length === 0} className={`${icon} !text-[var(--color-accent-light)]`}><Trash2 size={18} /></button>
+        </div>
+        <ChipRow
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { id: 'all', label: 'All', count: logs.length },
+            { id: 'error', label: 'Errors', count: logs.filter((l) => l.level.toLowerCase() === 'error').length },
+            { id: 'warn', label: 'Warnings', count: logs.filter((l) => l.level.toLowerCase() === 'warn').length },
+            { id: 'info', label: 'Info' },
+            { id: 'debug', label: 'Debug' },
+          ]}
+        />
+        {autoRefresh && <p className="mt-2 text-xs text-[var(--color-accent-light)]">Live · auto-scrolling</p>}
+        <div className="mt-3 flex-1">
+          {loading && logs.length === 0 ? (
+            <Spinner label="Loading logs…" />
+          ) : filteredLogs.length === 0 ? (
+            <EmptyState
+              icon={<ScrollText size={44} aria-hidden="true" />}
+              title={q || filter !== 'all' ? 'No matching logs' : 'No logs yet'}
+              text={q || filter !== 'all' ? 'Try another level or search term.' : 'App activity will show up here.'}
+            />
+          ) : (
+            <div className="space-y-1 font-mono text-xs">
+              {filteredLogs.map((log, index) => (
+                <div key={index} className={`rounded-md px-2.5 py-1.5 ${getLevelBg(log.level)}`}>
+                  <div className="flex gap-2">
+                    <span className={`font-semibold uppercase ${getLevelColor(log.level)}`}>{log.level}</span>
+                    <span className="text-[var(--color-text-tertiary)]">{log.timestamp}</span>
+                  </div>
+                  <div className="mt-0.5 break-all text-[var(--color-text-primary)]">{log.message}</div>
+                </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
+          )}
+        </div>
+        <ConfirmSheet isOpen={confirmClear} onClose={() => setConfirmClear(false)} title="Clear all logs?" text="This deletes the application log. It can't be undone." confirmLabel="Clear logs" onConfirm={handleClearLogs} />
+      </div>
+    )
   }
 
   return (

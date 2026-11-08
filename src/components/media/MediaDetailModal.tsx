@@ -8,7 +8,15 @@
  * - Action buttons (Watch, Add to List)
  */
 
-import { useEffect, useState, useRef } from 'react'
+import {
+  audioSummary,
+  countdownFromBroadcast,
+  formatBroadcast,
+  formatDateRange,
+  useProviderExtras,
+  withProviderEpisodes,
+} from '@/utils/providerExtras'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   X,
@@ -85,8 +93,14 @@ import {
   searchAnime,
 } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { resolveAnikotoSlug } from '@/utils/anikotoResolver'
-import { slugProviderExtension, streamingProviderLabel } from '@/utils/streamingProviders'
+import { resolveProviderSlug } from '@/utils/providerMatch'
+import { ProviderMatchPicker } from '@/components/media/ProviderMatchPicker'
+import {
+  nextStreamingProvider,
+  slugProviderExtension,
+  streamingProviderLabel,
+  providerForMedia,
+} from '@/utils/streamingProviders'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -97,7 +111,7 @@ import { useSettingsStore } from '@/store/settingsStore'
 // import { MediaCard } from './MediaCard'
 import { Description } from '@/components/ui/Description'
 import { NextEpisodeCountdown } from './NextEpisodeCountdown'
-import { BottomSheet } from '@/components/ui/BottomSheet'
+import { MobileAnimeDetail } from '@/components/mobile/detail/MobileAnimeDetail'
 import { isMobile } from '@/utils/platform'
 import { DetailTabBar } from './DetailTabBar'
 import { CharacterGrid } from './CharacterGrid'
@@ -188,7 +202,12 @@ interface MediaDetailModalProps {
   onFeedbackChange?: () => void
 }
 
-export function MediaDetailModal({
+/** Phones get the full-screen detail screen (mock: design/files/detail.html); desktop keeps the modal. */
+export function MediaDetailModal(props: MediaDetailModalProps) {
+  return isMobile() ? <MobileAnimeDetail {...props} /> : <MediaDetailModalDesktop {...props} />
+}
+
+function MediaDetailModalDesktop({
   media,
   extensionId,
   isOpen,
@@ -199,11 +218,15 @@ export function MediaDetailModal({
   const navigate = useNavigate()
   const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
-  const streamingProvider = useSettingsStore((state) => state.streamingProvider)
+  const selectedProvider = useSettingsStore((state) => state.streamingProvider)
   const anikotoApiBaseUrl = useSettingsStore((state) => state.anikotoApiBaseUrl)
+  const adultMode = useSettingsStore((state) => state.adultMode)
+  const updateSettings = useSettingsStore((state) => state.updateSettings)
   const anikotoSiteBaseUrl = useSettingsStore((state) => state.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((state) => state.anikotoYotochanBaseUrl)
   const [details, setDetails] = useState<MediaDetails | null>(null)
+  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
@@ -283,7 +306,20 @@ export function MediaDetailModal({
   // Selected streaming extension for video sources (downloads).
   const [downloadExtId, setDownloadExtId] = useState<string | null>(null)
   const [downloadProviderMediaId, setDownloadProviderMediaId] = useState<string | null>(null)
+  const kaa = useProviderExtras(downloadExtId, downloadProviderMediaId)
+  const kaaCountdown = kaa?.broadcast ? countdownFromBroadcast(kaa.broadcast) : null
+  // Grid view: provider stills and real titles over MAL's bare "Episode N".
+  const gridEpisodes = useMemo(() => withProviderEpisodes(details?.episodes ?? [], kaa?.episodes), [details, kaa])
+  const kaaFacts = (
+    [
+      ['Audio', audioSummary(kaa?.audio_locales)],
+      ['Airs', kaa?.broadcast && details && isAiring(details.status) ? formatBroadcast(kaa.broadcast.day, kaa.broadcast.time) : ''],
+      ['Dates', details?.aired_start ? '' : formatDateRange(kaa?.start_date, kaa?.end_date)],
+    ] as [string, string][]
+  ).filter(([, v]) => v)
   const [bridgeFailed, setBridgeFailed] = useState(false)
+  const [matchOpen, setMatchOpen] = useState(false)
+  const [matchKey, setMatchKey] = useState(0)
   const downloadProviderLabel = streamingProviderLabel(streamingProvider)
   const downloadProviderResolving =
     !!details && !bridgeFailed && (!downloadExtId || !downloadProviderMediaId)
@@ -320,7 +356,7 @@ export function MediaDetailModal({
               )
             ),
           }
-          const match = await resolveAnikotoSlug(anikotoDetails, (query) =>
+          const match = await resolveProviderSlug(metadata.id, media.id, anikotoDetails, (query) =>
             searchAnime(metadata.id, query, 1)
           )
           if (cancelled) return
@@ -373,6 +409,7 @@ export function MediaDetailModal({
     anikotoApiBaseUrl,
     anikotoSiteBaseUrl,
     anikotoYotochanBaseUrl,
+    matchKey,
   ])
 
   // Tag state
@@ -1646,6 +1683,7 @@ export function MediaDetailModal({
               )}
               <div className="flex flex-wrap gap-2">
                 {details.type && <span className="chip">{details.type}</span>}
+                {kaa?.age_rating && <span className="chip">{kaa.age_rating}</span>}
                 {details.year && <span className="chip">{details.year}</span>}
                 {details.rating && (
                   <span className="chip chip-gold">★ {details.rating.toFixed(2)}</span>
@@ -1858,12 +1896,12 @@ export function MediaDetailModal({
               </button>
             )}
             {/* Next episode timer */}
-            {isAiring(details.status) && details.last_update_end && details.broadcast_interval && (
+            {isAiring(details.status) && ((details.last_update_end && details.broadcast_interval) || kaaCountdown) && (
               <div className="ml-auto hidden md:flex items-center">
                 <NextEpisodeCountdown
                   latestEpisodeDate={media.latest_episode_date}
-                  lastUpdateEnd={details.last_update_end}
-                  broadcastInterval={details.broadcast_interval}
+                  lastUpdateEnd={details.last_update_end || kaaCountdown!.lastUpdateEnd}
+                  broadcastInterval={details.broadcast_interval || kaaCountdown!.broadcastInterval}
                   status={details.status}
                 />
               </div>
@@ -1875,9 +1913,9 @@ export function MediaDetailModal({
             {/* Sidebar */}
             <div className="hidden md:block w-[220px] shrink-0 p-5 border-r border-[var(--color-glass-border)]">
               {/* Poster */}
-              {details.cover_url && (
+              {(kaa?.banner_url || details.cover_url) && (
                 <img
-                  src={details.cover_url}
+                  src={kaa?.banner_url || details.cover_url}
                   alt={details.title}
                   className="w-full aspect-[2/3] rounded-lg object-cover shadow-xl"
                 />
@@ -2079,6 +2117,14 @@ export function MediaDetailModal({
                           </div>
                         </div>
                       )}
+                      {kaaFacts.map(([label, value]) => (
+                        <div key={label}>
+                          <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
+                            {label}
+                          </div>
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">{value}</div>
+                        </div>
+                      ))}
                       {details.season && (
                         <div>
                           <div className="text-[0.65rem] font-bold text-[var(--color-text-muted)] uppercase tracking-[0.08em] mb-0.5">
@@ -2106,6 +2152,49 @@ export function MediaDetailModal({
                 {/* Episodes */}
                 {activeTab === 'episodes' && details.episodes.length > 0 && (
                   <div>
+                    {bridgeFailed && downloadExtId && (
+                      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm">
+                        <span className="flex-1 min-w-[200px] text-amber-300">
+                          Couldn’t match this anime on {downloadProviderLabel}.
+                        </span>
+                        <button
+                          onClick={() => setMatchOpen(true)}
+                          className="px-3 py-1.5 rounded-lg bg-[var(--color-accent-primary)] text-white text-sm font-medium"
+                        >
+                          Find on {downloadProviderLabel}
+                        </button>
+                        {/* Hentai is pinned to hstream in 18+ mode: switching would do nothing. */}
+                        {streamingProvider === selectedProvider && (
+                          <button
+                            onClick={() =>
+                              updateSettings({
+                                streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium"
+                          >
+                            Try another provider
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {details && downloadExtId && (
+                      <ProviderMatchPicker
+                        open={matchOpen}
+                        onClose={() => setMatchOpen(false)}
+                        variant="modal"
+                        details={details}
+                        mediaId={media.id}
+                        extId={downloadExtId}
+                        providerLabel={downloadProviderLabel}
+                        onPicked={() => setMatchKey((k) => k + 1)}
+                        onTryAnother={
+                          streamingProvider === selectedProvider
+                            ? () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
+                            : undefined
+                        }
+                      />
+                    )}
                     <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
                       <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
                         <svg
@@ -2271,7 +2360,7 @@ export function MediaDetailModal({
                     )}
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                      {details.episodes
+                      {gridEpisodes
                         .slice(
                           episodePage * EPISODES_PER_PAGE,
                           (episodePage + 1) * EPISODES_PER_PAGE
@@ -2767,14 +2856,6 @@ export function MediaDetailModal({
       ) : null}
     </>
   )
-
-  if (mobile) {
-    return (
-      <BottomSheet isOpen={isOpen} onClose={onClose}>
-        {modalContent}
-      </BottomSheet>
-    )
-  }
 
   return (
     <div className="fixed inset-0 z-[200] overflow-y-auto animate-in fade-in duration-300">

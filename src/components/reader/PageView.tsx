@@ -3,10 +3,11 @@
  */
 
 import { useState, useRef } from 'react'
-import { Loader2, ImageOff } from 'lucide-react'
+import { Loader2, ImageOff, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FitMode } from '@/store/readerStore'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
+import { isMobile } from '@/utils/platform'
 
 interface PageViewProps {
   imageUrl: string
@@ -18,6 +19,7 @@ interface PageViewProps {
   onLoad?: () => void
   onError?: () => void
   onClick?: (zone: 'left' | 'center' | 'right') => void
+  onRetry?: () => void
   className?: string
 }
 
@@ -31,6 +33,7 @@ export function PageView({
   onLoad,
   onError,
   onClick,
+  onRetry,
   className,
 }: PageViewProps) {
   // Proxy remote images through the Rust backend (adds required Referer header)
@@ -123,16 +126,29 @@ export function PageView({
     >
       {/* Loading state */}
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
-          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        <div className={cn('absolute inset-0 flex items-center justify-center', isMobile() ? 'bg-[rgba(42,42,42,0.5)]' : 'bg-muted/50')}>
+          isMobile() ? <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[var(--color-surface)] border-t-[var(--color-accent-primary)]" /> : <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </div>
       )}
 
       {/* Error state */}
       {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-muted/50 text-muted-foreground">
+        <div className={cn('absolute inset-0 flex flex-col items-center justify-center text-muted-foreground', isMobile() ? 'gap-1.5 bg-[var(--color-surface)] px-5 text-[var(--color-text-secondary)]' : 'bg-muted/50')}>
           <ImageOff className="w-12 h-12 mb-2" />
           <p className="text-sm">Failed to load page</p>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRetry()
+              }}
+              className={cn('mt-3 min-h-[44px] rounded-lg px-5 text-sm text-white', isMobile() ? 'flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-accent-primary)] text-[15px] font-semibold' : 'bg-white/10')}
+            >
+              {isMobile() && <RefreshCw size={16} aria-hidden="true" />}
+              Retry
+            </button>
+          )}
         </div>
       )}
 

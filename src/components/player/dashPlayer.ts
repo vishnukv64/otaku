@@ -1,0 +1,67 @@
+// DASH playback via shaka-player (hls.js cannot play MPD). The manifest and every
+// segment request is rewritten to the local video-server /proxy, so no MPD
+// rewriting is needed: shaka resolves relative segment URLs against the real
+// upstream manifest URL, then the request filter swaps the host for the proxy.
+
+interface VideoServerLike {
+  proxy_base_url: string
+  token: string
+}
+
+export const isDashUrl = (url: string) => /\.mpd(\?|$)/i.test(url)
+
+export interface DashHandle {
+  destroy: () => Promise<void>
+}
+
+export function proxyUri(videoServer: VideoServerLike, url: string, referrer?: string): string {
+  if (url.startsWith(videoServer.proxy_base_url)) return url
+  const referrerParam = referrer ? `&referrer=${encodeURIComponent(referrer)}` : ''
+  return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}${referrerParam}`
+}
+
+/** Inverse of proxyUri: the upstream URL a proxy URL points at (others unchanged). */
+export function upstreamUri(videoServer: VideoServerLike, url: string): string {
+  if (!url.startsWith(videoServer.proxy_base_url)) return url
+  return new URL(url).searchParams.get('url') ?? url
+}
+
+// Teardown still running per <video>. Callers fire destroy() without awaiting it; a
+// new player attached meanwhile gets its MediaSource reset by the old one's detach and
+// fails to load (switching show/episode → "Failed to load DASH stream").
+const teardowns = new WeakMap<HTMLVideoElement, Promise<void>>()
+
+export async function attachDash(
+  video: HTMLVideoElement,
+  url: string,
+  opts: { videoServer: VideoServerLike; referrer?: string; startTime?: number }
+): Promise<DashHandle> {
+  await teardowns.get(video)
+  const shaka = (await import('shaka-player')).default
+  shaka.polyfill.installAll()
+  const player = new shaka.Player()
+  const destroy = () => {
+    const done = player.destroy().catch(() => {})
+    teardowns.set(video, done)
+    return done
+  }
+  const handle: DashHandle = { destroy }
+  await player.attach(video)
+  const net = player.getNetworkingEngine()
+  net?.registerRequestFilter((_type, request) => {
+    request.uris = request.uris.map((u) => proxyUri(opts.videoServer, u, opts.referrer))
+  })
+  // Shaka resolves the MPD's relative segment paths against the response URI. Left as
+  // the proxy URL, every segment would resolve to `<proxy host>/chunks/...` (404 →
+  // endless buffering), so report the upstream URL instead.
+  net?.registerResponseFilter((_type, response) => {
+    response.uri = upstreamUri(opts.videoServer, response.uri)
+  })
+  try {
+    await player.load(url, opts.startTime && opts.startTime > 0 ? opts.startTime : null)
+  } catch (err) {
+    await destroy()
+    throw err
+  }
+  return handle
+}

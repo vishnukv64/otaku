@@ -118,6 +118,9 @@ pub struct Episode {
     pub thumbnail: Option<String>,
     /// ISO 8601 air date. If in the future, the episode hasn't aired yet.
     pub aired: Option<String>,
+    /// Runtime in seconds, when the provider reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
 }
 
 /// Season information
@@ -168,6 +171,25 @@ pub struct MediaDetails {
     /// Interval between episodes in milliseconds
     #[serde(alias = "broadcastInterval")]
     pub broadcast_interval: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_rating: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_locales: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broadcast: Option<Broadcast>,
+}
+
+/// Weekly broadcast slot; `time` is UTC HH:mm.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Broadcast {
+    pub day: String,
+    pub time: String,
 }
 
 /// A single playable video source.
@@ -200,6 +222,13 @@ pub struct VideoSource {
     pub audio_type: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<Subtitle>,
+    /// WebVTT sprite map for seek-bar previews, when the provider has one.
+    #[serde(default, alias = "previewVtt", skip_serializing_if = "Option::is_none")]
+    pub preview_vtt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_synopsis: Option<String>,
 }
 
 /// Subtitle track

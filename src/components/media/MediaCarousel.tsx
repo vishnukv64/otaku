@@ -8,6 +8,7 @@
  */
 
 import { useCallback } from 'react'
+import { isMobile } from '@/utils/platform'
 import { Link } from '@tanstack/react-router'
 import useEmblaCarousel from 'embla-carousel-react'
 import { WheelGesturesPlugin } from 'embla-carousel-wheel-gestures'
@@ -22,6 +23,11 @@ interface MediaCarouselProps {
   items: SearchResult[]
   loading?: boolean
   onItemClick?: (item: SearchResult) => void
+  /** Phone: inline row error with Retry (mock: home.html) */
+  error?: string | null
+  onRetry?: () => void
+  /** Phone offline: row is greyed and not tappable */
+  disabled?: boolean
   /** When true, displays rank numbers (1, 2, 3...) on each card */
   showRank?: boolean
   /** Optional "See all" link href */
@@ -55,9 +61,10 @@ const skeletonGridClasses = {
   spacious: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 3xl:grid-cols-6 4xl:grid-cols-8 5xl:grid-cols-10 gap-6',
 }
 
-export function MediaCarousel({ title, items, loading = false, onItemClick, showRank, seeAllHref, seeAllText = 'See all' }: MediaCarouselProps) {
+export function MediaCarousel({ title, items, loading = false, onItemClick, error, onRetry, disabled, showRank, seeAllHref, seeAllText = 'See all' }: MediaCarouselProps) {
   const gridDensity = useSettingsStore((state) => state.gridDensity)
   const { getStatus } = useMediaStatusContext()
+  const mobile = isMobile()
 
   const [emblaRef, emblaApi] = useEmblaCarousel(
     {
@@ -79,11 +86,27 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
   if (loading) {
     return (
       <div className="mb-9">
-        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3">{title}</h2>
+        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">{title}</h2>
         <div className={`grid ${skeletonGridClasses[gridDensity]}`}>
           {Array.from({ length: 6 }).map((_, i) => (
             <MediaCardSkeleton key={i} />
           ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (items.length === 0 && error && isMobile()) {
+    return (
+      <div className="mb-9">
+        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">{title}</h2>
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] px-4 py-3">
+          <span className="text-sm text-[var(--color-text-secondary)]">Couldn’t load {title}</span>
+          {onRetry && (
+            <button onClick={onRetry} className="min-h-[44px] px-3 text-sm font-semibold text-[var(--color-accent-light)]">
+              Retry
+            </button>
+          )}
         </div>
       </div>
     )
@@ -97,11 +120,11 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
     <div className="mb-9 group/carousel overflow-visible">
       {/* Section Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">{title}</h2>
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">{title}</h2>
         {seeAllHref && (
           <Link
             to={seeAllHref}
-            className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+            className="flex items-center gap-1 text-sm max-sm:min-h-[44px] max-sm:text-[13px] max-sm:text-[var(--color-text-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
           >
             {seeAllText}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
@@ -133,21 +156,22 @@ export function MediaCarousel({ title, items, loading = false, onItemClick, show
           </div>
         </button>
 
-        {/* Embla Viewport - clip vertical, allow horizontal scroll */}
-        <div 
-          className="overflow-x-hidden"
-          style={{ 
-            overflowY: 'clip',
-            touchAction: 'pan-y pinch-zoom',
-            contain: 'layout style'
-          }}
-          ref={emblaRef}
+        {/* Desktop: Embla viewport. Phone: native horizontal scroll with snap, which iOS
+            axis-locks and flings natively (Embla's JS drag let rows drift vertically). */}
+        <div
+          className={mobile ? 'scrollbar-hide -mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 snap-x snap-mandatory' : 'overflow-x-hidden'}
+          style={
+            mobile
+              ? { WebkitOverflowScrolling: 'touch' }
+              : { overflowY: 'clip', touchAction: 'pan-y pinch-zoom', contain: 'layout style' }
+          }
+          ref={mobile ? undefined : emblaRef}
         >
-          <div className={`flex ${carouselGapClasses[gridDensity]} px-4 -mx-4 py-4`}>
+          <div className={`flex ${carouselGapClasses[gridDensity]} ${mobile ? 'w-max px-4' : 'px-4 -mx-4'} py-4 ${disabled ? 'pointer-events-none opacity-40' : ''}`}>
             {items.map((item, index) => (
               <div
                 key={item.id}
-                className={carouselItemClasses[gridDensity]}
+                className={mobile ? `w-[112px] shrink-0 snap-start` : carouselItemClasses[gridDensity]}
               >
                 <MediaCard
                   media={item}

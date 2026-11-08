@@ -23,6 +23,8 @@ import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { TimelineView } from './TimelineView'
 import { SeriesView } from './SeriesView'
+import { isMobile } from '@/utils/platform'
+import { ConfirmSheet, ErrorState } from '@/components/mobile/you/ui'
 
 type ViewMode = 'timeline' | 'series'
 type TypeFilter = 'all' | 'anime' | 'manga'
@@ -51,6 +53,8 @@ export function HistoryPage() {
 
   const [initialLoading, setInitialLoading] = useState(true)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const mobile = isMobile()
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
@@ -70,6 +74,7 @@ export function HistoryPage() {
     async (page: number, append: boolean) => {
       if (page === 1) setInitialLoading(true)
       setTimelineLoading(true)
+      setLoadError(false)
       try {
         const results = await getAllHistory(page, PAGE_SIZE, mediaTypeParam, searchParam)
         const filtered = filterNsfwContent(
@@ -86,6 +91,7 @@ export function HistoryPage() {
         setTimelineHasMore(results.length === PAGE_SIZE)
       } catch (err) {
         console.error('Failed to load history:', err)
+        setLoadError(true)
         notifyError('Error', 'Failed to load history')
       } finally {
         setTimelineLoading(false)
@@ -100,6 +106,7 @@ export function HistoryPage() {
     async (page: number, append: boolean) => {
       if (page === 1) setInitialLoading(true)
       setSeriesLoading(true)
+      setLoadError(false)
       try {
         const results = await getHistoryGroupedByMedia(page, PAGE_SIZE, mediaTypeParam, searchParam)
         const filtered = filterNsfwContent(
@@ -116,6 +123,7 @@ export function HistoryPage() {
         setSeriesHasMore(results.length === PAGE_SIZE)
       } catch (err) {
         console.error('Failed to load series history:', err)
+        setLoadError(true)
         notifyError('Error', 'Failed to load series history')
       } finally {
         setSeriesLoading(false)
@@ -175,9 +183,9 @@ export function HistoryPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
+    <div className={`min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 max-w-4k mx-auto ${mobile ? 'py-2 pb-24' : 'py-8'}`}>
       {/* Header */}
-      <div className="mb-8">
+      <div className={mobile ? 'hidden' : 'mb-8'}>
         <h1 className="text-[2.5rem] font-extrabold font-display mb-1.5 bg-gradient-to-br from-[var(--color-text-primary)] to-[var(--color-text-secondary)] bg-clip-text text-transparent flex items-center gap-3">
           <Clock className="w-8 h-8 text-[var(--color-accent-primary)]" />
           History
@@ -188,9 +196,9 @@ export function HistoryPage() {
       </div>
 
       {/* Controls row */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className={mobile ? 'flex flex-col gap-3 mb-4' : 'flex flex-wrap items-center gap-3 mb-6'}>
         {/* View toggle */}
-        <div className="flex gap-1 p-1 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)]">
+        <div className="flex gap-1 p-1 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] [&>button]:flex-1 [&>button]:justify-center [&>button]:min-h-[36px] sm:[&>button]:flex-none">
           <button
             onClick={() => setViewMode('timeline')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] text-sm font-medium transition-all ${
@@ -216,7 +224,7 @@ export function HistoryPage() {
         </div>
 
         {/* Type filter tabs */}
-        <div className="flex gap-1 p-1 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)]">
+        <div className="flex gap-1 p-1 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] [&>button]:flex-1 [&>button]:justify-center [&>button]:min-h-[36px] sm:[&>button]:flex-none">
           {(['all', 'anime', 'manga'] as const).map((type) => (
             <button
               key={type}
@@ -233,30 +241,32 @@ export function HistoryPage() {
         </div>
 
         {/* Search */}
-        <div className="relative flex-1 min-w-[180px] max-w-xs ml-auto">
+        <div className="relative flex-1 min-w-[180px] max-w-xs ml-auto max-sm:max-w-none max-sm:w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-dim)]" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search history..."
-            className="w-full pl-9 pr-3 py-2 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none focus:border-[var(--color-accent-primary)] transition-colors"
+            className="w-full pl-9 pr-3 py-2 max-sm:min-h-[44px] rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none focus:border-[var(--color-accent-primary)] transition-colors"
           />
         </div>
 
         {/* Clear All */}
         <button
           onClick={() => setShowClearConfirm(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-[var(--radius-md)] text-sm font-medium text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          className="flex items-center justify-center gap-1.5 px-3 py-2 max-sm:min-h-[44px] rounded-[var(--radius-md)] text-sm font-medium text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
           title="Clear all history"
         >
           <Trash2 className="w-4 h-4" />
-          <span className="hidden sm:inline">Clear All</span>
+          <span className="max-sm:inline">Clear All</span>
         </button>
       </div>
 
       {/* Content */}
-      {initialLoading ? (
+      {loadError && !initialLoading ? (
+        <ErrorState message="Couldn't load your history." onRetry={() => (viewMode === 'timeline' ? loadTimeline(1, false) : loadSeries(1, false))} />
+      ) : initialLoading ? (
         <div className="flex flex-col items-center justify-center py-20">
           <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent-primary)] mb-4" />
           <p className="text-lg text-[var(--color-text-secondary)]">Loading history...</p>
@@ -279,8 +289,10 @@ export function HistoryPage() {
         />
       )}
 
-      {/* Clear Confirmation Dialog */}
-      {showClearConfirm && (
+      {mobile && (
+        <ConfirmSheet isOpen={showClearConfirm} onClose={() => setShowClearConfirm(false)} title="Clear all history?" text="This permanently deletes all your watch and reading history. This can't be undone." confirmLabel="Clear history" onConfirm={handleClearAll} />
+      )}
+      {!mobile && showClearConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-[var(--color-card)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] p-6 max-w-sm w-full mx-4">
             <h3 className="text-lg font-bold text-[var(--color-text-primary)] mb-2">

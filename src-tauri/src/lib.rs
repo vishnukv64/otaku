@@ -7,9 +7,11 @@ mod extensions;
 mod jikan;
 mod media;
 mod notifications;
+mod orientation;
 mod request_headers;
 mod release_checker;
 mod status_normalizer;
+mod sync;
 mod trackers;
 #[cfg_attr(desktop, path = "tray.rs")]
 #[cfg_attr(not(desktop), path = "tray_stub.rs")]
@@ -231,6 +233,38 @@ pub fn run() {
       #[cfg(desktop)]
       app_handle.manage(tray::TrayLifecycleState::default());
 
+      // iOS: edge swipe from the left goes back (WKWebView's own gesture; it walks the
+      // pushState history the router writes, so every in-app page gets it).
+      #[cfg(target_os = "ios")]
+      if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.with_webview(|wv| unsafe {
+          use objc2::{msg_send, runtime::AnyObject};
+          let webview = wv.inner() as *mut AnyObject;
+          if !webview.is_null() {
+            let _: () = msg_send![webview, setAllowsBackForwardNavigationGestures: true];
+          }
+        });
+      }
+
+      // Dev-build only: OTAKU_DEV_EVAL=<js> runs that script in the main webview a few
+      // seconds after launch. Used to drive screens on a real iPhone for screenshot
+      // checks (`devicectl device process launch --environment-variables`). Not in
+      // release builds.
+      #[cfg(debug_assertions)]
+      if let Ok(script) = std::env::var("OTAKU_DEV_EVAL") {
+        let handle = app_handle.clone();
+        std::thread::spawn(move || {
+          let delay = std::env::var("OTAKU_DEV_EVAL_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4000);
+          std::thread::sleep(std::time::Duration::from_millis(delay));
+          if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.eval(&script);
+          }
+        });
+      }
+
       // If launched with --hidden (e.g. by the autostart LaunchAgent), start
       // straight into the tray instead of showing the window.
       if std::env::args().any(|a| a == "--hidden") {
@@ -284,6 +318,14 @@ pub fn run() {
 
         // Add database to app state
         app_handle.manage(AppState::new(database));
+
+        // Pair & sync engine (phone <-> Mac)
+        match sync::Engine::start(app_handle.clone(), db_pool.as_ref().clone()).await {
+            Ok(engine) => {
+                app_handle.manage(engine);
+            }
+            Err(e) => log::error!("Failed to start sync engine: {}", e),
+        }
 
         // Initialize download manager with database
         let downloads_dir = app_dir.join("downloads");
@@ -379,6 +421,7 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
+      orientation::set_orientation,
       commands::load_extension,
       commands::search_anime,
       commands::discover_anime,
@@ -428,6 +471,8 @@ pub fn run() {
       commands::get_downloads_directory,
       commands::open_downloads_folder,
       commands::remove_download,
+      commands::retry_download,
+      commands::get_free_storage,
       commands::delete_download,
       commands::delete_episode_download,
       commands::clear_completed_downloads,
@@ -626,6 +671,23 @@ pub fn run() {
       commands::get_autostart_status,
       commands::set_desktop_notifications_enabled,
       commands::get_desktop_notifications_enabled,
+      // Pair & sync
+      sync::sync_status,
+      sync::sync_start_pairing,
+      sync::sync_cancel_pairing,
+      sync::sync_approve_pair,
+      sync::sync_pair_scan,
+      sync::sync_pair_redeem,
+      sync::sync_pair_connect,
+      sync::sync_unpair,
+      sync::sync_set_toggles,
+      sync::sync_rename_device,
+      sync::sync_set_relay_url,
+      sync::sync_relay_signin,
+      sync::sync_relay_signout,
+      sync::sync_stats,
+      sync::sync_mark_conflicts_seen,
+      sync::sync_send,
     ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")

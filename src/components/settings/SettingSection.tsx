@@ -1,3 +1,5 @@
+import { isMobile } from '@/utils/platform'
+
 interface SettingSectionProps {
   title: string
   description?: string
@@ -5,6 +7,20 @@ interface SettingSectionProps {
 }
 
 export function SettingSection({ title, description, children }: SettingSectionProps) {
+  if (isMobile()) {
+    // iOS grouped list: caption above, rows divided inside one rounded group
+    return (
+      <section className="mb-5">
+        <h3 className="px-4 pb-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          {title}
+          {description && <span className="ml-1.5 font-normal normal-case tracking-normal">· {description}</span>}
+        </h3>
+        <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] [&>*+*]:border-t [&>*+*]:border-[var(--color-glass-border)]">
+          {children}
+        </div>
+      </section>
+    )
+  }
   return (
     <div className="mb-8">
       <div className="mb-4">

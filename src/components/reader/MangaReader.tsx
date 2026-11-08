@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Hand, Info, Loader2, WifiOff, ZoomIn } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useReaderStore } from '@/store/readerStore'
 import { saveReadingProgress } from '@/utils/tauri-commands'
@@ -24,6 +24,7 @@ import { PageView } from './PageView'
 import { VerticalScrollView } from './VerticalScrollView'
 import { ReaderControls } from './ReaderControls'
 import { ReaderSettings } from './ReaderSettings'
+import { MobileChapterSheet, MobileReaderSettings } from './MobileReaderSheets'
 import { ChapterList } from './ChapterList'
 
 /** Sub-component for double-page mode images that proxies remote URLs */
@@ -83,6 +84,8 @@ interface MangaReaderProps {
   hasPreviousChapter?: boolean
   chapters?: Chapter[]
   onNextChapter?: () => void
+  /** Chapter is being read from downloaded files (phone shows a badge). */
+  offline?: boolean
   onPreviousChapter?: () => void
   onChapterSelect?: (chapterId: string) => void
   onGoBack?: () => void
@@ -101,6 +104,7 @@ export function MangaReader({
   hasPreviousChapter = false,
   chapters = [],
   onNextChapter,
+  offline,
   onPreviousChapter,
   onChapterSelect,
   onGoBack,
@@ -110,7 +114,8 @@ export function MangaReader({
   const containerRef = useRef<HTMLDivElement>(null)
   const hideControlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const { refresh: refreshMediaStatus } = useMediaStatusContext()
-  const { isMobile: mobile } = useMobileLayout()
+  const { isMobile: mobile, isLandscape } = useMobileLayout()
+  const [retryKey, setRetryKey] = useState(0)
 
   // Refs for unmount save (to avoid stale closures)
   const mangaIdRef = useRef(mangaId)
@@ -151,10 +156,25 @@ export function MangaReader({
   const [chapterListOpen, setChapterListOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isBookmarked, setIsBookmarked] = useState(false)
+  // Phone: first-open tap-zone legend (mock "Tap zones"), remembered in localStorage
+  const [showZones, setShowZones] = useState(() => {
+    try {
+      return !localStorage.getItem('reader.zonesSeen')
+    } catch {
+      return false
+    }
+  })
+  const [showResume, setShowResume] = useState(initialPage > 1)
+  useEffect(() => {
+    if (!showResume) return
+    const t = setTimeout(() => setShowResume(false), 5000)
+    return () => clearTimeout(t)
+  }, [showResume])
 
   // Check if we can navigate to adjacent chapters (use props passed from parent)
   const canGoToPreviousChapter = !!(onPreviousChapter && hasPreviousChapter)
   const canGoToNextChapter = !!(onNextChapter && hasNextChapter)
+  const nextChapterInfo = chapters[chapters.findIndex((c) => c.id === chapterId) + 1]
 
   // Wrapper for next page that handles chapter boundary
   const handleNextPage = useCallback(() => {
@@ -269,9 +289,11 @@ export function MangaReader({
     }
   }, [refreshMediaStatus]) // Include refreshMediaStatus in deps
 
-  // On mobile, only allow single and webtoon modes
+  // On mobile, double only works in landscape
   const effectiveReadingMode = mobile
-    ? (settings.readingMode === 'double' || settings.readingMode === 'vertical' ? 'single' : settings.readingMode)
+    ? ((settings.readingMode === 'double' && !isLandscape)
+        ? 'single'
+        : settings.readingMode)
     : settings.readingMode
 
   // Check if current mode is vertical scroll (webtoon or vertical)
@@ -420,8 +442,21 @@ export function MangaReader({
     if (!container) return
 
     let startX = 0
-    const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX }
+    let pinch: { dist: number; zoom: number } | null = null
+    const dist = (e: TouchEvent) =>
+      Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
+    const onTouchStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX
+      if (e.touches.length === 2) pinch = { dist: dist(e), zoom: useReaderStore.getState().settings.zoom }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (pinch && e.touches.length === 2) useReaderStore.getState().setZoom(pinch.zoom * (dist(e) / pinch.dist))
+    }
     const onTouchEnd = (e: TouchEvent) => {
+      if (pinch) {
+        if (e.touches.length === 0) pinch = null
+        return
+      }
       const deltaX = e.changedTouches[0].clientX - startX
       if (Math.abs(deltaX) < 50) return // ignore small swipes
       if (settings.readingDirection === 'rtl') {
@@ -432,9 +467,11 @@ export function MangaReader({
     }
 
     container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchmove', onTouchMove, { passive: true })
     container.addEventListener('touchend', onTouchEnd, { passive: true })
     return () => {
       container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchmove', onTouchMove)
       container.removeEventListener('touchend', onTouchEnd)
     }
   }, [mobile, isVerticalScrollMode, settings.readingDirection, handleNextPage, handlePreviousPage])
@@ -553,7 +590,7 @@ export function MangaReader({
 
         return (
           <div className={cn(
-            'flex-1 flex items-center justify-center gap-2 p-2',
+            mobile ? 'flex-1 flex items-center justify-center' : 'flex-1 flex items-center justify-center gap-2 p-2',
             settings.fitMode === 'original' ? 'overflow-auto' : 'overflow-hidden'
           )}>
             {leftPage && (
@@ -580,6 +617,8 @@ export function MangaReader({
       default:
         return (
           <PageView
+            key={`${currentPage}-${retryKey}`}
+            onRetry={() => setRetryKey((k) => k + 1)}
             imageUrl={currentImage?.url || ''}
             pageNumber={currentPage}
             totalPages={totalPages}
@@ -600,10 +639,136 @@ export function MangaReader({
         'relative w-full h-full flex flex-col overflow-hidden',
         'select-none'
       )}
-      style={{ backgroundColor: settings.backgroundColor }}
+      style={{ backgroundColor: settings.backgroundColor, filter: `brightness(${settings.brightness})` }}
     >
       {/* Main content */}
       {renderContent()}
+
+      {mobile && offline && showControls && (
+        <div className="pointer-events-none absolute inset-x-3 z-[150] flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-glass-bg-hover)] px-3 py-2 text-[13px] text-[var(--color-text-primary)]" style={{ top: 'calc(var(--sat) + 64px)' }}>
+          <WifiOff size={16} className="shrink-0 text-[var(--color-warn)]" aria-hidden="true" />
+          You are offline. Reading from downloaded content.
+        </div>
+      )}
+
+      {/* Tap-zone legend (phone, first open; mock "Tap zones") */}
+      {mobile && showZones && !isVerticalScrollMode && totalPages > 0 && (
+        <button
+          type="button"
+          aria-label="Dismiss tap zone legend"
+          onClick={() => {
+            setShowZones(false)
+            try {
+              localStorage.setItem('reader.zonesSeen', '1')
+            } catch {
+              /* private mode: just hide for this session */
+            }
+          }}
+          className="absolute inset-0 z-[250] grid grid-cols-[30fr_40fr_30fr] text-center text-[13px] font-semibold text-[var(--color-text-primary)]"
+        >
+          {(() => {
+            const rtl = settings.readingDirection === 'rtl'
+            const zone = (cls: string, Icon: typeof Hand, label: string, pos: string) => (
+              <div className={`flex flex-col items-center justify-center gap-2 px-1 ${cls}`}>
+                <Icon size={24} aria-hidden="true" />
+                {label}
+                <small className="text-[11.5px] font-medium text-[var(--color-text-secondary)]">{pos}</small>
+              </div>
+            )
+            return (
+              <>
+                {zone(rtl ? 'bg-[rgba(70,211,105,0.35)]' : 'bg-[rgba(229,9,20,0.45)]', ChevronLeft, rtl ? 'Next' : 'Previous', 'left 30%')}
+                {zone('border-x border-dashed border-[var(--color-glass-border-hover)] bg-black/35', Hand, 'Show / hide controls', 'centre 40%')}
+                {zone(rtl ? 'bg-[rgba(229,9,20,0.45)]' : 'bg-[rgba(70,211,105,0.35)]', ChevronRight, rtl ? 'Previous' : 'Next', 'right 30%')}
+              </>
+            )
+          })()}
+        </button>
+      )}
+
+      {/* Zoom tag (phone) */}
+      {mobile && showControls && Math.abs(settings.zoom - 1) > 0.01 && (
+        <div className="absolute left-3 z-[150] inline-flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-[5px] text-[13px] font-semibold text-white" style={{ top: 'calc(var(--sat) + 70px)' }}>
+          <ZoomIn size={14} aria-hidden="true" />
+          {Math.round(settings.zoom * 100)}%
+        </div>
+      )}
+
+      {/* Double-page pill with both pages (phone; chrome hidden) */}
+      {mobile && effectiveReadingMode === 'double' && !showControls && totalPages > 0 && (
+        <div className="pointer-events-none absolute bottom-2.5 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-sm font-medium text-white">
+          {currentPage < totalPages ? `${currentPage}–${currentPage + 1}` : currentPage} / {totalPages}
+        </div>
+      )}
+
+      {/* Resume toast (phone; mock "Resuming toast") */}
+      {mobile && showResume && !showZones && (
+        <div
+          role="status"
+          className="absolute inset-x-3 z-[150] flex items-center gap-2.5 rounded-[var(--radius-lg)] border border-[var(--color-glass-border-hover)] bg-[#2b2b2b] px-3.5 py-3 text-[13.5px] shadow-md"
+          style={{ bottom: 'calc(var(--sab) + 60px)' }}
+        >
+          <Info size={18} className="shrink-0 text-[var(--color-info)]" aria-hidden="true" />
+          <div className="text-[var(--color-text-secondary)]">
+            <b className="block font-semibold text-white">Resuming Reading</b>
+            Resuming from page {initialPage}
+          </div>
+          <button
+            type="button"
+            className="ml-auto min-h-9 px-1.5 font-semibold text-[var(--color-accent-light)]"
+            onClick={() => {
+              setCurrentPage(1)
+              setShowResume(false)
+            }}
+          >
+            Start over
+          </button>
+        </div>
+      )}
+
+      {/* End-of-chapter card (phone; mock reader.html "End of chapter") */}
+      {mobile && !isVerticalScrollMode && totalPages > 0 && currentPage >= totalPages && !showControls && (
+        <div className="absolute inset-x-4 bottom-6 z-10 rounded-2xl bg-black/85 p-4 text-white">
+          {canGoToNextChapter && nextChapterInfo ? (
+            <>
+              <div className="text-xs uppercase tracking-wide text-white/50">You finished Ch. {currentChapter}</div>
+              <h3 className="mt-1 font-display text-lg font-bold">Next: Ch. {nextChapterInfo.number}</h3>
+              <div className="text-xs text-white/60">
+                {[nextChapterInfo.title, nextChapterInfo.releaseDate].filter(Boolean).join(' · ')}
+              </div>
+              <div className="mt-2 text-xs text-white/50">Marks Ch. {currentChapter} read ({settings.markReadThreshold}% passed)</div>
+              <button
+                type="button"
+                onClick={() => onNextChapter?.()}
+                className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-1 rounded-xl bg-[var(--color-accent-primary)] text-sm font-semibold"
+              >
+                Read Ch. {nextChapterInfo.number}
+                <ChevronRight size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowControls(true)}
+                className="mt-2 min-h-[48px] w-full rounded-xl border border-white/20 text-sm font-semibold"
+              >
+                Stay on this page
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-xs uppercase tracking-wide text-white/50">Ch. {currentChapter} · last available</div>
+              <h3 className="mt-1 font-display text-lg font-bold">You are all caught up</h3>
+              <div className="text-xs text-white/60">New chapters appear in your Library as they release.</div>
+              <button
+                type="button"
+                onClick={() => onGoBack?.()}
+                className="mt-3 min-h-[48px] w-full rounded-xl border border-white/20 text-sm font-semibold"
+              >
+                Back to details
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Controls overlay */}
       {showControls && (
@@ -633,6 +798,8 @@ export function MangaReader({
             setShowControls(true)
           }}
           onGoBack={() => onGoBack?.()}
+          offline={offline}
+          landscape={isLandscape}
           readingMode={settings.readingMode}
           onReadingModeChange={(mode) => useReaderStore.getState().setReadingMode(mode)}
           showControls={showControls}
@@ -640,6 +807,24 @@ export function MangaReader({
       )}
 
       {/* Settings panel */}
+      {mobile ? (
+        <>
+          <MobileReaderSettings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+          <MobileChapterSheet
+            mediaId={mangaId ?? ''}
+            isOpen={chapterListOpen}
+            onClose={() => setChapterListOpen(false)}
+            chapters={chapters}
+            currentChapterId={chapterId}
+            readChapters={readChapters}
+            onSelect={(id) => {
+              onChapterSelect?.(id)
+              setChapterListOpen(false)
+            }}
+          />
+        </>
+      ) : (
+        <>
       <ReaderSettings
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -658,6 +843,8 @@ export function MangaReader({
         isOpen={chapterListOpen}
         readChapters={readChapters}
       />
+        </>
+      )}
 
       {/* Scroll progress bar — fixed 2px accent bar at top (mock: always visible) */}
       {totalPages > 0 && (

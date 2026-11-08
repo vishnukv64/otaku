@@ -1,6 +1,6 @@
 import type { Subtitle, VideoSource } from '@/types/extension'
 import { isAdaptive, qualityLabel, type QualityPreference } from './pickSource'
-import { listAdaptiveVariants, resolveAdaptiveToVariant } from './hlsResolve'
+import { downloadVariantUrl, listAdaptiveVariants, resolveAdaptiveToVariant } from './hlsResolve'
 
 export interface DownloadSourceChoice {
   key: string
@@ -100,7 +100,7 @@ export async function buildDownloadSourceChoices(
             key,
             source: {
               ...source,
-              url: variant.url,
+              url: downloadVariantUrl(variant),
               resolution: variant.resolution,
               quality: `${variant.resolution}p`,
             },

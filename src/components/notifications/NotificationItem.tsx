@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { X, Info } from 'lucide-react'
+import { X, Info, MoreHorizontal, Check, Trash2 } from 'lucide-react'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
+import { isMobile } from '@/utils/platform'
 import type { Notification } from '@/store/notificationStore'
 import { getNotifCategory } from './NotificationCenter'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
@@ -60,6 +62,8 @@ export function NotificationItem({
   }
 
   const [imgError, setImgError] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const mobile = isMobile()
   const category = getNotifCategory(notification)
   const badge = getBadgeConfig(category)
   const thumbnail = coverUrl || (notification.metadata?.thumbnail || notification.metadata?.image) as string | undefined
@@ -130,16 +134,37 @@ export function NotificationItem({
       )}
 
       {/* Dismiss button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          onDismiss(notification.id)
-        }}
-        className="absolute top-2 right-2 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-white/10"
-        title="Dismiss"
-      >
-        <X size={14} />
-      </button>
+      {mobile ? (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setMenuOpen(true)
+            }}
+            aria-label="Notification actions"
+            className="flex-shrink-0 -mr-1 flex h-11 w-11 items-center justify-center rounded-full text-[var(--color-text-secondary)]"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          <BottomSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} title={notification.title}>
+            {!notification.read && (
+              <SheetOption icon={<Check size={18} />} onClick={() => { setMenuOpen(false); onMarkRead(notification.id) }}>Mark as read</SheetOption>
+            )}
+            <SheetOption destructive icon={<Trash2 size={18} />} onClick={() => { setMenuOpen(false); onDismiss(notification.id) }}>Delete</SheetOption>
+          </BottomSheet>
+        </>
+      ) : (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDismiss(notification.id)
+          }}
+          className="absolute top-2 right-2 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-white/10"
+          title="Dismiss"
+        >
+          <X size={14} />
+        </button>
+      )}
     </div>
   )
 }

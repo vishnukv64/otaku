@@ -2,6 +2,7 @@
  * TopContent — ranked lists of top 5 anime (by time) and manga (by chapters)
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { Tv, BookOpen } from 'lucide-react'
 import { useProxiedImage } from '@/hooks/useProxiedImage'
 import type { TopWatchedEntry, TopReadEntry } from '@/utils/tauri-commands'
@@ -65,10 +66,10 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
                 <span className="text-sm font-bold text-[var(--color-text-tertiary)] w-5 text-right shrink-0">
                   {i + 1}
                 </span>
-                <AnimeThumbnail url={entry.media.cover_url} title={entry.media.title} />
+                <AnimeThumbnail url={entry.media.cover_url} title={displayTitle(entry.media)} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                    {entry.media.title}
+                    {displayTitle(entry.media)}
                   </p>
                   <p className="text-xs text-[var(--color-text-tertiary)]">
                     {formatTime(entry.total_time_seconds)} &middot; {entry.episodes_watched}{' '}
@@ -98,10 +99,10 @@ export function TopContent({ topAnime, topManga }: TopContentProps) {
                 <span className="text-sm font-bold text-[var(--color-text-tertiary)] w-5 text-right shrink-0">
                   {i + 1}
                 </span>
-                <MangaThumbnail url={entry.media.cover_url} title={entry.media.title} />
+                <MangaThumbnail url={entry.media.cover_url} title={displayTitle(entry.media)} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                    {entry.media.title}
+                    {displayTitle(entry.media)}
                   </p>
                   <p className="text-xs text-[var(--color-text-tertiary)]">
                     {entry.chapters_read} chapters read

@@ -15,7 +15,11 @@ import {
   Settings,
   BookOpen,
   AlignVerticalSpaceAround,
+  SkipBack,
+  SkipForward,
 } from 'lucide-react'
+import { isMobile } from '@/utils/platform'
+import { ReaderPagedLtr, ReaderWebtoon } from '@/components/ui/OtakuIcons'
 import { cn } from '@/lib/utils'
 
 // Icon button style matching mock: 36x36, radius-md, glass border/bg
@@ -59,6 +63,10 @@ interface ReaderControlsProps {
   onOpenSettings: () => void
   onOpenChapterList: () => void
   onGoBack: () => void
+  /** Phone chrome: show "· Downloaded" in the subtitle */
+  offline?: boolean
+  /** Phone landscape: compact top bar and single-row bottom bar */
+  landscape?: boolean
 
   // Display options
   readingMode?: ReadingMode
@@ -88,9 +96,115 @@ export function ReaderControls({
   onOpenSettings,
   onOpenChapterList,
   onGoBack,
+  offline,
+  landscape,
+  onPageChange,
   readingMode = 'vertical',
   onReadingModeChange,
 }: ReaderControlsProps) {
+  if (isMobile()) {
+    const scroll = readingMode === 'vertical' || readingMode === 'webtoon'
+    const mobBtn =
+      'flex h-11 w-[42px] shrink-0 items-center justify-center text-[var(--color-text-primary)]'
+    const chBtn =
+      'inline-flex min-h-11 min-w-11 max-w-[30%] shrink items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg-hover)] px-2 text-[13px] font-semibold text-[var(--color-text-primary)] disabled:opacity-40'
+    const pct = totalPages > 1 ? ((currentPage - 1) / (totalPages - 1)) * 100 : 0
+    return (
+      <>
+        <div
+          className="fixed inset-x-0 top-0 z-[200] box-border flex h-14 items-center bg-[var(--color-overlay)]"
+          style={{ paddingTop: 'var(--sat)', paddingLeft: 'max(4px, env(safe-area-inset-left))', paddingRight: 'max(4px, env(safe-area-inset-right))', height: `calc(${landscape ? 48 : 56}px + var(--sat))` }}
+        >
+          <button onClick={onGoBack} aria-label="Back to details" className={mobBtn}>
+            <ChevronLeft size={20} />
+          </button>
+          <div className="min-w-0 flex-1 px-1">
+            <b className="block truncate font-display text-[15px] leading-tight text-[var(--color-text-primary)]">{mangaTitle || 'Manga'}</b>
+            <span className="block truncate text-xs text-[var(--color-text-secondary)]">
+              Ch. {currentChapterNumber || '-'}
+              {chapterTitle ? ` · ${chapterTitle}` : ''}
+              {offline ? ' · Downloaded' : ''}
+            </span>
+          </div>
+          {onToggleBookmark && (
+            <button
+              onClick={onToggleBookmark}
+              aria-label="Bookmark"
+              className={cn(mobBtn, isBookmarked && 'text-[var(--color-gold)]')}
+            >
+              <Bookmark size={20} fill={isBookmarked ? 'currentColor' : 'none'} />
+            </button>
+          )}
+          <button onClick={onOpenChapterList} aria-label="Chapter list" className={mobBtn}>
+            <List size={20} />
+          </button>
+          <button onClick={onOpenSettings} aria-label="Settings" className={mobBtn}>
+            <Settings size={20} />
+          </button>
+        </div>
+        <div
+          className={cn(
+            'fixed inset-x-0 bottom-0 z-[200] bg-[var(--color-overlay)]',
+            'box-border w-full min-w-0',
+            landscape ? 'flex items-center gap-3.5 pt-2' : 'grid gap-2.5 pt-3'
+          )}
+          style={{
+            paddingBottom: 'calc(var(--sab) + 12px)',
+            paddingLeft: `max(${landscape ? 20 : 14}px, env(safe-area-inset-left))`,
+            paddingRight: `max(${landscape ? 20 : 14}px, env(safe-area-inset-right))`,
+          }}
+        >
+          <div className={cn('flex min-w-0 items-center gap-2.5 text-[13px] text-[var(--color-text-secondary)]', landscape && 'flex-1')}>
+            <span className="min-w-[3ch] text-right">1</span>
+            <input
+              type="range"
+              aria-label="Page"
+              min={1}
+              max={totalPages || 1}
+              value={currentPage}
+              onChange={(e) => onPageChange?.(Number(e.target.value))}
+              className="mx-3.5 h-1 min-w-0 flex-1 accent-[var(--color-accent-primary)]"
+              style={{ background: `linear-gradient(to right, var(--color-accent-primary) ${pct}%, var(--color-surface) ${pct}%)` }}
+            />
+            <span className="min-w-[3ch]">{totalPages}</span>
+          </div>
+          <div className={cn('-mt-0.5 text-center text-sm font-semibold text-[var(--color-text-primary)]', landscape && 'hidden')}>
+            {currentPage} / {totalPages}
+          </div>
+          <div className={cn('flex min-w-0 items-center justify-between', landscape ? 'gap-3' : 'gap-2')}>
+            <button onClick={onPreviousChapter} disabled={!hasPreviousChapter} aria-label="Previous chapter" className={chBtn}>
+              <SkipBack size={16} className="shrink-0" />
+              <span className="truncate">{hasPreviousChapter && previousChapterNumber ? `Ch. ${previousChapterNumber}` : 'Prev'}</span>
+            </button>
+            <div role="group" aria-label="Reading mode" className="flex shrink-0 rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] p-0.5">
+              {[
+                { label: 'Page', mode: 'single' as const, on: !scroll, Icon: ReaderPagedLtr },
+                { label: 'Webtoon', mode: 'webtoon' as const, on: scroll, Icon: ReaderWebtoon },
+              ].map(({ label, mode, on, Icon }) => (
+                <button
+                  key={mode}
+                  aria-label={label}
+                  aria-pressed={on}
+                  onClick={() => onReadingModeChange?.(mode)}
+                  className={cn(
+                    'flex h-11 w-11 items-center justify-center rounded-md',
+                    on ? 'bg-[var(--color-surface)] text-[var(--color-accent-light)]' : 'text-[var(--color-text-secondary)]'
+                  )}
+                >
+                  <Icon size={20} />
+                </button>
+              ))}
+            </div>
+            <button onClick={onNextChapter} disabled={!hasNextChapter} aria-label="Next chapter" className={chBtn}>
+              <span className="truncate">{hasNextChapter && nextChapterNumber ? `Ch. ${nextChapterNumber}` : 'Next'}</span>
+              <SkipForward size={16} className="shrink-0" />
+            </button>
+          </div>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       {/* ── Top Bar ──────────────────────────────────────── */}

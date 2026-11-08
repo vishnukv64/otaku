@@ -5,16 +5,19 @@
  * with progress indicators
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, Link } from '@tanstack/react-router'
-import { Play, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
-import { getContinueWatchingWithDetails, removeFromContinueWatching, loadExtension, type ContinueWatchingEntry } from '@/utils/tauri-commands'
+import { Play, Loader2, ChevronLeft, ChevronRight, X, Info, MoreHorizontal, SkipForward, Check, List } from 'lucide-react'
+import { getContinueWatchingWithDetails, removeFromContinueWatching, saveWatchProgress, loadExtension, type ContinueWatchingEntry } from '@/utils/tauri-commands'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaDetailModal } from './MediaDetailModal'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
 import { notifySuccess, notifyError } from '@/utils/notify'
+import { isMobile } from '@/utils/platform'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
 
 interface ContinueWatchingSectionProps {
   extensionId?: string
@@ -27,6 +30,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
+  const [menuEntry, setMenuEntry] = useState<ContinueWatchingEntry | null>(null)
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(extensionId || null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
@@ -131,10 +135,34 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
     }
   }
 
+  const toSearchResult = (entry: ContinueWatchingEntry): SearchResult => ({
+    id: entry.media.id,
+    title: entry.media.title,
+    cover_url: entry.media.cover_url,
+    description: entry.media.description,
+    rating: entry.media.rating,
+    year: entry.media.year,
+    status: entry.media.status,
+  })
+
+  const playNext = (entry: ContinueWatchingEntry) =>
+    navigate({ to: '/watch', search: { malId: entry.media.id } })
+
+  const markWatched = async (entry: ContinueWatchingEntry) => {
+    try {
+      await saveWatchProgress(entry.media.id, entry.episode_id, entry.episode_number, entry.duration ?? 0, entry.duration ?? undefined, true)
+      setContinueWatching(prev => prev.map(e => (e.media.id === entry.media.id ? { ...e, completed: true } : e)))
+      notifySuccess('Marked watched', `EP ${entry.episode_number} of "${entry.media.title}"`)
+    } catch (error) {
+      console.error('Failed to mark watched:', error)
+      notifyError('Failed', 'Could not mark as watched')
+    }
+  }
+
   if (loading) {
     return (
       <div className="mb-10">
-        <h2 className="text-xl font-bold font-display mb-4 flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
+        <h2 className="text-xl font-bold font-display mb-4 flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">
           Continue Watching
         </h2>
         <div className="flex items-center justify-center py-12">
@@ -151,14 +179,14 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
   return (
     <div className="mb-10 overflow-visible">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">
           Continue Watching
         </h2>
         <Link
-          to="/library"
-          className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+          to={isMobile() ? '/history' : '/library'}
+          className="flex items-center gap-1 text-sm max-sm:min-h-[44px] max-sm:text-[13px] max-sm:text-[var(--color-text-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
         >
-          See all
+          {isMobile() ? 'History' : 'See all'}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
         </Link>
       </div>
@@ -224,7 +252,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                       {media.cover_url ? (
                         <img
                           src={media.cover_url}
-                          alt={media.title}
+                          alt={displayTitle(media)}
                           className="w-full h-full object-cover"
                           loading="lazy"
                         />
@@ -245,7 +273,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                     {/* Card info panel */}
                     <div className="px-3 py-2.5 pb-3">
                       <h3 className="text-[0.875rem] font-semibold font-display text-white truncate mb-1">
-                        {media.title}
+                        {displayTitle(media)}
                       </h3>
                       <p className="text-xs text-[var(--color-text-muted)] mb-2">
                         {entry.completed
@@ -266,21 +294,43 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                   </div>
                 </button>
 
-                {/* Info button */}
+                {isMobile() && (
+                  <button
+                    onClick={() => setMenuEntry(entry)}
+                    aria-label={`More actions for ${displayTitle(media)}`}
+                    className="absolute right-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <MoreHorizontal size={18} />
+                    </span>
+                  </button>
+                )}
+                {/* Info button: hover on desktop, always shown on phones (no hover there) */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedMedia(media)
                   }}
-                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  aria-label={`Details for ${displayTitle(media)}`}
+                  className={
+                    isMobile()
+                      ? 'absolute left-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
+                      : 'absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto'
+                  }
                   title="View Details"
                 >
-                  <Info className="w-4 h-4" />
+                  {isMobile() ? (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <Info size={18} />
+                    </span>
+                  ) : (
+                    <Info className="w-4 h-4" />
+                  )}
                 </button>
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title)}
-                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  className={`${isMobile() ? 'hidden ' : ''}absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto`}
                   title="Remove from Continue Watching"
                 >
                   <X className="w-4 h-4" />
@@ -290,6 +340,58 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
           })}
         </div>
       </div>
+
+      {menuEntry && (
+        <BottomSheet isOpen onClose={() => setMenuEntry(null)} title={displayTitle(menuEntry.media)}>
+          <SheetOption
+            icon={<Play size={20} />}
+            onClick={() => {
+              handleContinueWatching(menuEntry)
+              setMenuEntry(null)
+            }}
+          >
+            {menuEntry.completed ? 'Resume' : `Resume EP ${menuEntry.episode_number}`}
+          </SheetOption>
+          <SheetOption
+            icon={<SkipForward size={20} />}
+            onClick={() => {
+              playNext(menuEntry)
+              setMenuEntry(null)
+            }}
+          >
+            Play next
+          </SheetOption>
+          <SheetOption
+            icon={<List size={20} />}
+            onClick={() => {
+              setSelectedMedia(toSearchResult(menuEntry))
+              setMenuEntry(null)
+            }}
+          >
+            Episodes &amp; details
+          </SheetOption>
+          <SheetOption
+            icon={<Check size={20} />}
+            disabled={menuEntry.completed}
+            onClick={() => {
+              void markWatched(menuEntry)
+              setMenuEntry(null)
+            }}
+          >
+            Mark watched
+          </SheetOption>
+          <SheetOption
+            destructive
+            icon={<X size={20} />}
+            onClick={() => {
+              void handleRemove({ stopPropagation: () => {} } as React.MouseEvent, menuEntry.media.id, menuEntry.media.title)
+              setMenuEntry(null)
+            }}
+          >
+            Remove from Continue Watching
+          </SheetOption>
+        </BottomSheet>
+      )}
 
       {/* Media Detail Modal */}
       {selectedMedia && (

@@ -19,8 +19,8 @@ export function SettingSlider({
   const percentage = ((value - min) / (max - min)) * 100
 
   return (
-    <div className="flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[220px]">
-      <div className="relative flex-1 h-6 flex items-center">
+    <div className="flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[220px] max-sm:w-full">
+      <div className="relative flex-1 h-6 max-sm:h-11 flex items-center">
         {/* Track background */}
         <div className="absolute w-full h-2 bg-[var(--color-bg-tertiary)] rounded-full border border-[var(--color-border-subtle)]" />
 
@@ -38,7 +38,7 @@ export function SettingSlider({
           step={step}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="relative w-full h-6 appearance-none bg-transparent cursor-pointer z-10
+          className="relative w-full h-6 max-sm:h-11 appearance-none bg-transparent cursor-pointer z-10
             [&::-webkit-slider-thumb]:appearance-none
             [&::-webkit-slider-thumb]:w-5
             [&::-webkit-slider-thumb]:h-5

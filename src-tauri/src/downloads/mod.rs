@@ -79,6 +79,8 @@ struct HlsResumeState {
 /// Event name for download progress updates
 pub const DOWNLOAD_PROGRESS_EVENT: &str = "download-progress";
 
+const MISSING_FILE_ERROR: &str = "File not found. Please re-download.";
+
 pub struct DownloadManager {
     downloads: Arc<RwLock<HashMap<String, DownloadProgress>>>,
     active_downloads: Arc<Mutex<usize>>,
@@ -121,6 +123,17 @@ impl DownloadManager {
         }
     }
 
+    /// Map a path saved under an older copy of the download folder (same folder name,
+    /// different parent) onto the current one. `None` when it does not live there.
+    fn rebase_into(download_dir: &std::path::Path, stored: &str) -> Option<PathBuf> {
+        let dir_name = download_dir.file_name()?;
+        let stored = std::path::Path::new(stored);
+        let comps: Vec<_> = stored.components().collect();
+        let at = comps.iter().rposition(|c| c.as_os_str() == dir_name)?;
+        let rest: PathBuf = comps[at + 1..].iter().collect();
+        (!rest.as_os_str().is_empty()).then(|| download_dir.join(rest))
+    }
+
     /// Load downloads from database on startup
     pub async fn load_from_database(&self) -> Result<()> {
         if let Some(pool) = &self.db_pool {
@@ -137,11 +150,31 @@ impl DownloadManager {
             let mut downloads = self.downloads.write().await;
             for row in rows {
                 // Check if file still exists and get its size
-                let file_path: String = row.try_get("file_path")?;
-                let file_metadata = tokio::fs::metadata(&file_path).await;
-                let file_exists = file_metadata.is_ok();
+                let stored_path: String = row.try_get("file_path")?;
+                let mut original_status_str: String = row.try_get("status")?;
+                let stored_error: Option<String> = row.try_get("error_message")?;
+                let mut file_path = stored_path.clone();
+                let mut file_exists = tokio::fs::metadata(&file_path).await.is_ok();
+                let mut rebased = false;
+                if !file_exists {
+                    // iOS moves the app's data container on reinstall/update, so absolute
+                    // paths saved earlier point at a folder that no longer exists while the
+                    // files sit at the same place under the new container.
+                    if let Some(moved) = Self::rebase_into(&self.download_dir, &stored_path) {
+                        if tokio::fs::metadata(&moved).await.is_ok() {
+                            file_path = moved.to_string_lossy().to_string();
+                            file_exists = true;
+                            rebased = true;
+                            // Undo the earlier "file missing" downgrade for the same reason.
+                            if original_status_str == "failed"
+                                && stored_error.as_deref() == Some(MISSING_FILE_ERROR)
+                            {
+                                original_status_str = "completed".to_string();
+                            }
+                        }
+                    }
+                }
 
-                let original_status_str: String = row.try_get("status")?;
                 let completed_file_missing = original_status_str == "completed" && !file_exists;
                 let mut status_str = original_status_str.clone();
                 // If completed but file missing, mark as failed
@@ -215,13 +248,15 @@ impl DownloadManager {
                     speed: row.try_get::<i64, _>("speed")? as u64,
                     status,
                     error_message: if completed_file_missing {
-                        Some("File not found. Please re-download.".to_string())
+                        Some(MISSING_FILE_ERROR.to_string())
+                    } else if rebased && status_str == "completed" {
+                        None
                     } else {
-                        row.try_get("error_message")?
+                        stored_error
                     },
                 };
 
-                if completed_file_missing || original_status_str == "downloading" {
+                if completed_file_missing || rebased || original_status_str == "downloading" {
                     Self::save_progress_to_db(pool, &progress).await.ok();
                 }
 
@@ -563,6 +598,7 @@ impl DownloadManager {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(id) DO UPDATE SET
                 source_referrer = ?,
+                file_path = ?,
                 total_bytes = ?,
                 downloaded_bytes = ?,
                 percentage = ?,
@@ -588,6 +624,7 @@ impl DownloadManager {
         .bind(&progress.error_message)
         // For UPDATE
         .bind(&progress.source_referrer)
+        .bind(&progress.file_path)
         .bind(progress.total_bytes as i64)
         .bind(progress.downloaded_bytes as i64)
         .bind(progress.percentage)
@@ -632,6 +669,25 @@ impl DownloadManager {
             .and_then(|resolution| resolution.split_once('x').map(|(_, height)| height.to_string()))
             .and_then(|height| height.parse::<u32>().ok())
             .unwrap_or(0)
+    }
+
+    /// Separate audio rendition (EXT-X-MEDIA TYPE=AUDIO with URI); DEFAULT=YES wins, else first.
+    // ponytail: ignores the variant's AUDIO group-id (KAA masters have one group);
+    // match GROUP-ID to the chosen variant if a provider ever ships several.
+    fn parse_hls_audio_uri(text: &str, base_url: &str) -> Option<String> {
+        let mut first = None;
+        for line in text.lines().map(str::trim).filter(|l| l.starts_with("#EXT-X-MEDIA")) {
+            if Self::parse_hls_attribute(line, "TYPE").as_deref() != Some("AUDIO") {
+                continue;
+            }
+            let Some(uri) = Self::parse_hls_attribute(line, "URI") else { continue };
+            let Ok(url) = Self::absolutize_hls_uri(&uri, base_url) else { continue };
+            if Self::parse_hls_attribute(line, "DEFAULT").as_deref() == Some("YES") {
+                return Some(url);
+            }
+            first.get_or_insert(url);
+        }
+        first
     }
 
     fn parse_hls_playlist(text: &str, base_url: &str) -> Result<(Vec<(u32, String)>, Vec<HlsSegment>)> {
@@ -711,11 +767,16 @@ impl DownloadManager {
         response.text().await.context("Failed to read HLS playlist")
     }
 
+    /// Returns (video segments, audio segments). The audio list is empty for muxed streams.
+    /// A `#otaku-audio=<encoded url>` fragment on `url` names the audio playlist when the
+    /// caller already resolved a video-only variant.
     async fn resolve_hls_segments(
         client: &reqwest::Client,
         url: &str,
         referrer: &str,
-    ) -> Result<Vec<HlsSegment>> {
+    ) -> Result<(Vec<HlsSegment>, Vec<HlsSegment>)> {
+        let (url, frag) = url.split_once("#otaku-audio=").unwrap_or((url, ""));
+        let mut audio_url = urlencoding::decode(frag).ok().map(|v| v.into_owned()).filter(|v| !v.is_empty());
         let mut playlist_url = url.to_string();
 
         for _ in 0..4 {
@@ -723,10 +784,16 @@ impl DownloadManager {
             let (variants, segments) = Self::parse_hls_playlist(&text, &playlist_url)?;
 
             if !segments.is_empty() {
-                return Ok(segments);
+                let mut audio = Vec::new();
+                if let Some(audio_url) = audio_url {
+                    let text = Self::fetch_hls_text(client, &audio_url, referrer).await?;
+                    audio = Self::parse_hls_playlist(&text, &audio_url)?.1;
+                }
+                return Ok((segments, audio));
             }
 
             if let Some((_, next_url)) = variants.into_iter().max_by_key(|(height, _)| *height) {
+                audio_url = audio_url.or_else(|| Self::parse_hls_audio_uri(&text, &playlist_url));
                 playlist_url = next_url;
                 continue;
             }
@@ -893,11 +960,19 @@ impl DownloadManager {
     ) -> Option<u64> {
         use futures_util::{stream, StreamExt};
 
-        const HEAD_CONCURRENCY: usize = 24;
+        // HEAD-ing every segment (hundreds, 24 at a time) gets CDNs like KAA's to answer
+        // 429 and then refuse the download itself. Sample a few evenly spaced segments
+        // and extrapolate instead.
+        // ponytail: average-based estimate; progress corrects itself as bytes arrive.
+        const SAMPLES: usize = 6;
+        const HEAD_CONCURRENCY: usize = 2;
+        let step = segments.len().div_ceil(SAMPLES).max(1);
         let urls = segments
             .iter()
+            .step_by(step)
             .map(|segment| segment.url.clone())
             .collect::<Vec<_>>();
+        let sampled = urls.len();
         let lengths: Vec<Option<u64>> = stream::iter(urls.into_iter().map(|url| {
             let client = client.clone();
             let referrer = referrer.to_string();
@@ -919,7 +994,45 @@ impl DownloadManager {
         .collect()
         .await;
 
-        Self::sum_hls_content_lengths(lengths)
+        let sum = Self::sum_hls_content_lengths(lengths)?;
+        if sampled == segments.len() {
+            return Some(sum);
+        }
+        Some(sum / sampled as u64 * segments.len() as u64)
+    }
+
+    /// GET a segment, backing off on 429/503 (honours Retry-After, capped at 30s).
+    async fn fetch_hls_segment(
+        client: &reqwest::Client,
+        url: &str,
+        referrer: &str,
+    ) -> Result<reqwest::Response> {
+        const MAX_TRIES: u32 = 6;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let response = client
+                .get(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", referrer)
+                .header("Origin", crate::video_server::origin_from_referrer(referrer))
+                .send()
+                .await?;
+            let status = response.status();
+            let throttled = status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+            if !throttled || attempt >= MAX_TRIES {
+                return Ok(response);
+            }
+            let wait = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(1u64 << attempt)
+                .min(30);
+            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+        }
     }
 
     async fn remove_hls_segments(file_path: &str) {
@@ -976,20 +1089,18 @@ impl DownloadManager {
         playlist_path: &str,
         segments: &[HlsSegment],
         segment_names: &[String],
+        uri_prefix: &str,
     ) -> Result<()> {
         let max_duration = segments
             .iter()
             .filter_map(|segment| segment.duration)
             .fold(6.0f32, f32::max)
             .ceil() as u32;
-        let segment_dir_name = Self::hls_segment_dir(playlist_path)
-            .and_then(|path| path.file_name().map(|value| value.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "segments".to_string());
         let mut playlist = String::from("#EXTM3U\n#EXT-X-VERSION:3\n");
         playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:0\n", max_duration));
 
         for (segment, name) in segments.iter().zip(segment_names.iter()) {
-            let uri = format!("{}/{}", segment_dir_name, name);
+            let uri = format!("{}{}", uri_prefix, name);
             if segment.is_map {
                 playlist.push_str(&format!("#EXT-X-MAP:URI=\"{}\"\n", uri));
                 continue;
@@ -1062,7 +1173,10 @@ impl DownloadManager {
         subtitle_label: Option<String>,
         subtitle_language: Option<String>,
     ) -> Result<()> {
-        let segments = Self::resolve_hls_segments(&client, &url, &referrer).await?;
+        let (video_segments, audio_segments) = Self::resolve_hls_segments(&client, &url, &referrer).await?;
+        let video_len = video_segments.len();
+        let mut segments = video_segments;
+        segments.extend(audio_segments);
         if segments.is_empty() {
             return Err(anyhow::anyhow!("HLS playlist did not contain media segments"));
         }
@@ -1156,16 +1270,18 @@ impl DownloadManager {
                 }
             }
 
-            let response = client
-                .get(&segment.url)
-                .header("User-Agent", "Mozilla/5.0")
-                .header("Referer", &referrer)
-                .header("Origin", crate::video_server::origin_from_referrer(&referrer))
-                .send()
+            let response = Self::fetch_hls_segment(&client, &segment.url, &referrer)
                 .await
-                .with_context(|| format!("Failed to fetch HLS segment {}", index + 1))?
-                .error_for_status()
-                .with_context(|| format!("HLS segment {} request failed", index + 1))?;
+                .with_context(|| format!("Failed to fetch HLS segment {}", index + 1))?;
+            let status = response.status();
+            if !status.is_success() {
+                anyhow::bail!(
+                    "HLS segment {} request failed: HTTP {} from {}",
+                    index + 1,
+                    status.as_u16(),
+                    reqwest::Url::parse(&segment.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default()
+                );
+            }
 
             let data = Self::normalize_hls_segment(
                 response
@@ -1248,7 +1364,26 @@ impl DownloadManager {
             }
         }
 
-        Self::write_local_hls_playlist(&file_path, &segments, &segment_names).await?;
+        if segments.len() == video_len {
+            let dir_name = segment_dir.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or_default();
+            Self::write_local_hls_playlist(&file_path, &segments, &segment_names, &format!("{}/", dir_name)).await?;
+        } else {
+            // Video-only variant + separate audio rendition: master at file_path points at both.
+            let video_pl = segment_dir.join("video.m3u8");
+            let audio_pl = segment_dir.join("audio.m3u8");
+            Self::write_local_hls_playlist(&video_pl.to_string_lossy(), &segments[..video_len], &segment_names[..video_len], "").await?;
+            Self::write_local_hls_playlist(&audio_pl.to_string_lossy(), &segments[video_len..], &segment_names[video_len..], "").await?;
+            let dir_name = segment_dir.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or_default();
+            let master = format!(
+                r#"#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="{d}/audio.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=1000000,AUDIO="a"
+{d}/video.m3u8
+"#,
+                d = dir_name
+            );
+            tokio::fs::write(&file_path, master).await.context("Failed to write HLS master playlist")?;
+        }
         Self::download_subtitle_sidecar(
             &client,
             subtitle_url.as_deref(),
@@ -1602,10 +1737,61 @@ impl DownloadManager {
         Ok(())
     }
 
+    /// Reset a download so it restarts from scratch (status queued, bytes 0, no error).
+    fn reset_for_retry(p: &mut DownloadProgress) {
+        p.status = DownloadStatus::Queued;
+        p.downloaded_bytes = 0;
+        p.total_bytes = 0;
+        p.percentage = 0.0;
+        p.speed = 0;
+        p.error_message = None;
+    }
+
+    /// Retry a failed/cancelled download from zero: drop partial files, reset, re-queue.
+    /// URL (incl. any `#otaku-audio=` fragment) and file path are kept untouched.
+    pub async fn retry_download(&self, download_id: &str) -> Result<()> {
+        let path = {
+            let downloads = self.downloads.read().await;
+            match downloads.get(download_id) {
+                Some(d) if matches!(d.status, DownloadStatus::Failed | DownloadStatus::Cancelled) => d.file_path.clone(),
+                Some(_) => return Ok(()),
+                None => anyhow::bail!("Download not found: {}", download_id),
+            }
+        };
+        tokio::fs::remove_file(&path).await.ok();
+        Self::remove_hls_segments(&path).await;
+        {
+            let mut downloads = self.downloads.write().await;
+            if let Some(p) = downloads.get_mut(download_id) {
+                Self::reset_for_retry(p);
+                self.emit_progress(p);
+                self.save_to_database(p).await.ok();
+            }
+        }
+        self.start_download_task(download_id.to_string()).await
+    }
+
+    /// Free bytes on the filesystem holding the downloads directory.
+    #[cfg(unix)]
+    pub fn free_space(&self) -> u64 {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(c) = std::ffi::CString::new(self.download_dir.as_os_str().as_bytes()) else { return 0 };
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+            return 0;
+        }
+        (st.f_bavail as u64).saturating_mul(st.f_frsize as u64)
+    }
+
+    #[cfg(not(unix))]
+    pub fn free_space(&self) -> u64 {
+        0
+    }
+
     /// Remove completed/failed download from list
     pub async fn remove_download(&self, download_id: &str) -> Result<()> {
         // Delete from database
-        self.delete_from_database(download_id).await.ok();
+        self.delete_from_database(download_id).await?;
 
         let mut downloads = self.downloads.write().await;
         downloads.remove(download_id);
@@ -1648,94 +1834,35 @@ impl DownloadManager {
             .sum()
     }
 
+    /// Remove every download with `status` from memory AND the database.
+    /// The DB is filtered by status directly so rows missing from the
+    /// in-memory map (or failing individually) cannot survive a clear.
+    async fn clear_by_status(&self, status: DownloadStatus, db_status: &str) -> Result<()> {
+        if let Some(pool) = &self.db_pool {
+            sqlx::query("DELETE FROM downloads WHERE status = ?")
+                .bind(db_status)
+                .execute(pool.as_ref())
+                .await
+                .context("Failed to clear downloads from database")?;
+        }
+        let mut downloads = self.downloads.write().await;
+        downloads.retain(|_, d| d.status != status);
+        Ok(())
+    }
+
     /// Clear completed downloads from list (doesn't delete files)
     pub async fn clear_completed(&self) -> Result<()> {
-        // Get IDs of completed downloads
-        let completed_ids: Vec<String> = {
-            let downloads = self.downloads.read().await;
-            downloads
-                .iter()
-                .filter(|(_, d)| d.status == DownloadStatus::Completed)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        // Delete from database
-        if let Some(pool) = &self.db_pool {
-            for id in &completed_ids {
-                sqlx::query("DELETE FROM downloads WHERE id = ?")
-                    .bind(id)
-                    .execute(pool.as_ref())
-                    .await
-                    .ok();
-            }
-        }
-
-        // Remove from memory
-        let mut downloads = self.downloads.write().await;
-        downloads.retain(|_, d| d.status != DownloadStatus::Completed);
-        log::debug!("Cleared {} completed downloads from list", completed_ids.len());
-        Ok(())
+        self.clear_by_status(DownloadStatus::Completed, "completed").await
     }
 
     /// Clear failed downloads from list
     pub async fn clear_failed(&self) -> Result<()> {
-        // Get IDs of failed downloads
-        let failed_ids: Vec<String> = {
-            let downloads = self.downloads.read().await;
-            downloads
-                .iter()
-                .filter(|(_, d)| d.status == DownloadStatus::Failed)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        // Delete from database
-        if let Some(pool) = &self.db_pool {
-            for id in &failed_ids {
-                sqlx::query("DELETE FROM downloads WHERE id = ?")
-                    .bind(id)
-                    .execute(pool.as_ref())
-                    .await
-                    .ok();
-            }
-        }
-
-        // Remove from memory
-        let mut downloads = self.downloads.write().await;
-        downloads.retain(|_, d| d.status != DownloadStatus::Failed);
-        log::debug!("Cleared {} failed downloads from list", failed_ids.len());
-        Ok(())
+        self.clear_by_status(DownloadStatus::Failed, "failed").await
     }
 
     /// Clear cancelled downloads from list
     pub async fn clear_cancelled(&self) -> Result<()> {
-        // Get IDs of cancelled downloads
-        let cancelled_ids: Vec<String> = {
-            let downloads = self.downloads.read().await;
-            downloads
-                .iter()
-                .filter(|(_, d)| d.status == DownloadStatus::Cancelled)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        // Delete from database
-        if let Some(pool) = &self.db_pool {
-            for id in &cancelled_ids {
-                sqlx::query("DELETE FROM downloads WHERE id = ?")
-                    .bind(id)
-                    .execute(pool.as_ref())
-                    .await
-                    .ok();
-            }
-        }
-
-        // Remove from memory
-        let mut downloads = self.downloads.write().await;
-        downloads.retain(|_, d| d.status != DownloadStatus::Cancelled);
-        log::debug!("Cleared {} cancelled downloads from list", cancelled_ids.len());
-        Ok(())
+        self.clear_by_status(DownloadStatus::Cancelled, "cancelled").await
     }
 
     /// Delete a downloaded file and remove from list
@@ -1755,7 +1882,8 @@ impl DownloadManager {
                     log::debug!("Download file already missing: {}", path);
                 }
                 Err(e) => {
-                    return Err(e).with_context(|| format!("Failed to delete file: {}", path));
+                    // Never let an undeletable/odd path (directory, perms) strand the row.
+                    log::warn!("Could not delete download file {}: {}", path, e);
                 }
             }
             Self::remove_subtitle_sidecars(&path).await;
@@ -1898,6 +2026,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn reset_for_retry_clears_progress_and_error_but_keeps_url() {
+        let mut p = download_with_path("d", PathBuf::from("/x/a.mp4"), DownloadStatus::Failed);
+        p.url = "https://h/a.m3u8#otaku-audio=https://h/a.m4a".into();
+        p.downloaded_bytes = 5;
+        p.total_bytes = 10;
+        p.error_message = Some("boom".into());
+        DownloadManager::reset_for_retry(&mut p);
+        assert_eq!(p.status, DownloadStatus::Queued);
+        assert_eq!((p.downloaded_bytes, p.total_bytes), (0, 0));
+        assert!(p.error_message.is_none());
+        assert!(p.url.contains("#otaku-audio="));
+    }
+
     #[tokio::test]
     async fn delete_download_removes_record_when_file_is_already_missing() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1953,6 +2095,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remove_and_clear_delete_db_rows_even_when_file_missing_or_not_in_memory() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let missing = temp_dir.path().join("gone.otaku").to_string_lossy().to_string();
+        let pool = setup_downloads_pool().await;
+        for (id, ep, status) in [("d1", "e1", "failed"), ("d2", "e2", "failed")] {
+            sqlx::query("INSERT INTO downloads (id, media_id, episode_id, file_path, status) VALUES (?, 'm', ?, ?, ?)")
+                .bind(id).bind(ep).bind(&missing).bind(status)
+                .execute(&pool).await.expect("insert");
+        }
+        let manager = DownloadManager::new(temp_dir.path().to_path_buf())
+            .with_database(Arc::new(pool.clone()));
+        manager.load_from_database().await.expect("load");
+
+        manager.delete_download("d1").await.expect("delete with missing file");
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM downloads WHERE id = 'd1'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0);
+
+        // d2 dropped from memory only: clear_failed must still purge the DB row.
+        manager.downloads.write().await.remove("d2");
+        manager.clear_failed().await.expect("clear failed");
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM downloads")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
     async fn load_from_database_persists_missing_completed_file_as_failed() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let missing_file = temp_dir.path().join("missing-completed.otaku");
@@ -1988,6 +2157,45 @@ mod tests {
 
         assert_eq!(progress.status, DownloadStatus::Failed);
         assert_eq!(persisted_status, "failed");
+    }
+
+    #[tokio::test]
+    async fn load_from_database_rebases_paths_from_an_old_app_container() {
+        // iOS: the container UUID changes on reinstall; files move with it.
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let downloads_dir = temp_dir.path().join("new-container").join("downloads");
+        tokio::fs::create_dir_all(downloads_dir.join("EP1_segments")).await.unwrap();
+        tokio::fs::write(downloads_dir.join("EP1.m3u8"), b"#EXTM3U").await.unwrap();
+        let old_path = temp_dir.path().join("old-container").join("downloads").join("EP1.m3u8");
+
+        let pool = setup_downloads_pool().await;
+        sqlx::query(
+            r#"
+            INSERT INTO downloads (
+                id, media_id, episode_id, episode_number, filename, url, file_path,
+                total_bytes, downloaded_bytes, percentage, speed, status, error_message
+            )
+            VALUES ('d1', 'm', 'e', 1, 'EP1.m3u8', 'https://x.test/m.m3u8', ?, 7, 7, 100.0, 0,
+                'failed', 'File not found. Please re-download.')
+            "#,
+        )
+        .bind(old_path.to_string_lossy().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let manager = DownloadManager::new(downloads_dir.clone()).with_database(Arc::new(pool.clone()));
+        manager.load_from_database().await.expect("load");
+
+        let p = manager.get_progress("d1").await.expect("loaded");
+        let want = downloads_dir.join("EP1.m3u8").to_string_lossy().to_string();
+        assert_eq!(p.status, DownloadStatus::Completed);
+        assert_eq!(p.file_path, want);
+        let (status, path): (String, String) =
+            sqlx::query_as("SELECT status, file_path FROM downloads WHERE id = 'd1'")
+                .fetch_one(&pool).await.unwrap();
+        assert_eq!(status, "completed");
+        assert_eq!(path, want);
     }
 
     #[tokio::test]
@@ -2096,5 +2304,71 @@ mod tests {
         );
         assert_eq!(DownloadManager::infer_hls_total_bytes(0, 1, 100), None);
         assert_eq!(DownloadManager::infer_hls_total_bytes(117, 0, 100), None);
+    }
+
+    #[test]
+    fn hls_audio_rendition_is_found_and_scheme_relative_uris_resolve() {
+        let master = r#"#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="x",DEFAULT=YES,URI="//cdn.test/a/audio.m3u8"
+#EXT-X-STREAM-INF:RESOLUTION=1280x720,AUDIO="a"
+v/720.m3u8
+"#;
+        assert_eq!(
+            DownloadManager::parse_hls_audio_uri(master, "https://hls.test/m/master.m3u8").as_deref(),
+            Some("https://cdn.test/a/audio.m3u8")
+        );
+        assert_eq!(DownloadManager::parse_hls_audio_uri("#EXTM3U
+", "https://x.test/a.m3u8"), None);
+    }
+
+    /// Real KAA episode: master -> video + audio segments, first of each fetchable.
+    /// Run: cargo test --lib kaa_network -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn kaa_network_download_resolves_audio() {
+        let client = reqwest::Client::new();
+        let get = |u: &str| client.get(u.to_string()).header("Referer", "https://kaa.lt/").header("User-Agent", "Mozilla/5.0");
+        let eps: serde_json::Value = get("https://kaa.lt/api/show/sousou-no-frieren-2d15/episodes?lang=ja-JP&ep=1")
+            .send().await.unwrap().json().await.unwrap();
+        let e = &eps["result"][0];
+        let ep = format!("ep-{}-{}", e["episode_string"].as_str().unwrap(), e["slug"].as_str().unwrap());
+        let data: serde_json::Value = get(&format!("https://kaa.lt/api/show/sousou-no-frieren-2d15/episode/{}", ep))
+            .send().await.unwrap().json().await.unwrap();
+        let src = data["servers"][0]["src"].as_str().unwrap().to_string();
+        let html = get(&src).send().await.unwrap().text().await.unwrap().replace("&quot;", "\"").replace("&amp;", "&");
+        let start = html.find(r#""manifest":[0,""#).unwrap() + 15;
+        let mut manifest = html[start..start + html[start..].find('"').unwrap()].to_string();
+        if manifest.starts_with("//") { manifest = format!("https:{}", manifest); }
+        println!("manifest {}", manifest);
+
+        let (video, audio) = DownloadManager::resolve_hls_segments(&client, &manifest, "https://krussdomi.com/").await.unwrap();
+        println!("video segs {} audio segs {}", video.len(), audio.len());
+        assert!(!video.is_empty());
+        assert!(!audio.is_empty(), "audio rendition dropped");
+        // Full real path (same client setup as perform_download), first segments only.
+        let dir = std::env::temp_dir().join("otaku-kaa-dl-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("t.otaku").to_string_lossy().to_string();
+        let downloads = Arc::new(RwLock::new(HashMap::new()));
+        let dl_client = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(30)).build().unwrap();
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            DownloadManager::perform_hls_download(
+                "t".into(), downloads, None, None, dl_client, manifest.clone(),
+                "https://krussdomi.com/".into(), file, None, None, None,
+            ),
+        )
+        .await;
+        match res {
+            Err(_) => println!("full path: still downloading after 20s (ok)"),
+            Ok(r) => println!("full path result: {:?}", r),
+        }
+        for seg in [&video[0], &audio[0]] {
+            let r = client.get(&seg.url).header("Referer", "https://krussdomi.com/").header("Origin", "https://krussdomi.com").header("User-Agent", "Mozilla/5.0").send().await.unwrap();
+            assert!(r.status().is_success(), "{} -> {}", seg.url, r.status());
+            let b = DownloadManager::normalize_hls_segment(r.bytes().await.unwrap().to_vec());
+            assert_eq!(b[0], 0x47, "not TS");
+        }
     }
 }

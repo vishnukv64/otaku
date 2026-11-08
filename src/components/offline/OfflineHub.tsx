@@ -62,9 +62,9 @@ export function OfflineHub() {
   const hasContent = animeDownloads.length > 0 || mangaDownloads.length > 0
 
   return (
-    <div className="min-h-[calc(100vh-8rem)] flex flex-col">
+    <div className={`min-h-[calc(100vh-8rem)] flex flex-col ${mobile ? 'pb-24' : ''}`}>
       {/* Hero Section */}
-      <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className={`flex flex-col items-center justify-center px-4 ${mobile ? 'py-6' : 'py-12'}`}>
         <div className="relative mb-6">
           <div className="w-20 h-20 rounded-full bg-[var(--color-accent-primary)]/10 flex items-center justify-center">
             <WifiOff className="w-10 h-10 text-[var(--color-accent-primary)]" />
@@ -199,14 +199,14 @@ export function OfflineHub() {
           <div className="flex items-center gap-3">
             <Link
               to="/library"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] text-sm transition-colors"
+              className="flex items-center gap-2 px-4 py-2 max-sm:min-h-[44px] rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] text-sm transition-colors"
             >
               <Library size={16} />
               Library
             </Link>
             <Link
               to="/settings"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] text-sm transition-colors"
+              className="flex items-center gap-2 px-4 py-2 max-sm:min-h-[44px] rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] text-sm transition-colors"
             >
               <Settings size={16} />
               Settings
@@ -218,24 +218,24 @@ export function OfflineHub() {
       {/* Quick access footer when content exists */}
       {hasContent && !loading && (
         <div className="px-4 pb-6">
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-3">
             <Link
               to="/downloads"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] text-sm transition-colors"
+              className="flex items-center gap-2 px-4 py-2 max-sm:min-h-[44px] rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] text-sm transition-colors"
             >
               <Download size={14} />
               Manage Downloads
             </Link>
             <Link
               to="/library"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] text-sm transition-colors"
+              className="flex items-center gap-2 px-4 py-2 max-sm:min-h-[44px] rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] text-sm transition-colors"
             >
               <Library size={14} />
               Library
             </Link>
             <Link
               to="/settings"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] text-sm transition-colors"
+              className="flex items-center gap-2 px-4 py-2 max-sm:min-h-[44px] rounded-lg bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)] text-sm transition-colors"
             >
               <Settings size={14} />
               Settings

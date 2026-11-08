@@ -14,9 +14,11 @@
  * - Keyboard shortcuts hint (auto-fades)
  */
 
+import { audioModeLabel } from '@/utils/providerExtras'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
+import { attachDash, isDashUrl, type DashHandle } from './dashPlayer'
 import mpegts from 'mpegts.js'
 import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
 import type { Subtitle, VideoSource } from '@/types/extension'
@@ -27,6 +29,9 @@ import {
   type VideoServerUrls,
 } from '@/utils/tauri-commands'
 import { DownloadButton } from './DownloadButton'
+import { MobilePlayerControls } from './MobilePlayerControls'
+import { useMobileLayout } from '@/hooks/useMobileLayout'
+import { useActiveSkip, useSeekPreview } from '@/hooks/usePlayerExtras'
 import { usePlayerStore, type SubtitleFontFamily } from '@/store/playerStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { usePipStore } from '@/store/pipStore'
@@ -40,7 +45,8 @@ import {
   type QualityPreference,
 } from '@/utils/pickSource'
 
-type AudioMode = 'sub' | 'dub'
+/** 'sub' | 'dub', or a provider locale tag (ja-JP, en-US ...) when the provider reports one. */
+type AudioMode = string
 interface ParsedSubtitleCue {
   start: number
   end: number
@@ -91,7 +97,18 @@ function createPlayableHlsUrl(
   return createHlsProxyUrl(videoServer, m3u8Url, referrer)
 }
 
+/** Default audio: Japanese with subtitles (sub, or a Japanese locale), else the first offered. */
+export function defaultAudioMode(modes: AudioMode[]): AudioMode | undefined {
+  return (
+    modes.find((m) => m === 'sub') ??
+    modes.find((m) => m === 'ja-JP') ??
+    modes.find((m) => m.toLowerCase().startsWith('ja')) ??
+    modes[0]
+  )
+}
+
 function sourceAudioMode(source: VideoSource): AudioMode | null {
+  if (source.audio_locale) return source.audio_locale
   if (!source.audio_type) return null
   return source.audio_type.toLowerCase().includes('dub') ? 'dub' : 'sub'
 }
@@ -210,6 +227,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const dashRef = useRef<DashHandle | null>(null)
   const mpegtsRef = useRef<ReturnType<typeof mpegts.createPlayer> | null>(null)
   const sidebarEpisodeRef = useRef<HTMLDivElement>(null)
   // Tracks when the episode first hit the completion threshold (for auto-delete cooldown)
@@ -241,6 +259,7 @@ export function VideoPlayer({
   const [loading, setLoading] = useState(true)
   const [buffering, setBuffering] = useState(false)
   const [isSeeking, setIsSeeking] = useState(false)
+  const [retryKey, setRetryKey] = useState(0)
   const [bufferedPercentage, setBufferedPercentage] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [showNextEpisodeOverlay, setShowNextEpisodeOverlay] = useState(false)
@@ -352,15 +371,17 @@ export function VideoPlayer({
   )
 
   useEffect(() => {
-    const defaultMode = audioModes.includes('sub') ? 'sub' : audioModes[0]
+    const defaultMode = defaultAudioMode(audioModes)
     if (defaultMode) setSelectedAudioMode(defaultMode)
     // Reset to the preferred audio mode only when the episode/source set changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, availableSourceSetKey])
 
   useEffect(() => {
+    // Same default, not audioModes[0]: both effects run in one commit, and the first
+    // mode (e.g. KAA's en-US) used to overwrite the Japanese default set just above.
     if (audioModes.length > 0 && !audioModes.includes(selectedAudioMode)) {
-      setSelectedAudioMode(audioModes[0]!)
+      setSelectedAudioMode(defaultAudioMode(audioModes)!)
     }
   }, [audioModes, selectedAudioMode])
 
@@ -590,6 +611,10 @@ export function VideoPlayer({
           mpegtsRef.current.destroy()
           mpegtsRef.current = null
         }
+        if (dashRef.current) {
+          void dashRef.current.destroy()
+          dashRef.current = null
+        }
         video.removeAttribute('src')
         video.load() // Reset the video element
 
@@ -629,6 +654,34 @@ export function VideoPlayer({
             Promise.resolve(player.play()).catch((playError: unknown) => {
               console.warn('[VideoPlayer] MPEG-TS autoplay failed:', playError)
             })
+          }
+        } else if (isDashUrl(currentSource.url)) {
+          // DASH (hstream): shaka, every request routed through /proxy.
+          let cancelled = false
+          videoListenerCleanups.push(() => {
+            cancelled = true
+          })
+          try {
+            const handle = await attachDash(video, currentSource.url, {
+              videoServer,
+              referrer: currentSource.referrer,
+              startTime: initialTime,
+            })
+            if (cancelled) {
+              void handle.destroy()
+              return
+            }
+            dashRef.current = handle
+            setLoading(false)
+            if (autoPlay) {
+              video.play().catch((e) => console.error('Autoplay failed:', e))
+            }
+          } catch (dashError) {
+            if (cancelled) return
+            console.error('[VideoPlayer] DASH load failed:', dashError)
+            const code = (dashError as { code?: number })?.code
+            setError(code ? `Failed to load DASH stream (error ${code})` : 'Failed to load DASH stream')
+            setLoading(false)
           }
         } else if (isActuallyHls && Hls.isSupported()) {
           // HLS.js already cleaned up at the start of loadVideo, create new instance
@@ -901,6 +954,10 @@ export function VideoPlayer({
         mpegtsRef.current.destroy()
         mpegtsRef.current = null
       }
+      if (dashRef.current) {
+        void dashRef.current.destroy()
+        dashRef.current = null
+      }
       for (const cleanup of videoListenerCleanups) cleanup()
       // Also clean up direct video sources
       if (video) {
@@ -919,6 +976,7 @@ export function VideoPlayer({
     currentSource?.url,
     currentSource?.referrer,
     isLegacyTsDownload,
+    retryKey,
   ])
 
   // Close MiniPlayer when VideoPlayer starts playing (user navigated to /watch manually)
@@ -1155,6 +1213,11 @@ export function VideoPlayer({
     const pipSource = currentSource || currentServerSources[0]
     if (!pipSource) {
       console.warn('[VideoPlayer] PiP blocked - no current source')
+      return
+    }
+
+    if (isDashUrl(pipSource.url)) {
+      console.warn('[VideoPlayer] Mini player does not support DASH streams')
       return
     }
 
@@ -1940,11 +2003,19 @@ export function VideoPlayer({
   }, [isDragging, duration, disableSeeking, seekToTime])
 
   const mobile = isMobile()
+  const { isLandscape } = useMobileLayout()
   const subtitleScale = Math.max(0.75, Math.min(2, (playerSettings.subtitleFontScale ?? 100) / 100))
   const subtitleFontSize = `${(mobile ? 17.6 : 23.2) * subtitleScale}px`
   const subtitleFontFamily =
     subtitleFontFamilies[playerSettings.subtitleFontFamily ?? 'system'] ??
     subtitleFontFamilies.system
+
+  const activeSkip = useActiveSkip(mediaId, currentEpisode, duration, currentTime)
+  const seekPreview = useSeekPreview(
+    currentSource?.preview_vtt,
+    videoServer ? (u) => createProxyUrl(videoServer, u, currentSource?.referrer) : null
+  )
+  const hoverSprite = seekPreview && hoverPreview.visible ? seekPreview(hoverPreview.time) : null
 
   // Compute progress percentage
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
@@ -2051,6 +2122,58 @@ export function VideoPlayer({
           </div>
         )}
 
+        {mobile && (
+          <MobilePlayerControls
+            videoRef={videoRef}
+            title={animeTitle}
+            episodeLabel={`EP ${currentEpisode ?? ''}${episodeTitle ? ` · ${episodeTitle}` : ''}${currentSource?.server === 'Local' ? ' · Downloaded' : ''}`}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            bufferedPercentage={bufferedPercentage}
+            landscape={isLandscape || isFullscreen}
+            isFullscreen={isFullscreen}
+            disableSeeking={disableSeeking}
+            suspended={!!error || showNextEpisodeOverlay}
+            togglePlay={togglePlay}
+            seekTo={seekToTime}
+            skipBy={handleSkip}
+            toggleFullscreen={toggleFullscreen}
+            onBack={onGoBack}
+            onMinimize={handleEnterPip}
+            qualities={availableQualities}
+            selectedQuality={selectedQuality}
+            onQuality={changeQuality}
+            servers={servers}
+            selectedServer={selectedServer}
+            onServer={changeServer}
+            audioModes={audioModes}
+            audioMode={selectedAudioMode}
+            onAudio={changeAudioMode}
+            subtitleTracks={subtitleTracks.map((s) => ({ url: s.url, label: s.label || s.language }))}
+            selectedSubtitleUrl={selectedSubtitleUrl}
+            onSubtitle={setSelectedSubtitleUrl}
+            subtitleFontScale={playerSettings.subtitleFontScale ?? 100}
+            subtitleFontFamily={playerSettings.subtitleFontFamily ?? 'system'}
+            onSubtitleStyle={updatePlayerSettings}
+            speeds={playbackSpeedOptions}
+            speed={playerSettings.playbackSpeed}
+            onSpeed={(s) => updatePlayerSettings({ playbackSpeed: s })}
+            hasNext={hasNextEpisode}
+            onNext={() => onNextEpisode?.()}
+            episodes={episodes}
+            currentEpisode={currentEpisode}
+            onEpisodeSelect={onEpisodeSelect}
+            skipLabel={activeSkip?.label ?? null}
+            onSkip={() => activeSkip && seekToTime(activeSkip.end)}
+            seekPreview={seekPreview}
+            resumedAt={initialTime}
+            offline={currentSource?.server === 'Local'}
+          />
+        )}
+
+        {!mobile && (
+        <>
         {/* ── Center Play Button ────────────────────────────────── */}
         <div
           className={`absolute top-1/2 left-1/2 z-[5] flex items-center justify-center w-[72px] h-[72px] rounded-full cursor-pointer transition-all duration-200 ${
@@ -2089,7 +2212,7 @@ export function VideoPlayer({
         </div>
 
         {/* ── Skip Intro Button ─────────────────────────────────── */}
-        {!disableSeeking && currentTime > 0 && currentTime < 90 && (
+        {!disableSeeking && activeSkip && (
           <div
             className={`absolute bottom-[100px] right-6 z-10 flex items-center gap-2 py-[10px] px-5 rounded cursor-pointer transition-all duration-150 ${
               showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -2107,8 +2230,7 @@ export function VideoPlayer({
             }}
             onClick={(e) => {
               e.stopPropagation()
-              // Skip to 90 seconds
-              seekToTime(90)
+              seekToTime(activeSkip.end)
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'
@@ -2119,7 +2241,7 @@ export function VideoPlayer({
               e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)'
             }}
           >
-            Skip Intro
+            {activeSkip.label}
             <svg
               width="16"
               height="16"
@@ -2254,6 +2376,29 @@ export function VideoPlayer({
                 cursor: isDragging ? 'grabbing' : 'grab',
               }}
             />
+            {hoverSprite && (
+              <div
+                className="absolute pointer-events-none rounded overflow-hidden border border-white/20"
+                style={{
+                  top: `${-28 - 6 - (hoverSprite.h * 160) / hoverSprite.w}px`,
+                  left: `${Math.max(80, Math.min(hoverPreview.x, (progressBarRef.current?.clientWidth || 0) - 80))}px`,
+                  transform: 'translateX(-50%)',
+                  width: 160,
+                  height: (hoverSprite.h * 160) / hoverSprite.w,
+                }}
+              >
+                <div
+                  style={{
+                    width: hoverSprite.w,
+                    height: hoverSprite.h,
+                    backgroundImage: `url("${hoverSprite.url}")`,
+                    backgroundPosition: `-${hoverSprite.x}px -${hoverSprite.y}px`,
+                    transform: `scale(${160 / hoverSprite.w})`,
+                    transformOrigin: 'top left',
+                  }}
+                />
+              </div>
+            )}
             {/* Tooltip */}
             {hoverPreview.visible && (
               <div
@@ -2772,7 +2917,7 @@ export function VideoPlayer({
                       e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
                     }}
                   >
-                    {selectedAudioMode.toUpperCase()}
+                    {audioModeLabel(selectedAudioMode)}
                     <svg
                       width="10"
                       height="10"
@@ -2819,7 +2964,7 @@ export function VideoPlayer({
                             }
                           }}
                         >
-                          {mode.toUpperCase()}
+                          {audioModeLabel(mode)}
                           {selectedAudioMode === mode && (
                             <span
                               className="w-[6px] h-[6px] rounded-full"
@@ -3078,6 +3223,8 @@ export function VideoPlayer({
             </div>
           </div>
         </div>
+        </>
+        )}
 
         {/* ── Keyboard Shortcuts Hint ───────────────────────────── */}
         {showShortcutsHint && !mobile && (
@@ -3231,6 +3378,29 @@ export function VideoPlayer({
             </svg>
             <h3 className="text-xl font-bold mb-2">Playback Error</h3>
             <p className="text-white/60">{error}</p>
+            {mobile && (
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  className="min-h-[44px] rounded-lg bg-[#e50914] px-5 text-sm font-semibold"
+                  onClick={() => {
+                    setError(null)
+                    setRetryKey((k) => k + 1)
+                  }}
+                >
+                  Retry
+                </button>
+                {servers.length > 1 && (
+                  <button
+                    type="button"
+                    className="min-h-[44px] rounded-lg bg-white/10 px-5 text-sm font-semibold"
+                    onClick={() => changeServer((selectedServer + 1) % servers.length)}
+                  >
+                    Try another server
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -3474,6 +3644,11 @@ export function VideoPlayer({
                     >
                       {ep.title || `Episode ${ep.number}`}
                     </div>
+                    {isActive && sources[0]?.episode_synopsis && (
+                      <p className="mt-1 text-[0.7rem] leading-snug line-clamp-4 text-white/50">
+                        {sources[0].episode_synopsis}
+                      </p>
+                    )}
                   </div>
                 </div>
               )

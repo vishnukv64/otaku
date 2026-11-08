@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { ConfirmSheet } from '@/components/mobile/you/ui'
+import { isMobile } from '@/utils/platform'
 
 interface DangerButtonProps {
   onClick: () => void | Promise<void>
@@ -22,6 +24,28 @@ export function DangerButton({ onClick, label, confirmMessage, disabled }: Dange
     } finally {
       setIsLoading(false)
     }
+  }
+
+  if (isMobile()) {
+    return (
+      <>
+        <button
+          onClick={() => setShowConfirm(true)}
+          disabled={disabled}
+          className="min-h-[44px] whitespace-nowrap px-1 text-[15px] font-semibold text-[var(--color-accent-light)] disabled:opacity-50"
+        >
+          {label}
+        </button>
+        <ConfirmSheet
+          isOpen={showConfirm}
+          onClose={() => setShowConfirm(false)}
+          title={`${label}?`}
+          text={confirmMessage}
+          confirmLabel={label}
+          onConfirm={() => void handleConfirm()}
+        />
+      </>
+    )
   }
 
   return (

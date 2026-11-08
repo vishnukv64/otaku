@@ -39,6 +39,8 @@ export interface SearchResult {
   media_type?: string
   /** Genres for NSFW filtering */
   genres?: string[]
+  /** Audio locales the provider offers (e.g. ja-JP, en-US). */
+  audio_locales?: string[]
   /** Native/romaji title from providers that expose it in search results. */
   native_name?: string
   /** Provider-side title aliases used for cross-provider matching. */
@@ -71,6 +73,8 @@ export interface Episode {
   thumbnail?: string
   /** ISO 8601 air date. If in the future, the episode hasn't aired yet. */
   aired?: string
+  /** Runtime in seconds, when the provider reports it. */
+  duration?: number
 }
 
 export interface MediaDetails {
@@ -102,6 +106,16 @@ export interface MediaDetails {
   }
   last_update_end?: string // ISO 8601 timestamp of last episode release
   broadcast_interval?: number // Interval between episodes in milliseconds
+  /** Age rating (PG-13, R ...) from the provider. */
+  age_rating?: string
+  /** Audio locales the provider offers (ja-JP first). */
+  audio_locales?: string[]
+  banner_url?: string
+  /** ISO start/end dates from the provider. */
+  start_date?: string
+  end_date?: string
+  /** Weekly broadcast slot; time is UTC HH:mm. */
+  broadcast?: { day: string; time: string }
   /** MAL rank */
   rank?: number
   /** MAL popularity rank */
@@ -132,6 +146,12 @@ export interface VideoSource {
   // Per-source subtitle sidecars (not the top-level VideoSources.subtitles,
   // which are provider-wide). Rust side mirrors this as Vec<Subtitle>.
   subtitles?: Subtitle[]
+  /** WebVTT sprite map for seek-bar previews. */
+  preview_vtt?: string
+  /** BCP-47 audio locale (KAA: ja-JP, en-US, es-ES ...). */
+  audio_locale?: string
+  /** Current-episode synopsis, when the provider has one. */
+  episode_synopsis?: string
 }
 
 export interface Subtitle {

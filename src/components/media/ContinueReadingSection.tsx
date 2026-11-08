@@ -5,6 +5,8 @@
  * with progress indicators
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
+import { isMobile } from '@/utils/platform'
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, Link } from '@tanstack/react-router'
 import { BookOpen, Loader2, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
@@ -163,7 +165,7 @@ export function ContinueReadingSection() {
   if (loading) {
     return (
       <div className="mb-10">
-        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3">Continue Reading</h2>
+        <h2 className="text-xl font-bold font-display mb-4 border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">Continue Reading</h2>
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent-primary)]" />
         </div>
@@ -178,12 +180,12 @@ export function ContinueReadingSection() {
   return (
     <div className="mb-10 overflow-visible">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3">Continue Reading</h2>
+        <h2 className="text-xl font-bold font-display border-l-[3px] border-[var(--color-accent-primary)] pl-3 max-sm:border-l-0 max-sm:pl-0 max-sm:text-[19px]">Continue Reading</h2>
         <Link
-          to="/library"
-          className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
+          to={isMobile() ? '/history' : '/library'}
+          className="flex items-center gap-1 text-sm max-sm:min-h-[44px] max-sm:text-[13px] max-sm:text-[var(--color-text-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-light)] transition-colors"
         >
-          See all
+          {isMobile() ? 'All' : 'See all'}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
         </Link>
       </div>
@@ -248,7 +250,7 @@ export function ContinueReadingSection() {
                     {/* 16:9 Thumbnail */}
                     <div className="relative w-full h-[135px] bg-[var(--color-panel)]">
                       {media.cover_url ? (
-                        <ContinueReadingCardImage url={media.cover_url} title={media.title} />
+                        <ContinueReadingCardImage url={media.cover_url} title={displayTitle(media)} />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <BookOpen size={24} className="text-[var(--color-text-dim)]" />
@@ -266,7 +268,7 @@ export function ContinueReadingSection() {
                     {/* Card info panel */}
                     <div className="px-3 py-2.5 pb-3">
                       <h3 className="text-[0.875rem] font-semibold font-display text-white truncate mb-1">
-                        {media.title}
+                        {displayTitle(media)}
                       </h3>
                       <p className="text-xs text-[var(--color-text-muted)] mb-2">
                         {entry.completed
@@ -298,18 +300,41 @@ export function ContinueReadingSection() {
                     }
                     setSelectedManga({ manga: media, extensionId: effectiveExtensionId })
                   }}
-                  className="absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  aria-label={`Details for ${displayTitle(media)}`}
+                  className={
+                    isMobile()
+                      ? 'absolute left-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
+                      : 'absolute top-2 left-2 z-[60] p-1.5 rounded-full glass text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto'
+                  }
                   title="View Details"
                 >
-                  <Info className="w-4 h-4" />
+                  {/* Phones have no hover: keep it visible there. */}
+                  {isMobile() ? (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <Info size={18} />
+                    </span>
+                  ) : (
+                    <Info className="w-4 h-4" />
+                  )}
                 </button>
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title, entry.media.cover_url)}
-                  className="absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto"
+                  aria-label={`Remove ${displayTitle(media)} from Continue Reading`}
+                  className={
+                    isMobile()
+                      ? 'absolute right-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
+                      : 'absolute top-2 right-2 z-[60] p-1.5 rounded-full glass hover:!bg-red-600/80 text-white opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-auto'
+                  }
                   title="Remove from Continue Reading"
                 >
-                  <X className="w-4 h-4" />
+                  {isMobile() ? (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                      <X size={16} />
+                    </span>
+                  ) : (
+                    <X className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             )

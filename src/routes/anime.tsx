@@ -16,6 +16,11 @@ import { MediaCard } from '@/components/media/MediaCard'
 import { MediaDetailModal } from '@/components/media/MediaDetailModal'
 import { GenreFilterBar } from '@/components/media/GenreFilterBar'
 import { BrowseSidebar } from '@/components/browse/BrowseSidebar'
+import { MobileBrowseControls } from '@/components/browse/MobileBrowseControls'
+import { AnimeSegment } from '@/components/browse/AnimeSegment'
+import { isMobile } from '@/utils/platform'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { WifiOff } from 'lucide-react'
 import { BrowseHeader } from '@/components/browse/BrowseHeader'
 import { ActiveFilterChips } from '@/components/browse/ActiveFilterChips'
 import type { BrowseFilters, NavItem } from '@/components/browse/BrowseSidebar'
@@ -97,6 +102,11 @@ function AnimeScreen() {
   // Personalized recommendations state (used by browse fetcher logic)
   const [_userWatchingGenres, setUserWatchingGenres] = useState<string[]>([])
   const [_hasWatchHistory, setHasWatchHistory] = useState(false)
+
+  const mobile = isMobile()
+  const { isOnline } = useNetworkStatus()
+  const [filteredBrowseError, setFilteredBrowseError] = useState(false)
+  const [filteredRetry, setFilteredRetry] = useState(0)
 
   // Sidebar state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -231,7 +241,9 @@ function AnimeScreen() {
   const filteredBrowseLoadMoreRef = useRef<HTMLDivElement>(null)
 
   // Grid: auto-fill with 160px min (matches mock)
-  const gridClasses = 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 p-4 -m-4'
+  const gridClasses = isMobile()
+    ? 'grid-cols-2 gap-3'
+    : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 p-4 -m-4'
 
   const {
     searchQuery,
@@ -434,6 +446,7 @@ function AnimeScreen() {
       return
     }
     setFilteredBrowseLoading(true)
+    setFilteredBrowseError(false)
     setFilteredBrowsePage(1)
     filteredBrowseSeenRef.current.clear()
 
@@ -454,9 +467,12 @@ function AnimeScreen() {
         setFilteredBrowseItems(filtered)
         setFilteredBrowseHasNext(result.has_next_page)
       })
-      .catch(err => console.error('Filtered browse failed:', err))
+      .catch(err => {
+        console.error('Filtered browse failed:', err)
+        setFilteredBrowseError(true)
+      })
       .finally(() => setFilteredBrowseLoading(false))
-  }, [activeTab, hasActiveFilters, sidebarFilters, nsfwFilter])
+  }, [activeTab, hasActiveFilters, sidebarFilters, nsfwFilter, filteredRetry])
 
   // Filtered browse: load more
   const loadMoreFilteredBrowse = useCallback(async () => {
@@ -694,7 +710,7 @@ function AnimeScreen() {
   return (
     <div className="min-h-[calc(100vh-4rem)] flex">
       {/* Sidebar */}
-      <BrowseSidebar
+      {!mobile && <BrowseSidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((p) => !p)}
         activeNav={sidebarNav}
@@ -706,17 +722,38 @@ function AnimeScreen() {
         genres={animeGenres}
         genresLoading={genresLoading}
         yearOptions={sidebarYearOptions}
-      />
+      />}
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0 px-7 pb-3">
+      <main className={`flex-1 min-w-0 pb-3 ${mobile ? 'px-4' : 'px-7'}`}>
+        {mobile && <div className="-mx-4 pt-2"><AnimeSegment active="discover" /></div>}
+        {mobile && !isOnline && (
+          <div className="mb-3 flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+            <WifiOff size={14} /> You’re offline. Browsing needs a connection — showing what was loaded.
+          </div>
+        )}
         {/* Browse Header */}
+        {mobile ? (
+          <MobileBrowseControls
+            mediaType="anime"
+            activeNav={sidebarNav}
+            onNavChange={handleSidebarNav}
+            filters={sidebarFilters}
+            onFiltersChange={setSidebarFilters}
+            onReset={handleClearAllChips}
+            genres={animeGenres}
+            genresLoading={genresLoading}
+            yearOptions={sidebarYearOptions}
+            resultCount={currentResultCount}
+          />
+        ) : (
         <BrowseHeader
           title={headerTitle}
           resultCount={currentResultCount}
           sortBy={sidebarFilters.orderBy || 'popularity'}
           onSortChange={handleHeaderSortChange}
         />
+        )}
 
         {/* Search Bar */}
         <div className="relative mt-3 mb-3">
@@ -831,6 +868,11 @@ function AnimeScreen() {
                         )}
                       </div>
                     </div>
+                  ) : filteredBrowseError ? (
+                    <div className="text-center py-12">
+                      <p className="text-[var(--color-text-secondary)]">Couldn’t load anime.</p>
+                      <button onClick={() => setFilteredRetry((n) => n + 1)} className="mt-4 min-h-[44px] rounded-full bg-[var(--color-accent-primary)] px-6 text-sm font-semibold text-white">Retry</button>
+                    </div>
                   ) : (
                     <div className="text-center py-12">
                       <p className="text-[var(--color-text-secondary)]">
@@ -874,8 +916,11 @@ function AnimeScreen() {
                   ) : (
                     <div className="text-center py-12">
                       <p className="text-[var(--color-text-secondary)]">
-                        No anime found
+                        {browseAnime.error ? 'Couldn’t load anime.' : 'No anime found'}
                       </p>
+                      {browseAnime.error && (
+                        <button onClick={() => void browseAnime.refetch()} className="mt-4 min-h-[44px] rounded-full bg-[var(--color-accent-primary)] px-6 text-sm font-semibold text-white">Retry</button>
+                      )}
                     </div>
                   )}
                 </div>

@@ -15,12 +15,18 @@ import { RecommendationCarousel, SimilarToCarousel } from '@/components/home/Rec
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
+import { Link } from '@tanstack/react-router'
+import { Loader2, WifiOff, Sparkles } from 'lucide-react'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 
 export const Route = createFileRoute('/')({
   component: HomeScreen,
 })
 
 function HomeScreen() {
+  const mobile = isMobile()
+  const { isOnline } = useNetworkStatus()
   const [allanimeExtensionId, setAllanimeExtensionId] = useState<string | null>(null)
 
   const [featuredAnime, setFeaturedAnime] = useState<SearchResult | null>(null)
@@ -192,6 +198,20 @@ function HomeScreen() {
     setSelectedMedia(null)
   }
 
+  const { pull, refreshing } = usePullToRefresh(async () => {
+    await Promise.all([
+      trending.refetch(),
+      mostPopular.refetch(),
+      thisSeason.refetch(),
+      topRated.refetch(),
+      upcoming.refetch(),
+      loadRecommendations(),
+    ])
+  }, mobile && isOnline)
+
+  // First run: nothing watched yet, no recommendations
+  const firstRun = mobile && !recsLoading && recommendations.length === 0 && similarGroups.length === 0
+
   // Carousel sections config — maps hook results to titles
   const carousels = [
     { title: 'Most Popular', hook: mostPopular, seeAllHref: '/anime', seeAllText: 'Browse all' },
@@ -209,6 +229,21 @@ function HomeScreen() {
         <div className="absolute rounded-full opacity-[0.12] animate-orb-float" style={{ width: 250, height: 250, background: '#8b0000', filter: 'blur(80px)', bottom: '-5%', left: '30%', animationDelay: '-5s' }} />
       </div>
       <div className="relative z-[1] px-4 sm:px-6 lg:px-8 3xl:px-12 pt-6 max-w-4k mx-auto overflow-visible">
+        {mobile && (pull > 0 || refreshing) && (
+          <div className="flex justify-center py-2" style={{ height: refreshing ? 40 : pull / 2 }}>
+            <Loader2 className={`h-5 w-5 text-[var(--color-accent-primary)] ${refreshing ? 'animate-spin' : ''}`} />
+          </div>
+        )}
+        {mobile && !isOnline && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] px-4 py-3">
+            <span className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+              <WifiOff size={16} /> You’re offline. Showing downloads.
+            </span>
+            <Link to="/downloads" className="min-h-[44px] content-center text-sm font-semibold text-[var(--color-accent-light)]">
+              Downloads
+            </Link>
+          </div>
+        )}
         {/* Hero Section */}
         {featuredAnime ? (
           isMobile() ? (
@@ -220,6 +255,7 @@ function HomeScreen() {
               totalItems={trending.data.length || 1}
               currentIndex={featuredIndex}
               onIndexChange={handleFeaturedIndexChange}
+              rank={featuredIndex + 1}
             />
           ) : (
             <HeroSection
@@ -235,6 +271,22 @@ function HomeScreen() {
           )
         ) : (
           <HeroSectionSkeleton />
+        )}
+
+        {firstRun && (
+          <div className="mb-8 rounded-[var(--radius-lg)] border border-[var(--color-glass-border)] bg-[var(--color-glass-bg)] p-5 text-center">
+            <Sparkles className="mx-auto mb-2 h-6 w-6 text-[var(--color-accent-light)]" />
+            <p className="font-display text-lg font-bold text-white">Welcome to Otaku</p>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              Watch something or add titles to your library and we’ll tailor this feed to you.
+            </p>
+            <Link
+              to="/anime"
+              className="mt-4 inline-flex min-h-[44px] items-center rounded-full bg-[var(--color-accent-primary)] px-6 text-sm font-semibold text-white"
+            >
+              Browse anime
+            </Link>
+          </div>
         )}
 
         {/* Continue Watching Section */}
@@ -284,6 +336,9 @@ function HomeScreen() {
               title={title}
               items={hook.data}
               loading={hook.loading}
+              error={hook.error}
+              onRetry={() => void hook.refetch()}
+              disabled={mobile && !isOnline}
               onItemClick={handleMediaClick}
               seeAllHref={seeAllHref}
               seeAllText={seeAllText}

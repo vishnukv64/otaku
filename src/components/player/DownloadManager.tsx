@@ -8,15 +8,17 @@
  * - DownloadManager: Modal shell wrapping DownloadPageContent (used by TopNav on desktop)
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Download, Trash2, CheckCircle, Loader2, Folder, BookOpen, Tv, Pause, Play, ChevronDown } from 'lucide-react'
+import { X, Download, Trash2, CheckCircle, Loader2, Folder, BookOpen, Tv, Pause, Play, ChevronDown, EllipsisVertical, RefreshCw } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { ask } from '@tauri-apps/plugin-dialog'
-import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, clearCompletedChapterDownloads, clearFailedChapterDownloads, getCachedMediaDetails, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
+import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, retryDownload, getFreeStorage, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, clearCompletedChapterDownloads, clearFailedChapterDownloads, getCachedMediaDetails, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { useSettingsStore } from '@/store/settingsStore'
 import { isMobile } from '@/utils/platform'
+import { ConfirmSheet, Segmented } from '@/components/mobile/you/ui'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
 
 // Extension ID for AllAnime - used for navigation to watch page
 
@@ -117,10 +119,19 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   const [chapterDownloads, setChapterDownloads] = useState<ChapterDownloadWithTitle[]>([])
   const [loading, setLoading] = useState(false)
   const [totalStorage, setTotalStorage] = useState(0)
+  const [freeStorage, setFreeStorage] = useState(0)
+  // Phone sheets: app-bar ⋯ menu ('app') or a row's ⋯ menu (download id)
+  const [menu, setMenu] = useState<'app' | DisplayDownloadProgress | null>(null)
   const [activeTab, setActiveTab] = useState<string>('all')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [coverUrls, setCoverUrls] = useState<Record<string, string>>({})
   const navigate = useNavigate()
+  const mobile = isMobile()
+  const [mediaType, setMediaType] = useState<'anime' | 'manga'>('anime')
+  const [confirmReq, setConfirmReq] = useState<{ message: string; resolve: (ok: boolean) => void } | null>(null)
+  // Phone confirms in a bottom sheet (design: downloads.html); desktop keeps the native dialog.
+  const confirmAsk = (message: string, opts?: { kind?: 'warning' | 'info' | 'error' }): Promise<boolean> =>
+    mobile ? new Promise((resolve) => setConfirmReq({ message, resolve })) : ask(message, opts)
 
   // Get custom download location from settings
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
@@ -131,6 +142,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       try {
         const storage = await getTotalStorageUsed()
         setTotalStorage(storage)
+        setFreeStorage(await getFreeStorage().catch(() => 0))
       } catch (error) {
         console.error('Failed to load static data:', error)
       }
@@ -309,7 +321,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const confirmMessage = download && download.status !== 'completed'
       ? `Remove "${cleanFilename}" and delete any partial file?`
       : `Delete "${cleanFilename}"? This will permanently remove the file.`
-    const confirmed = await ask(confirmMessage, { kind: 'warning' })
+    const confirmed = await confirmAsk(confirmMessage, { kind: 'warning' })
     if (!confirmed) return
 
     try {
@@ -337,7 +349,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       return
     }
 
-    const confirmed = await ask(`Clear ${completedCount} completed download(s) from the list? Files will not be deleted.`)
+    const confirmed = await confirmAsk(`Clear ${completedCount} completed download(s) from the list? Files will not be deleted.`)
     if (!confirmed) return
 
     try {
@@ -367,7 +379,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       return
     }
 
-    const confirmed = await ask(`Clear ${failedCount} failed download(s) from the list?`)
+    const confirmed = await confirmAsk(`Clear ${failedCount} failed download(s) from the list?`)
     if (!confirmed) return
 
     try {
@@ -413,7 +425,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       ? `Are you sure you want to delete all ${animeDownloads.length} episode${animeDownloads.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed file${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
       : `Are you sure you want to delete all episodes for "${mediaTitle}"? This will permanently remove ${animeDownloads.length} file(s).`
 
-    const confirmed = await ask(summary, { kind: 'warning' })
+    const confirmed = await confirmAsk(summary, { kind: 'warning' })
     if (!confirmed) return
 
     try {
@@ -452,7 +464,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     const chapter = chapterDownloads.find(d => d.media_id === mediaId && d.chapter_id === chapterId)
     const displayName = chapter ? `${chapter.media_title} Ch.${chapter.chapter_number}` : 'Chapter'
 
-    const confirmed = await ask(`Delete "${displayName}"? This will permanently remove the downloaded images.`, { kind: 'warning' })
+    const confirmed = await confirmAsk(`Delete "${displayName}"? This will permanently remove the downloaded images.`, { kind: 'warning' })
     if (!confirmed) return
 
     try {
@@ -487,7 +499,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       ? `Are you sure you want to delete all ${mangaChapters.length} chapter${mangaChapters.length > 1 ? 's' : ''} for "${mediaTitle}"? This removes ${completedInGroup} completed chapter${completedInGroup === 1 ? '' : 's'} and ${inFlightInGroup} in-progress download${inFlightInGroup === 1 ? '' : 's'} (partial files will also be removed).`
       : `Are you sure you want to delete all chapters for "${mediaTitle}"? This will permanently remove ${mangaChapters.length} chapter(s).`
 
-    const confirmed = await ask(summary, { kind: 'warning' })
+    const confirmed = await confirmAsk(summary, { kind: 'warning' })
     if (!confirmed) return
 
     try {
@@ -517,6 +529,24 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     })
     onNavigateAway?.()
   }
+
+  const handleRetry = async (downloadId: string) => {
+    const download = downloads.find(d => d.id === downloadId)
+    try {
+      await retryDownload(downloadId)
+      setDownloads(withStableActiveDisplayTotals(await listDownloads(), downloads))
+    } catch (error) {
+      console.error('Failed to retry download:', error)
+      notifyError('Retry Failed', `Failed to retry Episode ${download?.episode_number ?? ''}`, mediaMeta(download?.media_id))
+    }
+  }
+
+  useEffect(() => {
+    if (!mobile) return
+    const open = () => setMenu('app')
+    window.addEventListener('downloads:menu', open)
+    return () => window.removeEventListener('downloads:menu', open)
+  }, [mobile])
 
   const handlePauseAll = async () => {
     const activeDownloads = downloads.filter(d => d.status === 'downloading')
@@ -628,11 +658,16 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     return true
   }
 
-  const filteredAnimeGroups = groupedDownloads
-    .map(g => ({ ...g, downloads: g.downloads.filter(d => statusFilter(d.status)) }))
+  // Phone (mock): in-flight and failed anime rows sit in flat "Active"/"Failed" sections;
+  // show groups hold only finished episodes.
+  const mobileAnime = mobile && mediaType === 'anime'
+  const flatActive = mobileAnime ? downloads.filter(d => ['downloading', 'paused', 'queued'].includes(d.status) && statusFilter(d.status)) : []
+  const flatFailed = mobileAnime ? downloads.filter(d => d.status === 'failed' && statusFilter(d.status)) : []
+  const filteredAnimeGroups = (mobile && mediaType === 'manga' ? [] : groupedDownloads)
+    .map(g => ({ ...g, downloads: g.downloads.filter(d => statusFilter(d.status) && !(mobileAnime && d.status !== 'completed')) }))
     .filter(g => g.downloads.length > 0)
 
-  const filteredMangaGroups = groupedChapterDownloads
+  const filteredMangaGroups = (mobile && mediaType === 'anime' ? [] : groupedChapterDownloads)
     .map(g => ({ ...g, downloads: g.downloads.filter(d => statusFilter(d.status)) }))
     .filter(g => g.downloads.length > 0)
 
@@ -646,7 +681,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   const mangaBytes = Math.max(0, totalStorage - animeBytes)
 
   return (
-    <div className="px-4 sm:px-6 py-5">
+    <div className={mobile ? 'px-4 pt-2 pb-24' : 'px-4 sm:px-6 py-5'}>
       {/* Shimmer animation for active progress bars */}
       <style>{`
         @keyframes shimmer-progress {
@@ -656,17 +691,32 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       `}</style>
 
       {/* Page Header */}
-      <div className="mb-2">
+      <div className={mobile ? 'hidden' : 'mb-2'}>
         <h1 className="font-display font-extrabold text-[1.75rem]">Downloads</h1>
         <p className="text-[0.9375rem] text-[var(--color-text-muted)]">Manage your downloaded episodes and chapters</p>
       </div>
 
+      {mobile && (
+        <Segmented
+          className="mb-3"
+          value={mediaType}
+          onChange={setMediaType}
+          options={[
+            { id: 'anime', label: <><Tv size={14} />Anime</> },
+            { id: 'manga', label: <><BookOpen size={14} />Manga</> },
+          ]}
+        />
+      )}
+
       {/* Storage Overview */}
       {totalStorage > 0 && (
-        <div className="p-[18px_22px] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] mb-5">
+        <div className={`p-4 sm:p-[18px_22px] border border-[var(--color-glass-border)] ${mobile ? 'bg-[var(--color-bg-secondary)] rounded-[var(--radius-xl)] mb-3.5' : 'bg-[var(--color-glass-bg)] rounded-[var(--radius-lg)] mb-5'}`}>
           <div className="flex items-baseline justify-between mb-2.5">
             <div className="font-mono text-[0.95rem] font-semibold">
               {formatBytes(totalStorage)} <span className="text-[var(--color-text-muted)] font-normal text-[0.85rem]">used</span>
+              {mobile && freeStorage > 0 && (
+                <span className="float-right text-[var(--color-text-muted)] font-normal text-[0.85rem]">{formatBytes(freeStorage)} free</span>
+              )}
             </div>
           </div>
           <div className="w-full h-2 bg-white/[0.06] rounded-full overflow-hidden flex">
@@ -701,7 +751,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       )}
 
       {/* Stats Bar */}
-      <div className="flex items-center gap-5 flex-wrap px-5 py-3.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] mb-5">
+      <div className={`${mobile ? 'hidden' : 'flex'} items-center gap-x-4 gap-y-2 flex-wrap px-4 sm:px-5 py-3.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] mb-5`}>
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-[0.9rem] font-semibold">{totalCount}</span>
           <span className="text-[0.7rem] text-[var(--color-text-muted)]">Total</span>
@@ -739,13 +789,13 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       </div>
 
       {/* Controls: Tabs + Actions */}
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-5 max-sm:flex-col max-sm:items-stretch">
+        <div className="flex items-center gap-1 max-sm:overflow-x-auto max-sm:-mx-4 max-sm:px-4 scrollbar-hide">
           {(['all', 'completed', 'in_progress', 'failed'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-all ${
+              className={`px-3.5 py-1.5 max-sm:min-h-[40px] max-sm:whitespace-nowrap rounded-full text-sm font-medium transition-all ${
                 activeTab === tab
                   ? 'bg-[var(--color-accent-primary)] text-white'
                   : 'text-[var(--color-text-secondary)] hover:text-white hover:bg-white/5'
@@ -755,13 +805,13 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-sm:flex-wrap max-sm:[&>button]:min-h-[44px] max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center max-sm:[&>button]:whitespace-nowrap">
           {completedCount > 0 && (
             <button onClick={handleClearCompleted} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-white/10 rounded-lg transition-colors text-sm">
               <Trash2 size={14} /> Clear completed
             </button>
           )}
-          {!isMobile() && (
+          {!mobile && (
             <button onClick={handleOpenFolder} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-white/10 rounded-lg transition-colors text-sm">
               <Folder size={14} /> Open folder
             </button>
@@ -797,6 +847,32 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Phone: flat Active / Failed sections (mock) */}
+          {([['Active', flatActive, `${activeCount} downloading · ${queuedCount} queued · ${pausedCount} paused`], ['Failed', flatFailed, `${flatFailed.length} failed`]] as const).map(([label, items, sub]) =>
+            items.length > 0 && (
+              <div key={label} className="border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] overflow-hidden">
+                <div className="px-3 py-3 bg-white/[0.04]">
+                  <b className="block text-[0.95rem]">{label}</b>
+                  <small className="text-[0.8rem] text-[var(--color-text-muted)]">{sub}</small>
+                </div>
+                {items.map((download) => (
+                  <DownloadItem
+                    key={download.id}
+                    download={download}
+                    onCancel={handleCancel}
+                    onDelete={handleDelete}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onRetry={handleRetry}
+                    onMenu={setMenu}
+                    onPlay={handlePlayEpisode}
+                    extractQuality={extractQuality}
+                    formatBytes={formatBytes}
+                  />
+                ))}
+              </div>
+            ))}
+
           {/* Anime groups */}
           {filteredAnimeGroups.map((group) => {
             const isCollapsed = collapsedGroups.has(group.mediaId)
@@ -810,7 +886,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
               <div key={group.mediaId} className={`group/grp border rounded-[var(--radius-lg)] overflow-hidden transition-colors ${hasFailed ? 'border-red-400/20' : 'border-[var(--color-glass-border)] hover:border-[var(--color-glass-border-hover)]'}`}>
                 {/* Group Header */}
                 <div
-                  className="w-full flex items-center gap-3.5 px-[18px] py-3.5 bg-white/[0.04] hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
+                  className="w-full flex items-center gap-3.5 px-3 sm:px-[18px] py-3.5 bg-white/[0.04] hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
                 >
                   <button
                     type="button"
@@ -851,7 +927,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleDeleteAnime(group.mediaId, group.mediaTitle) }}
-                    className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover/grp:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all flex-shrink-0"
+                    className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] max-sm:opacity-100 opacity-0 group-hover/grp:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all flex-shrink-0"
                     title="Delete all episodes"
                   >
                     <Trash2 size={14} />
@@ -859,7 +935,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.mediaId)}
-                    className={`w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}
+                    className={`w-7 h-7 max-sm:w-11 max-sm:h-11 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}
                     aria-label={isCollapsed ? `Expand ${group.mediaTitle}` : `Collapse ${group.mediaTitle}`}
                   >
                     <ChevronDown size={18} />
@@ -882,6 +958,8 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                         onDelete={handleDelete}
                         onPause={handlePause}
                         onResume={handleResume}
+                        onRetry={handleRetry}
+                        onMenu={setMenu}
                         onPlay={handlePlayEpisode}
                         extractQuality={extractQuality}
                         formatBytes={formatBytes}
@@ -902,7 +980,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
               <div key={group.mediaId} className={`group/grp border rounded-[var(--radius-lg)] overflow-hidden transition-colors ${hasFailed ? 'border-red-400/20' : 'border-[var(--color-glass-border)] hover:border-[var(--color-glass-border-hover)]'}`}>
                 {/* Group Header */}
                 <div
-                  className="w-full flex items-center gap-3.5 px-[18px] py-3.5 bg-white/[0.04] hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
+                  className="w-full flex items-center gap-3.5 px-3 sm:px-[18px] py-3.5 bg-white/[0.04] hover:bg-white/[0.06] transition-colors cursor-pointer select-none"
                 >
                   <button
                     type="button"
@@ -935,7 +1013,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleDeleteManga(group.mediaId, group.mediaTitle) }}
-                    className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover/grp:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all flex-shrink-0"
+                    className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] max-sm:opacity-100 opacity-0 group-hover/grp:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all flex-shrink-0"
                     title="Delete all chapters"
                   >
                     <Trash2 size={14} />
@@ -943,7 +1021,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.mediaId)}
-                    className={`w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}
+                    className={`w-7 h-7 max-sm:w-11 max-sm:h-11 flex items-center justify-center text-[var(--color-text-muted)] flex-shrink-0 transition-transform duration-250 ${isCollapsed ? '-rotate-90' : ''}`}
                     aria-label={isCollapsed ? `Expand ${group.mediaTitle}` : `Collapse ${group.mediaTitle}`}
                   >
                     <ChevronDown size={18} />
@@ -971,7 +1049,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
             )
           })}
 
-          {filteredAnimeGroups.length === 0 && filteredMangaGroups.length === 0 && (
+          {filteredAnimeGroups.length === 0 && filteredMangaGroups.length === 0 && flatActive.length === 0 && flatFailed.length === 0 && (
             <div className="text-center py-12 text-[var(--color-text-muted)]">
               {activeTab === 'completed' && completedCount === 0
                 ? 'Nothing finished yet. Completed downloads will show up here.'
@@ -984,6 +1062,49 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
           )}
         </div>
       )}
+
+      <BottomSheet
+        isOpen={menu === 'app'}
+        onClose={() => setMenu(null)}
+        title="Downloads"
+      >
+        <SheetOption icon={<Pause size={18} />} onClick={() => { setMenu(null); handlePauseAll() }}>Pause All</SheetOption>
+        <SheetOption icon={<Play size={18} />} onClick={() => { setMenu(null); handleResumeAll() }}>Resume All</SheetOption>
+        <SheetOption icon={<Trash2 size={18} />} onClick={() => { setMenu(null); handleClearCompleted() }}>Clear completed</SheetOption>
+        <SheetOption icon={<Trash2 size={18} />} onClick={() => { setMenu(null); handleClearFailed() }}>Clear failed</SheetOption>
+      </BottomSheet>
+      <BottomSheet
+        isOpen={!!menu && menu !== 'app'}
+        onClose={() => setMenu(null)}
+        title={menu && menu !== 'app' ? `Episode ${menu.episode_number}` : ''}
+      >
+        {menu && menu !== 'app' && (
+          <>
+            {menu.status === 'completed' && (
+              <SheetOption icon={<Play size={18} />} onClick={() => { handlePlayEpisode(menu.media_id, menu.episode_id); setMenu(null) }}>Play</SheetOption>
+            )}
+            {menu.status === 'failed' && (
+              <SheetOption icon={<RefreshCw size={18} />} onClick={() => { handleRetry(menu.id); setMenu(null) }}>Retry</SheetOption>
+            )}
+            <SheetOption destructive icon={<Trash2 size={18} />} onClick={() => { handleDelete(menu.id, menu.filename); setMenu(null) }}>Delete download</SheetOption>
+          </>
+        )}
+      </BottomSheet>
+
+      <ConfirmSheet
+        isOpen={!!confirmReq}
+        onClose={() => {
+          confirmReq?.resolve(false)
+          setConfirmReq(null)
+        }}
+        title="Are you sure?"
+        text={confirmReq?.message}
+        confirmLabel="Confirm"
+        onConfirm={() => {
+          confirmReq?.resolve(true)
+          setConfirmReq(null)
+        }}
+      />
     </div>
   )
 }
@@ -1046,6 +1167,8 @@ function DownloadItem({
   onDelete,
   onPause,
   onResume,
+  onRetry,
+  onMenu,
   onPlay,
   extractQuality,
   formatBytes,
@@ -1055,6 +1178,8 @@ function DownloadItem({
   onDelete: (id: string, filename: string) => void
   onPause: (id: string) => void
   onResume: (id: string) => void
+  onRetry: (id: string) => void
+  onMenu: (d: DisplayDownloadProgress) => void
   onPlay: (mediaId: string, episodeId: string) => void
   extractQuality: (filename: string) => string | null
   formatBytes: (bytes: number) => string
@@ -1071,6 +1196,8 @@ function DownloadItem({
     return `~${h}h ${m}m remaining`
   }
 
+  const mobile = isMobile()
+  const swipe = useSwipeLeft(() => onDelete(download.id, download.filename))
   const quality = extractQuality(download.filename)
   const isFailed = download.status === 'failed'
   const totalBytes = displayTotalBytes(download)
@@ -1080,7 +1207,11 @@ function DownloadItem({
   const etaText = formatEta(download)
 
   return (
-    <div className={`group flex items-center gap-3.5 py-3 px-[18px] pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}>
+    <div
+      {...swipe.handlers}
+      style={mobile ? { touchAction: 'pan-y', transform: `translateX(${swipe.dx}px)`, transition: swipe.dx ? 'none' : 'transform 0.2s' } : undefined}
+      className={`group flex items-center gap-3.5 py-3 px-4 sm:px-[18px] pl-4 sm:pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}
+    >
       {/* Episode label */}
       <span className="font-mono text-[0.8rem] font-semibold text-[var(--color-text-secondary)] min-w-[64px] flex-shrink-0">
         Episode {download.episode_number}
@@ -1189,57 +1320,88 @@ function DownloadItem({
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {download.status === 'downloading' && (
           <>
-            <button onClick={() => onPause(download.id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Pause">
+            <button onClick={() => onPause(download.id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Pause">
               <Pause size={13} />
             </button>
-            <button onClick={() => onCancel(download.id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Cancel">
+            <button onClick={() => onCancel(download.id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Cancel">
               <X size={13} />
             </button>
           </>
         )}
         {download.status === 'paused' && (
           <>
-            <button onClick={() => onResume(download.id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-green-400 hover:bg-green-500/10 flex items-center justify-center transition-all" title="Resume">
+            <button onClick={() => onResume(download.id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-green-400 hover:bg-green-500/10 flex items-center justify-center transition-all" title="Resume">
               <Play size={13} />
             </button>
-            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
               <Trash2 size={13} />
             </button>
           </>
         )}
         {download.status === 'failed' && (
           <>
-            <button onClick={() => onResume(download.id)} className="inline-flex items-center gap-1 px-2.5 py-[3px] rounded-[var(--radius-sm)] text-[0.7rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/25 hover:bg-red-400/[0.22] hover:border-red-400/40 transition-all cursor-pointer" title="Retry">
+            <button onClick={() => onRetry(download.id)} className="inline-flex items-center gap-1 px-2.5 py-[3px] max-sm:min-h-[44px] max-sm:px-4 rounded-[var(--radius-sm)] text-[0.7rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/25 hover:bg-red-400/[0.22] hover:border-red-400/40 transition-all cursor-pointer" title="Retry">
               Retry
             </button>
-            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
               <Trash2 size={13} />
             </button>
           </>
         )}
         {download.status === 'queued' && (
-          <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+          <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
             <Trash2 size={13} />
           </button>
         )}
         {download.status === 'completed' && (
           <>
-            <button onClick={() => onPlay(download.media_id, download.episode_id)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover:opacity-100 hover:bg-green-500/15 hover:text-green-400 hover:border-green-400/30 flex items-center justify-center transition-all" title="Play">
+            <button onClick={() => onPlay(download.media_id, download.episode_id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] max-sm:opacity-100 opacity-0 group-hover:opacity-100 hover:bg-green-500/15 hover:text-green-400 hover:border-green-400/30 flex items-center justify-center transition-all" title="Play">
               <Play size={13} />
             </button>
-            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
-              <Trash2 size={13} />
-            </button>
+            {mobile ? (
+              <button onClick={() => onMenu(download)} className="w-11 h-11 rounded-[var(--radius-md)] text-[var(--color-text-secondary)] flex items-center justify-center" aria-label="More actions">
+                <EllipsisVertical size={18} />
+              </button>
+            ) : (
+              <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+                <Trash2 size={13} />
+              </button>
+            )}
           </>
         )}
         {download.status === 'cancelled' && (
-          <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] hover:bg-red-400/15 hover:text-red-400 flex items-center justify-center transition-all" title="Remove">
+          <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] hover:bg-red-400/15 hover:text-red-400 flex items-center justify-center transition-all" title="Remove">
             <X size={13} />
           </button>
         )}
       </div>
     </div>
   )
+}
+
+/** Horizontal-dominant left swipe (touch-action: pan-y keeps vertical scroll). Fires on release past 80px. */
+function useSwipeLeft(onSwipe: () => void) {
+  const [dx, setDx] = useState(0)
+  const start = useRef<{ x: number; y: number; on: boolean } | null>(null)
+  return {
+    dx,
+    handlers: {
+      onPointerDown: (e: React.PointerEvent) => { start.current = { x: e.clientX, y: e.clientY, on: false } },
+      onPointerMove: (e: React.PointerEvent) => {
+        const s = start.current
+        if (!s) return
+        const mx = e.clientX - s.x
+        if (!s.on && Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(e.clientY - s.y) * 1.5) s.on = true
+        if (s.on) setDx(Math.max(-120, Math.min(0, mx)))
+      },
+      onPointerUp: () => {
+        if (start.current?.on && dx <= -80) onSwipe()
+        start.current = null
+        setDx(0)
+      },
+      onPointerCancel: () => { start.current = null; setDx(0) },
+    },
+  }
 }
 
 // Chapter download row — matches mock's inline layout for manga chapters
@@ -1255,7 +1417,7 @@ function ChapterDownloadItem({
   const isFailed = download.status === 'failed'
 
   return (
-    <div className={`group flex items-center gap-3.5 py-3 px-[18px] pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}>
+    <div className={`group flex items-center gap-3.5 py-3 px-4 sm:px-[18px] pl-4 sm:pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}>
       {/* Chapter label */}
       <span className="font-mono text-[0.8rem] font-semibold text-[var(--color-text-secondary)] min-w-[64px] flex-shrink-0">
         Ch. {download.chapter_number}
@@ -1326,12 +1488,12 @@ function ChapterDownloadItem({
       {/* Action buttons */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {(download.status === 'downloading' || download.status === 'queued') && (
-          <button onClick={() => onCancel(download.media_id, download.chapter_id)} className="w-7 h-7 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Cancel">
+          <button onClick={() => onCancel(download.media_id, download.chapter_id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-white/10 flex items-center justify-center transition-all" title="Cancel">
             <X size={13} />
           </button>
         )}
         {(download.status === 'completed' || download.status === 'failed') && (
-          <button onClick={() => onDelete(download.media_id, download.chapter_id)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+          <button onClick={() => onDelete(download.media_id, download.chapter_id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] max-sm:opacity-100 opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
             <Trash2 size={13} />
           </button>
         )}

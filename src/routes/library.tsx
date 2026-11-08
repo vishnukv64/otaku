@@ -7,9 +7,10 @@
  * - Filters and sorting
  */
 
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { displayTitle } from '@/utils/mediaHelpers'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useCallback } from 'react'
-import { Loader2, AlertCircle, Download, Tv, BookOpen, CheckSquare, Square, Clock, BarChart3 } from 'lucide-react'
+import { Loader2, AlertCircle, Download, Tv, BookOpen, CheckSquare, Square } from 'lucide-react'
 import { getLibraryWithMedia, loadExtension, getDownloadsWithMedia, getDownloadedMangaWithMedia, getLibraryTagsWithCounts, getLibraryByTag, type LibraryEntryWithMedia, type LibraryStatus, type DownloadWithMedia, type DownloadedMangaWithMedia, type LibraryTagWithCount } from '@/utils/tauri-commands'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
 import { MediaCard } from '@/components/media/MediaCard'
@@ -20,6 +21,7 @@ import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { isMobile } from '@/utils/platform'
+import { MobileLibrary } from '@/components/mobile/you/MobileLibrary'
 import { loadBundledMangaExtensions, resolveMangaExtensionId, type MangaExtensionIds } from '@/utils/manga-extensions'
 
 export const Route = createFileRoute('/library')({
@@ -69,6 +71,7 @@ function LibraryScreen() {
   const [tags, setTags] = useState<LibraryTagWithCount[]>([])
   const [selectedTagId, setSelectedTagId] = useState<number | null>(null)
   const [showTagManager, setShowTagManager] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   // Multi-select state
   const [selectionMode, setSelectionMode] = useState(false)
@@ -196,7 +199,7 @@ function LibraryScreen() {
     }
 
     loadLibrary()
-  }, [activeTab, mediaFilter, nsfwFilter, selectedTagId])
+  }, [activeTab, mediaFilter, nsfwFilter, selectedTagId, reloadKey])
 
   const handleMediaClick = (entry: LibraryEntryWithMedia) => {
     // Convert to SearchResult for modal
@@ -366,6 +369,49 @@ function LibraryScreen() {
   // Get appropriate tabs based on media filter
   const currentTabs = mediaFilter === 'manga' ? MANGA_TABS : ANIME_TABS
 
+  if (isMobile()) {
+    return (
+      <>
+        <MobileLibrary
+          mediaFilter={mediaFilter === 'manga' ? 'manga' : 'anime'}
+          setMediaFilter={setMediaFilter}
+          tabs={currentTabs}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          library={library}
+          downloadedAnime={downloadedAnime}
+          downloadedManga={downloadedManga}
+          loading={loading}
+          error={error}
+          onRetry={() => setReloadKey((k) => k + 1)}
+          tags={tags}
+          selectedTagId={selectedTagId}
+          onSelectTag={(id) => {
+            setSelectedTagId(id)
+            if (id !== null) setActiveTab('all')
+          }}
+          reloadTags={loadTags}
+          reload={handleBulkActionComplete}
+          selectionMode={selectionMode}
+          setSelectionMode={setSelectionMode}
+          selectedItems={selectedItems}
+          toggleItem={toggleItemSelection}
+          selectAll={selectAllItems}
+          clearSelection={clearSelection}
+          onOpen={handleMediaClick}
+          onOpenDownloaded={handleDownloadedClick}
+          onOpenDownloadedManga={handleDownloadedMangaClick}
+        />
+        {selectedMedia && selectedMediaType === 'anime' && extensionId && (
+          <MediaDetailModal media={selectedMedia} extensionId={extensionId} isOpen={isModalOpen} onClose={handleCloseModal} onMediaChange={setSelectedMedia} />
+        )}
+        {selectedMedia && selectedMediaType === 'manga' && selectedMangaExtensionId && (
+          <MangaDetailModal manga={selectedMedia} extensionId={selectedMangaExtensionId} onClose={handleCloseModal} />
+        )}
+      </>
+    )
+  }
+
   return (
     <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 3xl:px-12 py-8 max-w-4k mx-auto">
       {/* Header */}
@@ -377,18 +423,6 @@ function LibraryScreen() {
           {library.length + downloadedAnime.length + downloadedManga.length} titles
         </p>
       </div>
-
-      {/* Mobile-only shortcut buttons */}
-      {isMobile() && (
-        <div className="flex gap-2 px-4 mb-3">
-          <Link to="/history" className="flex-1 flex items-center justify-center gap-2 bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] rounded-lg py-2.5 text-sm font-medium text-[var(--color-text-secondary)]">
-            <Clock size={16} /> History
-          </Link>
-          <Link to="/stats" className="flex-1 flex items-center justify-center gap-2 bg-[var(--color-surface-subtle)] hover:bg-[var(--color-surface-hover)] rounded-lg py-2.5 text-sm font-medium text-[var(--color-text-secondary)]">
-            <BarChart3 size={16} /> Stats
-          </Link>
-        </div>
-      )}
 
       {/* Media Type Filter and Tag Filter */}
       <div className="mb-6 flex flex-wrap items-center gap-3">
@@ -677,7 +711,7 @@ function LibraryScreen() {
               // Convert media entry to SearchResult for MediaCard
               const media: SearchResult = {
                 id: entry.media.id,
-                title: entry.media.title,
+                title: displayTitle(entry.media),
                 cover_url: entry.media.cover_url,
               }
               const isSelected = selectedItems.has(entry.media.id)

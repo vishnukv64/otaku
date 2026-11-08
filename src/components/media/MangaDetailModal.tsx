@@ -61,7 +61,7 @@ import { useProxiedImage } from '@/hooks/useProxiedImage'
 import { isNsfwContent } from '@/utils/nsfw-filter'
 import type { SearchResult, MangaDetails, Chapter } from '@/types/extension'
 import { notifySuccess, notifyError, notifyInfo } from '@/utils/notify'
-import { BottomSheet } from '@/components/ui/BottomSheet'
+import { MobileMangaDetail } from '@/components/mobile/detail/MobileMangaDetail'
 import { isMobile } from '@/utils/platform'
 import { DetailTabBar } from './DetailTabBar'
 import { LibraryDropdown } from './LibraryDropdown'
@@ -105,7 +105,12 @@ interface MangaDetailModalProps {
   onClose: () => void
 }
 
-export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDetailModalProps) {
+/** Phones get the full-screen detail screen (mock: design/files/manga.html); desktop keeps the modal. */
+export function MangaDetailModal(props: MangaDetailModalProps) {
+  return isMobile() ? <MobileMangaDetail {...props} /> : <MangaDetailModalDesktop {...props} />
+}
+
+function MangaDetailModalDesktop({ manga, extensionId = '', onClose }: MangaDetailModalProps) {
   const navigate = useNavigate()
   const maxConcurrentDownloads = useSettingsStore((state) => state.maxConcurrentDownloads)
   const nsfwFilter = useSettingsStore((state) => state.nsfwFilter)
@@ -1384,14 +1389,6 @@ export function MangaDetailModal({ manga, extensionId = '', onClose }: MangaDeta
       )}
     </>
   )
-
-  if (mobile) {
-    return (
-      <BottomSheet isOpen={!!manga} onClose={onClose}>
-        {modalContent}
-      </BottomSheet>
-    )
-  }
 
   return (
     <div className="fixed inset-0 z-[200] overflow-y-auto animate-in fade-in duration-300">

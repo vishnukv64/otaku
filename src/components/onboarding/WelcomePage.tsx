@@ -116,7 +116,7 @@ export function WelcomePage({ onGetStarted }: WelcomePageProps) {
         {/* CTA Button */}
         <button
           onClick={onGetStarted}
-          className="animate-onboarding-fade-up px-8 py-3 rounded-xl bg-[#e50914] text-white font-semibold text-base hover:bg-[#ff1a25] transition-all active:scale-95"
+          className={`animate-onboarding-fade-up px-8 py-3 min-h-[48px] rounded-xl ${mobile ? 'w-full' : ''} bg-[#e50914] text-white font-semibold text-base hover:bg-[#ff1a25] transition-all active:scale-95`}
           style={{ animationDelay: `${300 + features.length * 80 + 100}ms` }}
         >
           Get Started
