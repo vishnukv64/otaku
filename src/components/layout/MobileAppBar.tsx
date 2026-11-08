@@ -1,5 +1,5 @@
 import { Link, useRouter, useRouterState } from '@tanstack/react-router'
-import { Bell, ChevronLeft, Search } from 'lucide-react'
+import { Bell, ChevronLeft, EllipsisVertical, Search } from 'lucide-react'
 import logoImage from '@/assets/logo.png'
 import { useNotificationStore } from '@/store/notificationStore'
 import { isReleaseSummaryNotification } from '@/components/notifications/ReleaseRadarGroupCard'
@@ -108,6 +108,16 @@ export function MobileAppBar({ onSearchClick }: { onSearchClick: () => void }) {
               <ChevronLeft size={26} aria-hidden="true" />
             </button>
             <h1 className="mr-auto truncate font-display text-[17px] font-bold text-white">{variant.title}</h1>
+            {pathname === '/downloads' && (
+              <button
+                type="button"
+                className={iconButton}
+                aria-label="Downloads menu"
+                onClick={() => window.dispatchEvent(new Event('downloads:menu'))}
+              >
+                <EllipsisVertical size={24} aria-hidden="true" />
+              </button>
+            )}
           </>
         )}
       </div>

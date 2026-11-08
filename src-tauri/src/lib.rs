@@ -471,6 +471,8 @@ pub fn run() {
       commands::get_downloads_directory,
       commands::open_downloads_folder,
       commands::remove_download,
+      commands::retry_download,
+      commands::get_free_storage,
       commands::delete_download,
       commands::delete_episode_download,
       commands::clear_completed_downloads,

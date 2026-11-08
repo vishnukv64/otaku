@@ -8,16 +8,17 @@
  * - DownloadManager: Modal shell wrapping DownloadPageContent (used by TopNav on desktop)
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { X, Download, Trash2, CheckCircle, Loader2, Folder, BookOpen, Tv, Pause, Play, ChevronDown } from 'lucide-react'
+import { X, Download, Trash2, CheckCircle, Loader2, Folder, BookOpen, Tv, Pause, Play, ChevronDown, EllipsisVertical, RefreshCw } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { ask } from '@tauri-apps/plugin-dialog'
-import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, clearCompletedChapterDownloads, clearFailedChapterDownloads, getCachedMediaDetails, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
+import { listDownloads, cancelDownload, pauseDownload, resumeDownload, deleteDownload, retryDownload, getFreeStorage, getTotalStorageUsed, clearCompletedDownloads, clearFailedDownloads, openDownloadsFolder, listAllChapterDownloads, cancelChapterDownload, deleteChapterDownload, clearCompletedChapterDownloads, clearFailedChapterDownloads, getCachedMediaDetails, type DownloadProgress, type ChapterDownloadWithTitle, type ChapterDownloadProgressEvent } from '@/utils/tauri-commands'
 import { notifySuccess, notifyError } from '@/utils/notify'
 import { useSettingsStore } from '@/store/settingsStore'
 import { isMobile } from '@/utils/platform'
 import { ConfirmSheet, Segmented } from '@/components/mobile/you/ui'
+import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
 
 // Extension ID for AllAnime - used for navigation to watch page
 
@@ -118,6 +119,9 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
   const [chapterDownloads, setChapterDownloads] = useState<ChapterDownloadWithTitle[]>([])
   const [loading, setLoading] = useState(false)
   const [totalStorage, setTotalStorage] = useState(0)
+  const [freeStorage, setFreeStorage] = useState(0)
+  // Phone sheets: app-bar ⋯ menu ('app') or a row's ⋯ menu (download id)
+  const [menu, setMenu] = useState<'app' | DisplayDownloadProgress | null>(null)
   const [activeTab, setActiveTab] = useState<string>('all')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [coverUrls, setCoverUrls] = useState<Record<string, string>>({})
@@ -138,6 +142,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       try {
         const storage = await getTotalStorageUsed()
         setTotalStorage(storage)
+        setFreeStorage(await getFreeStorage().catch(() => 0))
       } catch (error) {
         console.error('Failed to load static data:', error)
       }
@@ -525,6 +530,24 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     onNavigateAway?.()
   }
 
+  const handleRetry = async (downloadId: string) => {
+    const download = downloads.find(d => d.id === downloadId)
+    try {
+      await retryDownload(downloadId)
+      setDownloads(withStableActiveDisplayTotals(await listDownloads(), downloads))
+    } catch (error) {
+      console.error('Failed to retry download:', error)
+      notifyError('Retry Failed', `Failed to retry Episode ${download?.episode_number ?? ''}`, mediaMeta(download?.media_id))
+    }
+  }
+
+  useEffect(() => {
+    if (!mobile) return
+    const open = () => setMenu('app')
+    window.addEventListener('downloads:menu', open)
+    return () => window.removeEventListener('downloads:menu', open)
+  }, [mobile])
+
   const handlePauseAll = async () => {
     const activeDownloads = downloads.filter(d => d.status === 'downloading')
     if (activeDownloads.length === 0) return
@@ -691,6 +714,9 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
           <div className="flex items-baseline justify-between mb-2.5">
             <div className="font-mono text-[0.95rem] font-semibold">
               {formatBytes(totalStorage)} <span className="text-[var(--color-text-muted)] font-normal text-[0.85rem]">used</span>
+              {mobile && freeStorage > 0 && (
+                <span className="float-right text-[var(--color-text-muted)] font-normal text-[0.85rem]">{formatBytes(freeStorage)} free</span>
+              )}
             </div>
           </div>
           <div className="w-full h-2 bg-white/[0.06] rounded-full overflow-hidden flex">
@@ -837,6 +863,8 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                     onDelete={handleDelete}
                     onPause={handlePause}
                     onResume={handleResume}
+                    onRetry={handleRetry}
+                    onMenu={setMenu}
                     onPlay={handlePlayEpisode}
                     extractQuality={extractQuality}
                     formatBytes={formatBytes}
@@ -930,6 +958,8 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
                         onDelete={handleDelete}
                         onPause={handlePause}
                         onResume={handleResume}
+                        onRetry={handleRetry}
+                        onMenu={setMenu}
                         onPlay={handlePlayEpisode}
                         extractQuality={extractQuality}
                         formatBytes={formatBytes}
@@ -1033,6 +1063,34 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         </div>
       )}
 
+      <BottomSheet
+        isOpen={menu === 'app'}
+        onClose={() => setMenu(null)}
+        title="Downloads"
+      >
+        <SheetOption icon={<Pause size={18} />} onClick={() => { setMenu(null); handlePauseAll() }}>Pause All</SheetOption>
+        <SheetOption icon={<Play size={18} />} onClick={() => { setMenu(null); handleResumeAll() }}>Resume All</SheetOption>
+        <SheetOption icon={<Trash2 size={18} />} onClick={() => { setMenu(null); handleClearCompleted() }}>Clear completed</SheetOption>
+        <SheetOption icon={<Trash2 size={18} />} onClick={() => { setMenu(null); handleClearFailed() }}>Clear failed</SheetOption>
+      </BottomSheet>
+      <BottomSheet
+        isOpen={!!menu && menu !== 'app'}
+        onClose={() => setMenu(null)}
+        title={menu && menu !== 'app' ? `Episode ${menu.episode_number}` : ''}
+      >
+        {menu && menu !== 'app' && (
+          <>
+            {menu.status === 'completed' && (
+              <SheetOption icon={<Play size={18} />} onClick={() => { handlePlayEpisode(menu.media_id, menu.episode_id); setMenu(null) }}>Play</SheetOption>
+            )}
+            {menu.status === 'failed' && (
+              <SheetOption icon={<RefreshCw size={18} />} onClick={() => { handleRetry(menu.id); setMenu(null) }}>Retry</SheetOption>
+            )}
+            <SheetOption destructive icon={<Trash2 size={18} />} onClick={() => { handleDelete(menu.id, menu.filename); setMenu(null) }}>Delete download</SheetOption>
+          </>
+        )}
+      </BottomSheet>
+
       <ConfirmSheet
         isOpen={!!confirmReq}
         onClose={() => {
@@ -1109,6 +1167,8 @@ function DownloadItem({
   onDelete,
   onPause,
   onResume,
+  onRetry,
+  onMenu,
   onPlay,
   extractQuality,
   formatBytes,
@@ -1118,6 +1178,8 @@ function DownloadItem({
   onDelete: (id: string, filename: string) => void
   onPause: (id: string) => void
   onResume: (id: string) => void
+  onRetry: (id: string) => void
+  onMenu: (d: DisplayDownloadProgress) => void
   onPlay: (mediaId: string, episodeId: string) => void
   extractQuality: (filename: string) => string | null
   formatBytes: (bytes: number) => string
@@ -1134,6 +1196,8 @@ function DownloadItem({
     return `~${h}h ${m}m remaining`
   }
 
+  const mobile = isMobile()
+  const swipe = useSwipeLeft(() => onDelete(download.id, download.filename))
   const quality = extractQuality(download.filename)
   const isFailed = download.status === 'failed'
   const totalBytes = displayTotalBytes(download)
@@ -1143,7 +1207,11 @@ function DownloadItem({
   const etaText = formatEta(download)
 
   return (
-    <div className={`group flex items-center gap-3.5 py-3 px-4 sm:px-[18px] pl-4 sm:pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}>
+    <div
+      {...swipe.handlers}
+      style={mobile ? { touchAction: 'pan-y', transform: `translateX(${swipe.dx}px)`, transition: swipe.dx ? 'none' : 'transform 0.2s' } : undefined}
+      className={`group flex items-center gap-3.5 py-3 px-4 sm:px-[18px] pl-4 sm:pl-[92px] bg-white/[0.02] border-t border-white/[0.04] transition-colors hover:bg-white/[0.04] relative ${isFailed ? 'bg-red-400/[0.04]' : ''}`}
+    >
       {/* Episode label */}
       <span className="font-mono text-[0.8rem] font-semibold text-[var(--color-text-secondary)] min-w-[64px] flex-shrink-0">
         Episode {download.episode_number}
@@ -1272,7 +1340,7 @@ function DownloadItem({
         )}
         {download.status === 'failed' && (
           <>
-            <button onClick={() => onResume(download.id)} className="inline-flex items-center gap-1 px-2.5 py-[3px] max-sm:min-h-[44px] max-sm:px-4 rounded-[var(--radius-sm)] text-[0.7rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/25 hover:bg-red-400/[0.22] hover:border-red-400/40 transition-all cursor-pointer" title="Retry">
+            <button onClick={() => onRetry(download.id)} className="inline-flex items-center gap-1 px-2.5 py-[3px] max-sm:min-h-[44px] max-sm:px-4 rounded-[var(--radius-sm)] text-[0.7rem] font-semibold bg-red-400/[0.12] text-red-400 border border-red-400/25 hover:bg-red-400/[0.22] hover:border-red-400/40 transition-all cursor-pointer" title="Retry">
               Retry
             </button>
             <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] text-[var(--color-text-secondary)] hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
@@ -1290,9 +1358,15 @@ function DownloadItem({
             <button onClick={() => onPlay(download.media_id, download.episode_id)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] max-sm:opacity-100 opacity-0 group-hover:opacity-100 hover:bg-green-500/15 hover:text-green-400 hover:border-green-400/30 flex items-center justify-center transition-all" title="Play">
               <Play size={13} />
             </button>
-            <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] max-sm:opacity-100 opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
-              <Trash2 size={13} />
-            </button>
+            {mobile ? (
+              <button onClick={() => onMenu(download)} className="w-11 h-11 rounded-[var(--radius-md)] text-[var(--color-text-secondary)] flex items-center justify-center" aria-label="More actions">
+                <EllipsisVertical size={18} />
+              </button>
+            ) : (
+              <button onClick={() => onDelete(download.id, download.filename)} className="w-7 h-7 rounded-[var(--radius-md)] border border-transparent text-[var(--color-text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-400/15 hover:text-red-400 hover:border-red-400/30 flex items-center justify-center transition-all" title="Delete">
+                <Trash2 size={13} />
+              </button>
+            )}
           </>
         )}
         {download.status === 'cancelled' && (
@@ -1303,6 +1377,31 @@ function DownloadItem({
       </div>
     </div>
   )
+}
+
+/** Horizontal-dominant left swipe (touch-action: pan-y keeps vertical scroll). Fires on release past 80px. */
+function useSwipeLeft(onSwipe: () => void) {
+  const [dx, setDx] = useState(0)
+  const start = useRef<{ x: number; y: number; on: boolean } | null>(null)
+  return {
+    dx,
+    handlers: {
+      onPointerDown: (e: React.PointerEvent) => { start.current = { x: e.clientX, y: e.clientY, on: false } },
+      onPointerMove: (e: React.PointerEvent) => {
+        const s = start.current
+        if (!s) return
+        const mx = e.clientX - s.x
+        if (!s.on && Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(e.clientY - s.y) * 1.5) s.on = true
+        if (s.on) setDx(Math.max(-120, Math.min(0, mx)))
+      },
+      onPointerUp: () => {
+        if (start.current?.on && dx <= -80) onSwipe()
+        start.current = null
+        setDx(0)
+      },
+      onPointerCancel: () => { start.current = null; setDx(0) },
+    },
+  }
 }
 
 // Chapter download row — matches mock's inline layout for manga chapters

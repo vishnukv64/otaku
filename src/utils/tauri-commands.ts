@@ -668,6 +668,16 @@ export async function openDownloadsFolder(customPath?: string): Promise<void> {
   return await invoke('open_downloads_folder', { customPath })
 }
 
+/** Restart a failed download from scratch (keeps its URL and path) */
+export async function retryDownload(downloadId: string): Promise<void> {
+  return await invoke('retry_download', { downloadId })
+}
+
+/** Free bytes on the filesystem that holds downloads */
+export async function getFreeStorage(): Promise<number> {
+  return await invoke('get_free_storage')
+}
+
 /**
  * Remove a download from the list (doesn't delete file)
  * @param downloadId - Download ID to remove
