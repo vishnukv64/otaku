@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { Download, Check, X, Loader2, Star } from 'lucide-react'
 import type { Subtitle, VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
+import { isDashUrl } from './dashPlayer'
 import { useSettingsStore } from '@/store/settingsStore'
 import {
   audioTypeLabel,
@@ -133,6 +134,7 @@ export function DownloadButton({
     }
   }
   if (!hasAnySource) return null
+  const dashOnly = sources.every((s) => !s.url || isDashUrl(s.url))
 
   const subOptions = choicesForAudioTab(downloadOptions, 'sub')
   const dubOptions = choicesForAudioTab(downloadOptions, 'dub')
@@ -147,9 +149,9 @@ export function DownloadButton({
       <button
         type="button"
         onClick={() => setShowOptions(!showOptions)}
-        disabled={!!downloading}
+        disabled={!!downloading || dashOnly}
         className={`w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-        title="Download Episode"
+        title={dashOnly ? 'Downloads are not available for DASH streams' : 'Download Episode'}
       >
         {downloading ? (
           <Loader2 size={20} className="animate-spin" />

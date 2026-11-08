@@ -276,6 +276,12 @@ impl ExtensionRuntime {
                 };
 
                 {
+                    // Extensions that need a session (hstream's XSRF flow) read these.
+                    let set_cookie: Vec<String> = response
+                        .all("set-cookie")
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect();
                     let mut body = String::new();
                     let read_result = response.into_reader()
                         .take(10_000_000)
@@ -290,7 +296,8 @@ impl ExtensionRuntime {
                     // Return response object (including non-2xx so JS can inspect errors)
                     Ok(serde_json::json!({
                         "status": status,
-                        "body": body
+                        "body": body,
+                        "set_cookie": set_cookie
                     }).to_string())
                 }
             })?;

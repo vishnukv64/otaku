@@ -146,6 +146,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const { isOnline } = useNetworkStatus()
   const downloadLocation = useSettingsStore((s) => s.downloadLocation)
   const streamingProvider = useSettingsStore((s) => s.streamingProvider)
+  const adultMode = useSettingsStore((s) => s.adultMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
   const anikotoSiteBaseUrl = useSettingsStore((s) => s.anikotoSiteBaseUrl)
@@ -1003,7 +1004,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
           <span className="flex-1">Couldn’t match this anime on {providerLabel}.</span>
           <button
             className="min-h-11 shrink-0 font-semibold underline"
-            onClick={() => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider) })}
+            onClick={() => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })}
           >
             Try another provider
           </button>

@@ -120,6 +120,7 @@ function WatchPage() {
   const pipData = usePipStore((s) => s.data)
   const clearPipExpandTime = usePipStore((s) => s.clearExpandTime)
   const streamingProvider = useSettingsStore((s) => s.streamingProvider)
+  const adultMode = useSettingsStore((s) => s.adultMode)
   const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
   const anikotoSiteBaseUrl = useSettingsStore((s) => s.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((s) => s.anikotoYotochanBaseUrl)
@@ -742,7 +743,7 @@ function WatchPage() {
   const updatePlayerSettings = usePlayerStore((s) => s.updateSettings)
   const currentIdx = details?.episodes.findIndex((e) => e.id === currentEpisodeId) ?? -1
   const nextEpisode = currentIdx >= 0 ? details?.episodes[currentIdx + 1] : undefined
-  const alternateProvider = nextStreamingProvider(streamingProvider)
+  const alternateProvider = nextStreamingProvider(streamingProvider, adultMode)
   const alternateProviderLabel = streamingProviderLabel(alternateProvider)
   const switchProvider = () => {
     setError(null)

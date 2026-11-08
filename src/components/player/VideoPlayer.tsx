@@ -18,6 +18,7 @@ import { audioModeLabel } from '@/utils/providerExtras'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import Hls from 'hls.js'
+import { attachDash, isDashUrl, type DashHandle } from './dashPlayer'
 import mpegts from 'mpegts.js'
 import { Loader2, RotateCcw, SkipForward } from 'lucide-react'
 import type { Subtitle, VideoSource } from '@/types/extension'
@@ -216,6 +217,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const dashRef = useRef<DashHandle | null>(null)
   const mpegtsRef = useRef<ReturnType<typeof mpegts.createPlayer> | null>(null)
   const sidebarEpisodeRef = useRef<HTMLDivElement>(null)
   // Tracks when the episode first hit the completion threshold (for auto-delete cooldown)
@@ -597,6 +599,10 @@ export function VideoPlayer({
           mpegtsRef.current.destroy()
           mpegtsRef.current = null
         }
+        if (dashRef.current) {
+          void dashRef.current.destroy()
+          dashRef.current = null
+        }
         video.removeAttribute('src')
         video.load() // Reset the video element
 
@@ -636,6 +642,33 @@ export function VideoPlayer({
             Promise.resolve(player.play()).catch((playError: unknown) => {
               console.warn('[VideoPlayer] MPEG-TS autoplay failed:', playError)
             })
+          }
+        } else if (isDashUrl(currentSource.url)) {
+          // DASH (hstream): shaka, every request routed through /proxy.
+          let cancelled = false
+          videoListenerCleanups.push(() => {
+            cancelled = true
+          })
+          try {
+            const handle = await attachDash(video, currentSource.url, {
+              videoServer,
+              referrer: currentSource.referrer,
+              startTime: initialTime,
+            })
+            if (cancelled) {
+              void handle.destroy()
+              return
+            }
+            dashRef.current = handle
+            setLoading(false)
+            if (autoPlay) {
+              video.play().catch((e) => console.error('Autoplay failed:', e))
+            }
+          } catch (dashError) {
+            if (cancelled) return
+            console.error('[VideoPlayer] DASH load failed:', dashError)
+            setError('Failed to load DASH stream')
+            setLoading(false)
           }
         } else if (isActuallyHls && Hls.isSupported()) {
           // HLS.js already cleaned up at the start of loadVideo, create new instance
@@ -908,6 +941,10 @@ export function VideoPlayer({
         mpegtsRef.current.destroy()
         mpegtsRef.current = null
       }
+      if (dashRef.current) {
+        void dashRef.current.destroy()
+        dashRef.current = null
+      }
       for (const cleanup of videoListenerCleanups) cleanup()
       // Also clean up direct video sources
       if (video) {
@@ -1163,6 +1200,11 @@ export function VideoPlayer({
     const pipSource = currentSource || currentServerSources[0]
     if (!pipSource) {
       console.warn('[VideoPlayer] PiP blocked - no current source')
+      return
+    }
+
+    if (isDashUrl(pipSource.url)) {
+      console.warn('[VideoPlayer] Mini player does not support DASH streams')
       return
     }
 

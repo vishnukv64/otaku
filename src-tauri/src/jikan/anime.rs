@@ -65,7 +65,8 @@ fn build_trailer_url(trailer: &Option<JikanTrailer>) -> Option<String> {
 fn jikan_anime_to_search_result(anime: &JikanAnime) -> SearchResult {
     SearchResult {
         id: anime.mal_id.to_string(),
-        title: anime.title.clone(),
+        // Lists and search show the English title; romaji stays as a synonym for matching.
+        title: anime.title_english.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| anime.title.clone()),
         cover_url: extract_image_url(&anime.images),
         trailer_url: build_trailer_url(&anime.trailer),
         description: anime.synopsis.clone(),
@@ -78,7 +79,11 @@ fn jikan_anime_to_search_result(anime: &JikanAnime) -> SearchResult {
         media_type: anime.anime_type.clone(),
         genres: Some(extract_genre_names(&anime.genres)),
         native_name: None,
-        title_synonyms: None,
+        title_synonyms: anime
+            .title_english
+            .as_ref()
+            .filter(|e| !e.is_empty() && **e != anime.title)
+            .map(|_| vec![anime.title.clone()]),
         rank: anime.rank,
         popularity: anime.popularity,
         views: None,
@@ -801,7 +806,8 @@ pub(crate) fn anilist_media_to_search_result(media: &serde_json::Value, sfw: boo
 
     Some(SearchResult {
         id: mal_id.to_string(),
-        title: romaji.clone().or_else(|| english.clone())?,
+        // English first for display; the other title stays a synonym for matching.
+        title: english.clone().or_else(|| romaji.clone())?,
         cover_url: media.get("coverImage").and_then(|c| str_at(c, "large")),
         trailer_url: None,
         description: str_at(media, "description").map(|d| strip_html(&d)),
@@ -824,7 +830,7 @@ pub(crate) fn anilist_media_to_search_result(media: &serde_json::Value, sfw: boo
         media_type: anilist_format(media.get("format").and_then(|v| v.as_str())),
         genres: media.get("genres").and_then(|g| serde_json::from_value(g.clone()).ok()),
         native_name: None,
-        title_synonyms: english.filter(|e| Some(e) != romaji.as_ref()).map(|e| vec![e]),
+        title_synonyms: romaji.filter(|r| english.is_some() && Some(r) != english.as_ref()).map(|r| vec![r]),
         rank: None,
         popularity: media.get("popularity").and_then(|v| v.as_i64()).map(|p| p as i32),
         views: None,
@@ -1381,7 +1387,9 @@ mod schedule_tests {
         assert_eq!(r.rating, Some(9.1));
         assert_eq!(r.media_type.as_deref(), Some("TV"));
         assert_eq!(r.status.as_deref(), Some("Releasing"));
-        assert_eq!(r.title_synonyms, Some(vec!["Frieren".to_string()]));
+        // English for display, romaji kept for provider matching.
+        assert_eq!(r.title, "Frieren");
+        assert_eq!(r.title_synonyms, Some(vec!["Sousou no Frieren".to_string()]));
         assert_eq!(r.studios, Some(vec!["Madhouse".to_string()]));
     }
 

@@ -43,6 +43,7 @@
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.6.0",
     "recharts": "^3.8.0",
+    "shaka-player": "^5.3.4",
     "zustand": "^5.0.10"
   },
   "devDependencies": {

@@ -23,9 +23,9 @@ import {
 // Database key for all settings
 const DB_KEY_SETTINGS = 'app_settings'
 
-export type StreamingProviderMode = 'kaa' | 'allanime' | 'anikoto'
+export type StreamingProviderMode = 'kaa' | 'allanime' | 'anikoto' | 'hstream'
 
-const STREAMING_PROVIDER_MODES: StreamingProviderMode[] = ['kaa', 'allanime', 'anikoto']
+const STREAMING_PROVIDER_MODES: StreamingProviderMode[] = ['kaa', 'allanime', 'anikoto', 'hstream']
 
 // Bump when the default provider changes and existing installs should move to it once.
 const PROVIDER_DEFAULT_VERSION = 2
@@ -37,6 +37,8 @@ interface SettingsData {
 
   // Content
   nsfwFilter: boolean
+  /** Opt-in 18+ providers (hstream). Off by default; enabled after an age confirmation. */
+  adultMode: boolean
 
   // Downloads
   downloadLocation: string
@@ -76,6 +78,7 @@ const defaultSettings: SettingsData = {
 
   // Content
   nsfwFilter: false,
+  adultMode: false,
 
   // Downloads
   downloadLocation: '',
@@ -114,6 +117,7 @@ const extractSettingsData = (state: SettingsState): SettingsData => ({
   gridDensity: state.gridDensity,
   showContinueWatching: state.showContinueWatching,
   nsfwFilter: state.nsfwFilter,
+  adultMode: state.adultMode,
   downloadLocation: state.downloadLocation,
   defaultDownloadQuality: state.defaultDownloadQuality,
   maxConcurrentDownloads: state.maxConcurrentDownloads,
@@ -135,7 +139,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   _saving: false,
 
   // Update multiple settings at once
-  updateSettings: (newSettings) => {
+  updateSettings: (rawSettings) => {
+    // Turning adult mode off also drops an 18+ provider selection.
+    const newSettings =
+      rawSettings.adultMode === false && get().streamingProvider === 'hstream'
+        ? { ...rawSettings, streamingProvider: defaultSettings.streamingProvider }
+        : rawSettings
     set((state) => ({ ...state, ...newSettings }))
 
     // Save to database (debounced via the state update)
@@ -166,7 +175,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         // a provider picked after that is kept.
         const providerOutdated = (parsed.providerDefaultVersion ?? 1) < PROVIDER_DEFAULT_VERSION
         const streamingProvider: StreamingProviderMode =
-          !providerOutdated && parsed.streamingProvider && STREAMING_PROVIDER_MODES.includes(parsed.streamingProvider)
+          !providerOutdated &&
+          parsed.streamingProvider &&
+          STREAMING_PROVIDER_MODES.includes(parsed.streamingProvider) &&
+          (parsed.streamingProvider !== 'hstream' || parsed.adultMode === true)
             ? parsed.streamingProvider
             : defaultSettings.streamingProvider
         // Merge with defaults to handle new settings added in updates
