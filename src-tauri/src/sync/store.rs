@@ -39,21 +39,22 @@ const MEDIA_COLS: [&str; 15] = [
     "media_type", "content_type", "status", "year", "rating", "episode_count", "genres",
 ];
 
-// (tbl, base table, key expression over row alias)
-const TABLES: [(&str, &str, &str); 5] = [
-    ("watch", "watch_history", "{r}.media_id||'|'||{r}.episode_id"),
-    ("reading", "reading_history", "{r}.media_id||'|'||{r}.chapter_id"),
-    ("library", "library", "{r}.media_id"),
-    ("tag", "library_tags", "{r}.name"),
+// (tbl, base table, key expression over row alias, row timestamp column)
+const TABLES: [(&str, &str, &str, &str); 5] = [
+    ("watch", "watch_history", "{r}.media_id||'|'||{r}.episode_id", "last_watched"),
+    ("reading", "reading_history", "{r}.media_id||'|'||{r}.chapter_id", "last_read"),
+    ("library", "library", "{r}.media_id", "updated_at"),
+    ("tag", "library_tags", "{r}.name", "updated_at"),
     (
         "assign",
         "library_tag_assignments",
         "(SELECT media_id FROM library WHERE id={r}.library_entry_id)||'|'||(SELECT name FROM library_tags WHERE id={r}.tag_id)",
+        "created_at",
     ),
 ];
 
 pub async fn init(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    for (t, table, key) in TABLES {
+    for (t, table, key, _) in TABLES {
         for (ev, r) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
             let k = key.replace("{r}", r);
             sqlx::raw_sql(&format!(
@@ -68,6 +69,38 @@ pub async fn init(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let cutoff = chrono::Utc::now().timestamp_millis() - 30 * 24 * 3600 * 1000;
     sqlx::query("DELETE FROM sync_conflicts WHERE created_at < ?").bind(cutoff).execute(pool).await?;
     Ok(())
+}
+
+/// Log every existing row that has no change-log entry yet, so a newly paired device
+/// receives history from before sync existed (triggers only see later edits; without
+/// this, Mac → phone sent nothing). Stamped with the row's own time, not now, so older
+/// data never beats a newer edit on the other device. Idempotent.
+pub async fn backfill(pool: &SqlitePool, dev: &str) -> Result<usize, sqlx::Error> {
+    let mut n = 0;
+    for (t, table, key, ts) in TABLES {
+        let k = key.replace("{r}", "r");
+        let rows = sqlx::query(&format!(
+            "SELECT {k} AS k, CAST(strftime('%s', COALESCE(r.{ts}, '1970-01-02')) AS INTEGER) AS sec FROM {table} r              WHERE {k} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sync_changes c WHERE c.tbl='{t}' AND c.key={k})"
+        ))
+        .fetch_all(pool)
+        .await?;
+        for (i, r) in rows.iter().enumerate() {
+            let (key, sec): (String, i64) = (r.get("k"), r.get::<Option<i64>, _>("sec").unwrap_or(86_400));
+            let Some(payload) = snapshot(pool, t, &key).await? else { continue };
+            // unix ms << 16 like Hlc::tick; the low bits keep same-second rows distinct.
+            let hlc = ((sec * 1000) << 16) | (i as i64 & 0xffff);
+            sqlx::query("INSERT INTO sync_changes(tbl,key,payload,deleted,hlc,device_id) VALUES(?,?,?,0,?,?)")
+                .bind(t)
+                .bind(&key)
+                .bind(payload)
+                .bind(hlc)
+                .bind(dev)
+                .execute(pool)
+                .await?;
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 pub async fn max_hlc(pool: &SqlitePool) -> i64 {
@@ -365,6 +398,37 @@ mod tests {
     }
 
     const ALL: Toggles = Toggles { progress: true, library: true, reading: true };
+
+    #[tokio::test]
+    async fn backfill_sends_history_from_before_pairing_without_beating_newer_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (db(&dir, "a.db").await, db(&dir, "b.db").await);
+        // History written before the change log existed: no trigger rows.
+        sqlx::query("DELETE FROM sync_changes").execute(&a).await.unwrap();
+        sqlx::query("INSERT INTO media(id,extension_id,title,media_type) VALUES('m1','x','Show','anime')").execute(&a).await.unwrap();
+        sqlx::query("UPDATE sync_ctl SET applying=1").execute(&a).await.unwrap();
+        sqlx::query(
+            "INSERT INTO watch_history(media_id,episode_id,episode_number,progress_seconds,completed,last_watched)              VALUES('m1','e1',1,600,0,'2020-01-01 00:00:00')",
+        )
+        .execute(&a)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE sync_ctl SET applying=0").execute(&a).await.unwrap();
+        assert!(pending(&a, "B", 0, 100, ALL).await.unwrap().is_empty());
+
+        assert_eq!(backfill(&a, "A").await.unwrap(), 1);
+        assert_eq!(backfill(&a, "A").await.unwrap(), 0, "idempotent");
+        let out = pending(&a, "B", 0, 100, ALL).await.unwrap();
+        assert_eq!(out.len(), 1);
+
+        // B already has a newer position for the same episode: the old row must lose.
+        let hb = Hlc::new(0);
+        seed(&b, 0, 900.0).await;
+        stamp(&b, &hb, "B").await.unwrap();
+        apply(&b, &hb, &out, ALL).await.unwrap();
+        let pos: f64 = sqlx::query_scalar("SELECT progress_seconds FROM watch_history").fetch_one(&b).await.unwrap();
+        assert_eq!(pos, 900.0);
+    }
 
     #[tokio::test]
     async fn two_devices_converge_and_completed_sticks() {

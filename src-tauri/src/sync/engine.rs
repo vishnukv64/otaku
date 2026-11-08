@@ -122,6 +122,11 @@ impl Engine {
                 i
             }
         };
+        match store::backfill(&pool, &dev_id).await {
+            Ok(n) if n > 0 => log::info!("sync: logged {n} existing rows for paired devices"),
+            Ok(_) => {}
+            Err(e) => log::warn!("sync backfill: {e}"),
+        }
         let seed = store::max_hlc(&pool).await;
         let e = Arc::new(Engine {
             app,
@@ -306,7 +311,10 @@ impl Engine {
             e.emit("sync://pair-state", json!({"state": "connecting", "via": "lan"}));
             let mut chan = None;
             if !qr.lan.is_empty() {
-                chan = net::dial_lan(&qr.lan, &qr.link.room, &wt).await.ok();
+                chan = net::dial_lan(&qr.lan, &qr.link.room, &wt)
+                    .await
+                    .map_err(|err| log::warn!("pairing: LAN {} failed: {err}", qr.lan))
+                    .ok();
             }
             if chan.is_none() {
                 e.emit("sync://pair-state", json!({"state": "connecting", "via": "relay"}));
@@ -314,6 +322,7 @@ impl Engine {
                 match net::dial_relay(&qr.link, "guest", &token).await {
                     Ok(c) => chan = Some(c),
                     Err(err) => {
+                        log::warn!("pairing: relay failed: {err}");
                         e.emit("sync://pair-state", json!({"state": "error", "code": err.code(), "detail": err.to_string()}));
                         return;
                     }
@@ -384,7 +393,7 @@ impl Engine {
             let wt = link.write_b64();
             let mut chan = None;
             if role == Role::Guest && !lan.is_empty() {
-                chan = net::dial_lan(&lan, &room, &wt).await.ok();
+                chan = net::dial_lan(&lan, &room, &wt).await.map_err(|err| log::debug!("sync: LAN {lan} failed: {err}")).ok();
             }
             let dial = match chan {
                 Some(c) => Ok(c),
@@ -400,6 +409,7 @@ impl Engine {
                     }
                 }
                 Err(err) => {
+                    log::warn!("sync: relay dial failed: {err}");
                     *self.error.lock().unwrap() = Some(err.code().to_string());
                     self.notify();
                 }
@@ -786,10 +796,16 @@ impl Engine {
         }
         tokio::spawn(async move {
             let app = Router::new().route("/sync/:room", get(ws)).route("/sync/redeem", post(redeem)).with_state(self.clone());
-            let ln = match tokio::net::TcpListener::bind("0.0.0.0:0").await {
+            // Fixed port so the address a phone saved at pairing still works after the
+            // Mac app restarts (a random port changed every launch); random if taken.
+            let ln = match tokio::net::TcpListener::bind(("0.0.0.0", LAN_PORT)).await {
                 Ok(l) => l,
-                Err(e) => return log::error!("sync LAN listener: {e}"),
+                Err(_) => match tokio::net::TcpListener::bind("0.0.0.0:0").await {
+                    Ok(l) => l,
+                    Err(e) => return log::error!("sync LAN listener: {e}"),
+                },
             };
+            log::info!("sync LAN listener on {:?}", ln.local_addr());
             self.lan_port.store(ln.local_addr().map(|a| a.port() as u64).unwrap_or(0), Ordering::Relaxed);
             if let Err(e) = axum::serve(ln, app).await {
                 log::error!("sync LAN server: {e}");
@@ -797,6 +813,9 @@ impl Engine {
         });
     }
 }
+
+/// Mac's LAN sync port (phones dial `<mac ip>:LAN_PORT`).
+const LAN_PORT: u16 = 47913;
 
 pub async fn get(pool: &SqlitePool, k: &str) -> Option<String> {
     sqlx::query_scalar("SELECT value FROM app_settings WHERE key=?").bind(k).fetch_optional(pool).await.ok().flatten()

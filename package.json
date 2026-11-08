@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@tanstack/react-router": "^1.170.18",
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
@@ -51,7 +51,7 @@
     "@tailwindcss/postcss": "^4.1.18",
     "@tanstack/router-devtools": "^1.167.0",
     "@tanstack/router-plugin": "^1.168.23",
-    "@tauri-apps/cli": "^2.3.0",
+    "@tauri-apps/cli": "^2.12.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/dompurify": "^3.2.0",

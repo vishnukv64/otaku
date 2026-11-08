@@ -9,6 +9,8 @@ import { Download, Check, X, Loader2, Star } from 'lucide-react'
 import type { Subtitle, VideoSource } from '@/types/extension'
 import { startDownload } from '@/utils/tauri-commands'
 import { isDashUrl } from './dashPlayer'
+import { BottomSheet } from '@/components/ui/BottomSheet'
+import { isMobile } from '@/utils/platform'
 import { useSettingsStore } from '@/store/settingsStore'
 import {
   audioTypeLabel,
@@ -50,6 +52,7 @@ export function DownloadButton({
   const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
   const [showOptions, setShowOptions] = useState(false)
+  const mobile = isMobile()
   const [downloading, setDownloading] = useState<string | null>(null)
   const [completed, setCompleted] = useState(false)
   const [resolvingOptions, setResolvingOptions] = useState(false)
@@ -77,7 +80,10 @@ export function DownloadButton({
             let englishKey: string | undefined
             for (const option of options) {
               const label = option.label.toLowerCase()
-              if (option.subtitle && (/english/.test(label) || option.subtitle.language?.toLowerCase() === 'en')) {
+              if (
+                option.subtitle &&
+                (/english/.test(label) || option.subtitle.language?.toLowerCase() === 'en')
+              ) {
                 englishKey = option.key
                 break
               }
@@ -112,7 +118,9 @@ export function DownloadButton({
       const safeTitle = animeTitle.replace(/[^a-zA-Z0-9]/g, '_')
       const filename = `${safeTitle}_EP${episodeNumber}_${audioTypeLabel(choice.audioType)}_${choice.quality}.otaku`
       const selectedSubtitleKey = subtitleSelections[choice.key] || 'off'
-      const selectedSubtitle = choice.subtitles.find((subtitle) => subtitleKey(subtitle) === selectedSubtitleKey)
+      const selectedSubtitle = choice.subtitles.find(
+        (subtitle) => subtitleKey(subtitle) === selectedSubtitleKey
+      )
       await startDownload(
         mediaId,
         episodeId,
@@ -142,9 +150,12 @@ export function DownloadButton({
   const subOptions = choicesForAudioTab(downloadOptions, 'sub')
   const dubOptions = choicesForAudioTab(downloadOptions, 'dub')
   const hasBothAudioTabs = subOptions.length > 0 && dubOptions.length > 0
-  const activeAudioTab = choicesForAudioTab(downloadOptions, selectedAudioTab).length > 0
-    ? selectedAudioTab
-    : subOptions.length > 0 ? 'sub' : 'dub'
+  const activeAudioTab =
+    choicesForAudioTab(downloadOptions, selectedAudioTab).length > 0
+      ? selectedAudioTab
+      : subOptions.length > 0
+        ? 'sub'
+        : 'dub'
   const visibleDownloadOptions = choicesForAudioTab(downloadOptions, activeAudioTab)
 
   return (
@@ -172,28 +183,15 @@ export function DownloadButton({
         {label && downloaded ? 'Downloaded' : label}
       </button>
 
-      {/* Download Options Menu */}
-      {showOptions && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setShowOptions(false)}
-          />
-
-          {/* Options Panel */}
-          <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl p-4 min-w-[250px] z-50">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold">Download Episode {episodeNumber}</h4>
-              <button
-                type="button"
-                onClick={() => setShowOptions(false)}
-                className="w-6 h-6 flex items-center justify-center hover:bg-white/10 rounded transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
+      {/* Download Options Menu: bottom sheet on phones (a dropdown anchored to the
+          button runs off the screen edge there), popover on desktop. */}
+      {mobile ? (
+        <BottomSheet
+          isOpen={showOptions}
+          onClose={() => setShowOptions(false)}
+          title={`Download Episode ${episodeNumber}`}
+        >
+          <div className="px-4 pb-4">
             <div className="space-y-1">
               {!resolvingOptions && hasBothAudioTabs && (
                 <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/5 p-1 mb-2">
@@ -234,20 +232,26 @@ export function DownloadButton({
                 const isDefault =
                   defaultDownloadQuality === 'auto'
                     ? index === 0
-                    : label.toLowerCase() === defaultDownloadQuality;
+                    : label.toLowerCase() === defaultDownloadQuality
 
                 return (
                   <div
                     key={choice.key}
                     className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between group ${
-                      isDefault ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30' : ''
+                      isDefault
+                        ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30'
+                        : ''
                     }`}
                   >
                     <div className="min-w-0">
                       <div className="font-medium flex items-center gap-2">
                         {audioTypeLabel(choice.audioType)} · {label}
                         {isDefault && (
-                          <Star size={12} className="text-[var(--color-accent-primary)]" fill="currentColor" />
+                          <Star
+                            size={12}
+                            className="text-[var(--color-accent-primary)]"
+                            fill="currentColor"
+                          />
                         )}
                       </div>
                       <div className="text-xs text-[var(--color-text-muted)]">
@@ -257,10 +261,12 @@ export function DownloadButton({
                     <div className="flex items-center gap-2">
                       <select
                         value={subtitleSelections[choice.key] || 'off'}
-                        onChange={(event) => setSubtitleSelections((current) => ({
-                          ...current,
-                          [choice.key]: event.target.value,
-                        }))}
+                        onChange={(event) =>
+                          setSubtitleSelections((current) => ({
+                            ...current,
+                            [choice.key]: event.target.value,
+                          }))
+                        }
                         onClick={(event) => event.stopPropagation()}
                         className="max-w-[120px] bg-white/10 border border-white/15 rounded px-2 py-1 text-xs text-white"
                         title="Subtitle track"
@@ -281,11 +287,130 @@ export function DownloadButton({
                       </button>
                     </div>
                   </div>
-                );
+                )
               })}
             </div>
           </div>
-        </>
+        </BottomSheet>
+      ) : (
+        showOptions && (
+          <>
+            {/* Backdrop */}
+            <div className="fixed inset-0 z-40" onClick={() => setShowOptions(false)} />
+
+            {/* Options Panel */}
+            <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg shadow-xl p-4 min-w-[250px] z-50">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold">Download Episode {episodeNumber}</h4>
+                <button
+                  type="button"
+                  onClick={() => setShowOptions(false)}
+                  className="w-6 h-6 flex items-center justify-center hover:bg-white/10 rounded transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="space-y-1">
+                {!resolvingOptions && hasBothAudioTabs && (
+                  <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/5 p-1 mb-2">
+                    {(['sub', 'dub'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setSelectedAudioTab(tab)}
+                        aria-pressed={activeAudioTab === tab}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                          activeAudioTab === tab
+                            ? 'bg-[var(--color-accent-primary)] text-white'
+                            : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/10'
+                        }`}
+                      >
+                        {tab === 'sub' ? 'Sub' : 'Dub'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {resolvingOptions && (
+                  <div className="px-3 py-4 text-sm text-[var(--color-text-muted)] flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" />
+                    Resolving downloadable variants...
+                  </div>
+                )}
+                {!resolvingOptions && downloadOptions.length === 0 && (
+                  <div className="px-3 py-4 text-sm text-[var(--color-text-muted)]">
+                    No downloadable variants available for this episode.
+                  </div>
+                )}
+                {visibleDownloadOptions.map((choice, index) => {
+                  const label = choice.quality
+                  const subtitleOptions = subtitleChoices(choice.subtitles)
+                  // Default is preferred when:
+                  //  - setting is 'auto' and source has no concrete resolution (adaptive), OR
+                  //  - setting matches this source's resolution (e.g. '1080p' === `${resolution}p`).
+                  const isDefault =
+                    defaultDownloadQuality === 'auto'
+                      ? index === 0
+                      : label.toLowerCase() === defaultDownloadQuality
+
+                  return (
+                    <div
+                      key={choice.key}
+                      className={`w-full text-left px-3 py-2 rounded hover:bg-white/10 transition-colors text-sm flex items-center justify-between group ${
+                        isDefault
+                          ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30'
+                          : ''
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium flex items-center gap-2">
+                          {audioTypeLabel(choice.audioType)} · {label}
+                          {isDefault && (
+                            <Star
+                              size={12}
+                              className="text-[var(--color-accent-primary)]"
+                              fill="currentColor"
+                            />
+                          )}
+                        </div>
+                        <div className="text-xs text-[var(--color-text-muted)]">
+                          {choice.server} · {choice.source.type.toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={subtitleSelections[choice.key] || 'off'}
+                          onChange={(event) =>
+                            setSubtitleSelections((current) => ({
+                              ...current,
+                              [choice.key]: event.target.value,
+                            }))
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                          className="max-w-[120px] bg-white/10 border border-white/15 rounded px-2 py-1 text-xs text-white"
+                          title="Subtitle track"
+                        >
+                          {subtitleOptions.map((option) => (
+                            <option key={option.key} value={option.key}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleDownload(choice)}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/15 transition-colors"
+                          title={`Download ${audioTypeLabel(choice.audioType)} ${choice.quality}`}
+                        >
+                          <Download size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        )
       )}
     </div>
   )
