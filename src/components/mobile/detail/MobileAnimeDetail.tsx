@@ -24,6 +24,7 @@ import {
   Heart,
   Loader2,
   MoreVertical,
+  Search,
   Play,
   Sparkles,
   Tags,
@@ -77,8 +78,14 @@ import {
 } from '@/utils/tauri-commands'
 import type { SearchResult, MediaDetails, Episode } from '@/types/extension'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { resolveAnikotoSlug } from '@/utils/anikotoResolver'
-import { nextStreamingProvider, slugProviderExtension, streamingProviderLabel } from '@/utils/streamingProviders'
+import { resolveProviderSlug } from '@/utils/providerMatch'
+import { ProviderMatchPicker } from '@/components/media/ProviderMatchPicker'
+import {
+  nextStreamingProvider,
+  providerForMedia,
+  slugProviderExtension,
+  streamingProviderLabel,
+} from '@/utils/streamingProviders'
 import { savePendingReturn } from '@/utils/return-media'
 import {
   audioTypeLabel,
@@ -135,7 +142,7 @@ interface Props {
   onFeedbackChange?: () => void
 }
 
-type Sheet = null | 'library' | 'range' | 'row' | 'confirmDelete' | 'menu' | 'download'
+type Sheet = null | 'library' | 'range' | 'row' | 'confirmDelete' | 'menu' | 'download' | 'match'
 interface Picker {
   episodes: Episode[]
 }
@@ -145,7 +152,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
   const { isOnline } = useNetworkStatus()
   const downloadLocation = useSettingsStore((s) => s.downloadLocation)
-  const streamingProvider = useSettingsStore((s) => s.streamingProvider)
+  const selectedProvider = useSettingsStore((s) => s.streamingProvider)
   const adultMode = useSettingsStore((s) => s.adultMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
@@ -153,6 +160,8 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const anikotoYotochanBaseUrl = useSettingsStore((s) => s.anikotoYotochanBaseUrl)
 
   const [details, setDetails] = useState<MediaDetails | null>(null)
+  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -200,7 +209,11 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const [extId, setExtId] = useState<string | null>(null)
   const [providerMediaId, setProviderMediaId] = useState<string | null>(null)
   const [bridgeFailed, setBridgeFailed] = useState(false)
+  const [pickedTitle, setPickedTitle] = useState<string | null>(null)
+  const [matchKey, setMatchKey] = useState(0)
   const providerLabel = streamingProviderLabel(streamingProvider)
+  const tryAnotherProvider = () =>
+    updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
   const providerResolving = !!details && !bridgeFailed && (!extId || !providerMediaId)
 
   // download picker
@@ -371,6 +384,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
     setExtId(null)
     setProviderMediaId(null)
     setBridgeFailed(false)
+    setPickedTitle(null)
     ;(async () => {
       try {
         const slugExt = slugProviderExtension(streamingProvider, {
@@ -382,7 +396,9 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
           const meta = await loadExtension(slugExt)
           if (cancelled) return
           setExtId(meta.id)
-          const match = await resolveAnikotoSlug(
+          const match = await resolveProviderSlug(
+            meta.id,
+            media.id,
             {
               ...details,
               native_name: details.native_name || media.native_name,
@@ -397,6 +413,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
             (q) => searchAnime(meta.id, q, 1)
           )
           if (cancelled) return
+          setPickedTitle(match?.manual ? match.title : null)
           if (match?.id) setProviderMediaId(match.id)
           else setBridgeFailed(true)
           return
@@ -426,7 +443,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
     return () => {
       cancelled = true
     }
-  }, [details, extensionId, media.id, streamingProvider, anikotoApiBaseUrl, anikotoSiteBaseUrl, anikotoYotochanBaseUrl]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [details, extensionId, media.id, streamingProvider, anikotoApiBaseUrl, anikotoSiteBaseUrl, anikotoYotochanBaseUrl, matchKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- library / feedback / tags ----
   useEffect(() => {
@@ -1002,12 +1019,19 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
         <div className="mx-4 mt-3 flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-400">
           <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
           <span className="flex-1">Couldn’t match this anime on {providerLabel}.</span>
-          <button
-            className="min-h-11 shrink-0 font-semibold underline"
-            onClick={() => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })}
-          >
-            Try another provider
-          </button>
+          <div className="flex shrink-0 flex-col items-end">
+            {extId && (
+              <button className="btn btn-primary min-h-11 px-3" onClick={() => setSheet('match')}>
+                Find on {providerLabel}
+              </button>
+            )}
+            <button
+              className="min-h-11 shrink-0 font-semibold underline"
+              onClick={tryAnotherProvider}
+            >
+              Try another provider
+            </button>
+          </div>
         </div>
       )}
 
@@ -1182,6 +1206,16 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
                 {selecting ? 'Done' : 'Select'}
               </button>
             </div>
+            {isOnline && pickedTitle && (
+              <div className="mb-3 flex min-h-11 items-center gap-2 rounded-xl bg-white/5 px-3 text-sm">
+                <span className="min-w-0 flex-1 truncate">
+                  Playing from <b>{pickedTitle}</b> (your pick)
+                </span>
+                <button className="min-h-11 shrink-0 font-semibold text-[var(--color-accent-primary)]" onClick={() => setSheet('match')}>
+                  Change
+                </button>
+              </div>
+            )}
             {isOnline && (
               <button
                 onClick={() => openPicker(episodes)}
@@ -1651,6 +1685,14 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
         >
           Select episodes
         </SheetOption>
+        {extId && slugProviderExtension(streamingProvider, { anikotoApiBaseUrl, anikotoSiteBaseUrl, anikotoYotochanBaseUrl }) && (
+          <SheetOption
+            icon={<Search size={18} />}
+            onClick={() => setSheet('match')}
+          >
+            Change {providerLabel} match
+          </SheetOption>
+        )}
         <SheetOption
           icon={<Loader2 size={18} />}
           onClick={() => {
@@ -1661,6 +1703,19 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
           Reload
         </SheetOption>
       </BottomSheet>
+      {details && extId && (
+        <ProviderMatchPicker
+          open={sheet === 'match'}
+          onClose={() => setSheet(null)}
+          variant="sheet"
+          details={details}
+          mediaId={media.id}
+          extId={extId}
+          providerLabel={providerLabel}
+          onPicked={() => setMatchKey((k) => k + 1)}
+          onTryAnother={tryAnotherProvider}
+        />
+      )}
     </PushedScreen>
   )
 }

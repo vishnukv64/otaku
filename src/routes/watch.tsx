@@ -55,11 +55,13 @@ import { toastInfo } from '@/utils/notify'
 import { isAndroid, isIOS } from '@/utils/platform'
 import { usePipStore } from '@/store/pipStore'
 import { useSettingsStore } from '@/store/settingsStore'
-import { buildAnikotoSearchQueries, resolveAnikotoSlug } from '@/utils/anikotoResolver'
+import { buildAnikotoSearchQueries } from '@/utils/anikotoResolver'
+import { resolveProviderSlug } from '@/utils/providerMatch'
 import {
   nextStreamingProvider,
   slugProviderExtension,
   streamingProviderLabel,
+  providerForMedia,
 } from '@/utils/streamingProviders'
 import {
   canSeekLocalDownload,
@@ -119,8 +121,10 @@ function WatchPage() {
   const pipExpandTime = usePipStore((s) => s.expandTime)
   const pipData = usePipStore((s) => s.data)
   const clearPipExpandTime = usePipStore((s) => s.clearExpandTime)
-  const streamingProvider = useSettingsStore((s) => s.streamingProvider)
+  const selectedProvider = useSettingsStore((s) => s.streamingProvider)
   const adultMode = useSettingsStore((s) => s.adultMode)
+  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
   const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
   const anikotoSiteBaseUrl = useSettingsStore((s) => s.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((s) => s.anikotoYotochanBaseUrl)
@@ -268,6 +272,8 @@ function WatchPage() {
       }
 
       setDetails(result)
+      // `details` state is not updated yet in this closure: decide from the fresh result.
+      const streamingProvider = providerForMedia(selectedProvider, adultMode, result)
       setAllanimeExtId(null)
       setAllanimeId(null)
       setAnikotoExtId(null)
@@ -323,7 +329,7 @@ function WatchPage() {
           try {
             const metadata = await loadExtension(slugExtension)
             setAnikotoExtId(metadata.id)
-            const match = await resolveAnikotoSlug(result, (query) =>
+            const match = await resolveProviderSlug(metadata.id, malId, result, (query) =>
               searchAnime(metadata.id, query, 1)
             )
             const queries = buildAnikotoSearchQueries(result)
@@ -411,7 +417,8 @@ function WatchPage() {
   }, [
     malId,
     initialEpisodeId,
-    streamingProvider,
+    selectedProvider,
+    adultMode,
     anikotoApiBaseUrl,
     anikotoSiteBaseUrl,
     anikotoYotochanBaseUrl,

@@ -39,6 +39,8 @@ export interface SearchResult {
   media_type?: string
   /** Genres for NSFW filtering */
   genres?: string[]
+  /** Audio locales the provider offers (e.g. ja-JP, en-US). */
+  audio_locales?: string[]
   /** Native/romaji title from providers that expose it in search results. */
   native_name?: string
   /** Provider-side title aliases used for cross-provider matching. */

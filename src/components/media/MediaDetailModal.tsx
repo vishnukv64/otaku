@@ -93,8 +93,14 @@ import {
   searchAnime,
 } from '@/utils/tauri-commands'
 import { ALLANIME_EXTENSION } from '@/extensions/allanime-extension'
-import { resolveAnikotoSlug } from '@/utils/anikotoResolver'
-import { slugProviderExtension, streamingProviderLabel } from '@/utils/streamingProviders'
+import { resolveProviderSlug } from '@/utils/providerMatch'
+import { ProviderMatchPicker } from '@/components/media/ProviderMatchPicker'
+import {
+  nextStreamingProvider,
+  slugProviderExtension,
+  streamingProviderLabel,
+  providerForMedia,
+} from '@/utils/streamingProviders'
 import { savePendingReturn } from '@/utils/return-media'
 import { TagSelector, TagChips } from '@/components/library'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -212,11 +218,15 @@ function MediaDetailModalDesktop({
   const navigate = useNavigate()
   const { getStatus, refresh: refreshMediaStatus } = useMediaStatusContext()
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
-  const streamingProvider = useSettingsStore((state) => state.streamingProvider)
+  const selectedProvider = useSettingsStore((state) => state.streamingProvider)
   const anikotoApiBaseUrl = useSettingsStore((state) => state.anikotoApiBaseUrl)
+  const adultMode = useSettingsStore((state) => state.adultMode)
+  const updateSettings = useSettingsStore((state) => state.updateSettings)
   const anikotoSiteBaseUrl = useSettingsStore((state) => state.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((state) => state.anikotoYotochanBaseUrl)
   const [details, setDetails] = useState<MediaDetails | null>(null)
+  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
@@ -308,6 +318,8 @@ function MediaDetailModalDesktop({
     ] as [string, string][]
   ).filter(([, v]) => v)
   const [bridgeFailed, setBridgeFailed] = useState(false)
+  const [matchOpen, setMatchOpen] = useState(false)
+  const [matchKey, setMatchKey] = useState(0)
   const downloadProviderLabel = streamingProviderLabel(streamingProvider)
   const downloadProviderResolving =
     !!details && !bridgeFailed && (!downloadExtId || !downloadProviderMediaId)
@@ -344,7 +356,7 @@ function MediaDetailModalDesktop({
               )
             ),
           }
-          const match = await resolveAnikotoSlug(anikotoDetails, (query) =>
+          const match = await resolveProviderSlug(metadata.id, media.id, anikotoDetails, (query) =>
             searchAnime(metadata.id, query, 1)
           )
           if (cancelled) return
@@ -397,6 +409,7 @@ function MediaDetailModalDesktop({
     anikotoApiBaseUrl,
     anikotoSiteBaseUrl,
     anikotoYotochanBaseUrl,
+    matchKey,
   ])
 
   // Tag state
@@ -2139,6 +2152,46 @@ function MediaDetailModalDesktop({
                 {/* Episodes */}
                 {activeTab === 'episodes' && details.episodes.length > 0 && (
                   <div>
+                    {bridgeFailed && downloadExtId && (
+                      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm">
+                        <span className="flex-1 min-w-[200px] text-amber-300">
+                          Couldn’t match this anime on {downloadProviderLabel}.
+                        </span>
+                        <button
+                          onClick={() => setMatchOpen(true)}
+                          className="px-3 py-1.5 rounded-lg bg-[var(--color-accent-primary)] text-white text-sm font-medium"
+                        >
+                          Find on {downloadProviderLabel}
+                        </button>
+                        <button
+                          onClick={() =>
+                            updateSettings({
+                              streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
+                            })
+                          }
+                          className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium"
+                        >
+                          Try another provider
+                        </button>
+                      </div>
+                    )}
+                    {details && downloadExtId && (
+                      <ProviderMatchPicker
+                        open={matchOpen}
+                        onClose={() => setMatchOpen(false)}
+                        variant="modal"
+                        details={details}
+                        mediaId={media.id}
+                        extId={downloadExtId}
+                        providerLabel={downloadProviderLabel}
+                        onPicked={() => setMatchKey((k) => k + 1)}
+                        onTryAnother={() =>
+                          updateSettings({
+                            streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
+                          })
+                        }
+                      />
+                    )}
                     <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
                       <h2 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 border-l-[3px] border-[var(--color-accent-primary)] pl-3">
                         <svg

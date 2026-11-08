@@ -151,6 +151,7 @@ const extensionObject = {
         year: item.year || null,
         rating: null,
         available_episodes: item.episode_count || null,
+        audio_locales: Array.isArray(item.locales) ? item.locales : [],
         media_type: item.type || null,
         genres: Array.isArray(item.genres) ? item.genres : [],
         native_name: item.title_original || null,

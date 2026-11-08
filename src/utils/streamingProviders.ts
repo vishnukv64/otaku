@@ -19,6 +19,23 @@ export function streamingProviderLabel(provider: StreamingProviderMode): string 
   return ALL_PROVIDERS.find((p) => p.value === provider)?.label ?? provider
 }
 
+/** Hentai: the genre tag Jikan and AniList both use for explicit titles. */
+export function isHentai(media: { genres?: string[] | null } | null | undefined): boolean {
+  return !!media?.genres?.some((g) => g.toLowerCase() === 'hentai')
+}
+
+/**
+ * Provider to use for this show: with 18+ mode on, hentai always streams from hstream
+ * (the regular providers carry none of it); everything else uses the user's pick.
+ */
+export function providerForMedia(
+  selected: StreamingProviderMode,
+  adultMode: boolean,
+  media: { genres?: string[] | null } | null | undefined
+): StreamingProviderMode {
+  return adultMode && isHentai(media) ? 'hstream' : selected
+}
+
 /** Next provider in the list, for the "Try another provider" button. */
 export function nextStreamingProvider(
   provider: StreamingProviderMode,

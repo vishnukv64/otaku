@@ -195,7 +195,7 @@ function bestTitleScore(targets: string[], candidates: string[]): number {
   return best
 }
 
-function normalizeMediaType(value?: string): string | null {
+export function normalizeMediaType(value?: string): string | null {
   const lower = value?.toLowerCase().trim()
   if (!lower) return null
   if (lower === 'tv' || lower === 'tv series') return 'tv'

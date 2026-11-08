@@ -20,6 +20,12 @@ export function proxyUri(videoServer: VideoServerLike, url: string, referrer?: s
   return `${videoServer.proxy_base_url}?token=${videoServer.token}&url=${encodeURIComponent(url)}${referrerParam}`
 }
 
+/** Inverse of proxyUri: the upstream URL a proxy URL points at (others unchanged). */
+export function upstreamUri(videoServer: VideoServerLike, url: string): string {
+  if (!url.startsWith(videoServer.proxy_base_url)) return url
+  return new URL(url).searchParams.get('url') ?? url
+}
+
 export async function attachDash(
   video: HTMLVideoElement,
   url: string,
@@ -30,8 +36,15 @@ export async function attachDash(
   const player = new shaka.Player()
   const handle: DashHandle = { destroy: () => player.destroy() }
   await player.attach(video)
-  player.getNetworkingEngine()?.registerRequestFilter((_type, request) => {
+  const net = player.getNetworkingEngine()
+  net?.registerRequestFilter((_type, request) => {
     request.uris = request.uris.map((u) => proxyUri(opts.videoServer, u, opts.referrer))
+  })
+  // Shaka resolves the MPD's relative segment paths against the response URI. Left as
+  // the proxy URL, every segment would resolve to `<proxy host>/chunks/...` (404 →
+  // endless buffering), so report the upstream URL instead.
+  net?.registerResponseFilter((_type, response) => {
+    response.uri = upstreamUri(opts.videoServer, response.uri)
   })
   try {
     await player.load(url, opts.startTime && opts.startTime > 0 ? opts.startTime : null)
