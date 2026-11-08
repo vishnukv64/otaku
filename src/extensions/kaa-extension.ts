@@ -126,11 +126,27 @@ const extensionObject = {
     }
     const props = html.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const manifest = props.match(/"manifest":\[0,"([^"]+)"\]/);
-    const re = /\{"language":\[0,"([^"]*)"\],"name":\[0,"([^"]*)"\],"src":\[0,"([^"]+)"\]\}/g;
+    // Each track is [0,{...}] inside "subtitles". Fields vary by source (older
+    // episodes add format/filename/source between them), so read them individually:
+    // a fixed-order pattern missed those tracks and episodes played with no subtitles.
     const subtitles = [];
+    const block = props.match(/"subtitles":\[1,\[([\s\S]*?\}\])\]\]/);
+    const objRe = /\[0,\{([^{}]*)\}\]/g;
+    const field = function(obj, name) {
+      const f = obj.match(new RegExp('"' + name + '":\\[0,"([^"]*)"\\]'));
+      return f ? f[1] : '';
+    };
     let m;
-    while ((m = re.exec(props)) !== null) {
-      subtitles.push({ url: m[3], language: m[1] || m[2], label: m[2] || m[1] });
+    while (block && (m = objRe.exec(block[1])) !== null) {
+      const src = field(m[1], 'src');
+      if (!src) continue;
+      const language = field(m[1], 'language');
+      const name = field(m[1], 'name');
+      subtitles.push({
+        url: src.indexOf('//') === 0 ? 'https:' + src : src,
+        language: language || name,
+        label: name || language
+      });
     }
     const preview = props.match(/"thumbnails":\[0,"([^"]+\.vtt[^"]*)"\]/);
     return {

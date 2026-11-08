@@ -98,6 +98,21 @@ describe('KAA extension', () => {
     ])
   })
 
+  it('reads subtitle tracks whose fields vary (older episodes add format/filename/source)', () => {
+    const html =
+      '<astro-island props="{&quot;manifest&quot;:[0,&quot;//bl.cdn.test/m.m3u8&quot;],&quot;subtitles&quot;:[1,[' +
+      '[0,{&quot;format&quot;:[0,&quot;srt&quot;],&quot;language&quot;:[0,&quot;en&quot;],&quot;filename&quot;:[0,&quot;x_en.srt&quot;],&quot;name&quot;:[0,&quot;English&quot;],&quot;source&quot;:[0,&quot;bilibili&quot;],&quot;src&quot;:[0,&quot;https://subs.test/x_en.srt&quot;]}],' +
+      '[0,{&quot;language&quot;:[0,&quot;th&quot;],&quot;name&quot;:[0,&quot;Thai&quot;],&quot;src&quot;:[0,&quot;//subs.test/th.vtt&quot;]}]' +
+      ']],&quot;thumbnails&quot;:[0,&quot;https://subst.test/p.vtt&quot;]}">'
+    const ext = loadExtension((() => JSON.stringify({ status: 200, body: html })) as never) as unknown as {
+      player: (url: string) => { subtitles: unknown[] }
+    }
+    expect(ext.player('https://player.test/x').subtitles).toEqual([
+      { url: 'https://subs.test/x_en.srt', language: 'en', label: 'English' },
+      { url: 'https://subs.test/th.vtt', language: 'th', label: 'Thai' },
+    ])
+  })
+
   it('resolves an episode on a later page to an HLS manifest with subtitles, skipping DASH', () => {
     const { sources, subtitles } = loadExtension(fakeKaa()).getSources('frieren-1::3')
     expect(sources).toEqual([
