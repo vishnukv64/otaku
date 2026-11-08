@@ -50,7 +50,7 @@ function fakeSite(): Fetch & { calls: string[] } {
       expect(options.headers!['Referer']).toBe('https://hstream.moe/hentai/overflow-1')
       return reply(JSON.stringify({ stream_url: '2021/Overflow/E01', stream_domains: ['https://dead.test', 'https://cdn.test/'], extra_subtitles: [] }))
     }
-    if (url.startsWith('https://dead.test')) return JSON.stringify({ status: 503, body: '' })
+    if (new URL(url).host === 'dead.test') return JSON.stringify({ status: 503, body: '' })
     if (url.endsWith('/manifest.mpd')) return JSON.stringify({ status: 200, body: '<MPD/>' })
     throw new Error('unexpected ' + url)
   }) as Fetch & { calls: string[] }
