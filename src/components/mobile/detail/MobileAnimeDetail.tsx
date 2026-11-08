@@ -2,6 +2,7 @@
  * Phone anime detail (mock: design/files/detail.html).
  * Same props and data logic as MediaDetailModal; rendered as a pushed full screen.
  */
+import { displayTitle } from '@/utils/mediaHelpers'
 import {
   audioSummary,
   countdownFromBroadcast,
@@ -1381,7 +1382,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
                       <img src={rec.media.cover_url} alt="" loading="lazy" className="h-full w-full object-cover" />
                     )}
                   </span>
-                  <span className="mt-1.5 line-clamp-2 text-xs font-medium leading-snug">{rec.media.title}</span>
+                  <span className="mt-1.5 line-clamp-2 text-xs font-medium leading-snug">{displayTitle(rec.media)}</span>
                 </button>
               ))}
             </div>

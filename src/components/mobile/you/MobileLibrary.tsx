@@ -3,6 +3,7 @@
  * routes/library.tsx; this renders it: segmented Anime|Manga, status chips,
  * tag chips, Sort/View sheet, grid/list, long-press selection, bulk bar, tag sheets.
  */
+import { displayTitle } from '@/utils/mediaHelpers'
 import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Check, Download, Pencil, Plus, SlidersHorizontal, Tags, Trash2, Tv, BookOpen, X } from 'lucide-react'
@@ -42,7 +43,7 @@ export function sortLibrary(items: LibraryEntryWithMedia[], sort: LibrarySort): 
   const by: Record<LibrarySort, (a: LibraryEntryWithMedia, b: LibraryEntryWithMedia) => number> = {
     added: (a, b) => b.library_entry.added_at.localeCompare(a.library_entry.added_at),
     updated: (a, b) => b.library_entry.updated_at.localeCompare(a.library_entry.updated_at),
-    title: (a, b) => a.media.title.localeCompare(b.media.title),
+    title: (a, b) => displayTitle(a.media).localeCompare(displayTitle(b.media)),
     score: (a, b) => (b.library_entry.score ?? -1) - (a.library_entry.score ?? -1),
   }
   return [...items].sort(by[sort])
@@ -212,7 +213,7 @@ export function MobileLibrary(p: MobileLibraryProps) {
         {items.map((e) => (
           <Item
             key={e.library_entry.media_id}
-            title={e.media.title}
+            title={displayTitle(e.media)}
             cover={e.media.cover_url}
             badge={statusLabel(e.library_entry.status)}
             right={e.library_entry.favorite ? '★' : undefined}

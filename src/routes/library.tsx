@@ -7,6 +7,7 @@
  * - Filters and sorting
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useCallback } from 'react'
 import { Loader2, AlertCircle, Download, Tv, BookOpen, CheckSquare, Square } from 'lucide-react'
@@ -710,7 +711,7 @@ function LibraryScreen() {
               // Convert media entry to SearchResult for MediaCard
               const media: SearchResult = {
                 id: entry.media.id,
-                title: entry.media.title,
+                title: displayTitle(entry.media),
                 cover_url: entry.media.cover_url,
               }
               const isSelected = selectedItems.has(entry.media.id)

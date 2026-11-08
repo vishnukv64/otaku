@@ -31,7 +31,8 @@ fn extract_published_year(manga: &JikanManga) -> Option<u32> {
 fn jikan_manga_to_search_result(manga: &JikanManga) -> SearchResult {
     SearchResult {
         id: manga.mal_id.to_string(),
-        title: manga.title.clone(),
+        // English first for display; romaji stays a synonym for provider matching.
+        title: manga.title_english.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| manga.title.clone()),
         cover_url: extract_image_url(&manga.images),
         trailer_url: None,
         description: manga.synopsis.clone(),
@@ -44,7 +45,10 @@ fn jikan_manga_to_search_result(manga: &JikanManga) -> SearchResult {
         media_type: manga.manga_type.clone(),
         genres: Some(extract_genre_names(&manga.genres)),
         native_name: None,
-        title_synonyms: None,
+        title_synonyms: match manga.title_english.as_deref() {
+            Some(e) if !e.is_empty() && e != manga.title => Some(vec![manga.title.clone()]),
+            _ => None,
+        },
         rank: manga.rank,
         popularity: manga.popularity,
         views: None,
@@ -179,10 +183,16 @@ fn anilist_manga_details(mal_id: i64) -> Result<MangaDetails, String> {
     let title = media.get("title");
     Ok(MangaDetails {
         id: base.id,
-        title: base.title,
+        title: base.title.clone(),
         english_name: title.and_then(|t| str_at(t, "english")),
         native_name: title.and_then(|t| str_at(t, "native")),
-        title_synonyms: media.get("synonyms").and_then(|v| serde_json::from_value(v.clone()).ok()),
+        title_synonyms: {
+            let mut syn: Vec<String> = media.get("synonyms").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+            if let Some(r) = title.and_then(|t| str_at(t, "romaji")).filter(|r| *r != base.title && !syn.contains(r)) {
+                syn.insert(0, r);
+            }
+            if syn.is_empty() { None } else { Some(syn) }
+        },
         cover_url: media
             .get("coverImage")
             .and_then(|c| str_at(c, "extraLarge").or_else(|| str_at(c, "large"))),

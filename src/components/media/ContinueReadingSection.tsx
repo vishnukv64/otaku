@@ -5,6 +5,7 @@
  * with progress indicators
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { isMobile } from '@/utils/platform'
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, Link } from '@tanstack/react-router'
@@ -249,7 +250,7 @@ export function ContinueReadingSection() {
                     {/* 16:9 Thumbnail */}
                     <div className="relative w-full h-[135px] bg-[var(--color-panel)]">
                       {media.cover_url ? (
-                        <ContinueReadingCardImage url={media.cover_url} title={media.title} />
+                        <ContinueReadingCardImage url={media.cover_url} title={displayTitle(media)} />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <BookOpen size={24} className="text-[var(--color-text-dim)]" />
@@ -267,7 +268,7 @@ export function ContinueReadingSection() {
                     {/* Card info panel */}
                     <div className="px-3 py-2.5 pb-3">
                       <h3 className="text-[0.875rem] font-semibold font-display text-white truncate mb-1">
-                        {media.title}
+                        {displayTitle(media)}
                       </h3>
                       <p className="text-xs text-[var(--color-text-muted)] mb-2">
                         {entry.completed
@@ -299,7 +300,7 @@ export function ContinueReadingSection() {
                     }
                     setSelectedManga({ manga: media, extensionId: effectiveExtensionId })
                   }}
-                  aria-label={`Details for ${media.title}`}
+                  aria-label={`Details for ${displayTitle(media)}`}
                   className={
                     isMobile()
                       ? 'absolute left-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
@@ -319,7 +320,7 @@ export function ContinueReadingSection() {
                 {/* Remove button */}
                 <button
                   onClick={(e) => handleRemove(e, entry.media.id, entry.media.title, entry.media.cover_url)}
-                  aria-label={`Remove ${media.title} from Continue Reading`}
+                  aria-label={`Remove ${displayTitle(media)} from Continue Reading`}
                   className={
                     isMobile()
                       ? 'absolute right-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'

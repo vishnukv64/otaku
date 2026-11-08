@@ -126,3 +126,8 @@ export async function getNextEpisodeToWatch(
     }
   }
 }
+
+/** English title when stored, else the stored (romaji) title. */
+export function displayTitle(m: { title: string; english_name?: string | null }): string {
+  return m.english_name?.trim() || m.title
+}

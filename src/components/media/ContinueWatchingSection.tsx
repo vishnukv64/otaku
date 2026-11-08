@@ -5,6 +5,7 @@
  * with progress indicators
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, Link } from '@tanstack/react-router'
 import { Play, Loader2, ChevronLeft, ChevronRight, X, Info, MoreHorizontal, SkipForward, Check, List } from 'lucide-react'
@@ -251,7 +252,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                       {media.cover_url ? (
                         <img
                           src={media.cover_url}
-                          alt={media.title}
+                          alt={displayTitle(media)}
                           className="w-full h-full object-cover"
                           loading="lazy"
                         />
@@ -272,7 +273,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                     {/* Card info panel */}
                     <div className="px-3 py-2.5 pb-3">
                       <h3 className="text-[0.875rem] font-semibold font-display text-white truncate mb-1">
-                        {media.title}
+                        {displayTitle(media)}
                       </h3>
                       <p className="text-xs text-[var(--color-text-muted)] mb-2">
                         {entry.completed
@@ -296,7 +297,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                 {isMobile() && (
                   <button
                     onClick={() => setMenuEntry(entry)}
-                    aria-label={`More actions for ${media.title}`}
+                    aria-label={`More actions for ${displayTitle(media)}`}
                     className="absolute right-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white"
                   >
                     <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60">
@@ -310,7 +311,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
                     e.stopPropagation()
                     setSelectedMedia(media)
                   }}
-                  aria-label={`Details for ${media.title}`}
+                  aria-label={`Details for ${displayTitle(media)}`}
                   className={
                     isMobile()
                       ? 'absolute left-0 top-0 z-[60] flex h-11 w-11 items-center justify-center text-white'
@@ -341,7 +342,7 @@ export function ContinueWatchingSection({ extensionId }: ContinueWatchingSection
       </div>
 
       {menuEntry && (
-        <BottomSheet isOpen onClose={() => setMenuEntry(null)} title={menuEntry.media.title}>
+        <BottomSheet isOpen onClose={() => setMenuEntry(null)} title={displayTitle(menuEntry.media)}>
           <SheetOption
             icon={<Play size={20} />}
             onClick={() => {

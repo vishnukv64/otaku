@@ -5,6 +5,7 @@
  * Manga rows: "Ch. 12.5 · Page 8/24"
  */
 
+import { displayTitle } from '@/utils/mediaHelpers'
 import { useState } from 'react'
 import { Play, X, Check, MoreHorizontal, Trash2 } from 'lucide-react'
 import { BottomSheet, SheetOption } from '@/components/ui/BottomSheet'
@@ -134,7 +135,7 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
         className="flex-shrink-0 w-12 h-16 rounded-[var(--radius-sm)] overflow-hidden bg-[var(--color-panel)] relative"
       >
         {coverSrc ? (
-          <img src={coverSrc} alt={entry.media.title} className="w-full h-full object-cover" loading="lazy" />
+          <img src={coverSrc} alt={displayTitle(entry.media)} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-[var(--color-text-dim)]">
             <Play size={16} />
@@ -145,7 +146,7 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
       {/* Info */}
       <div className="flex-1 min-w-0">
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
-          {entry.media.title}
+          {displayTitle(entry.media)}
         </h4>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{progressLabel}</p>
         {mobile && <p className="text-[0.7rem] text-[var(--color-text-dim)]">{relativeTimestamp(entry.timestamp)}</p>}
@@ -181,7 +182,7 @@ export function HistoryEntry({ entry, onRemoved }: HistoryEntryProps) {
           >
             <MoreHorizontal size={20} />
           </button>
-          <BottomSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} title={entry.media.title}>
+          <BottomSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} title={displayTitle(entry.media)}>
             <SheetOption icon={<Play size={18} />} onClick={() => { setMenuOpen(false); handleResume() }}>Resume</SheetOption>
             <SheetOption destructive icon={<Trash2 size={18} />} onClick={() => { setMenuOpen(false); void handleRemove() }}>Remove from history</SheetOption>
           </BottomSheet>
