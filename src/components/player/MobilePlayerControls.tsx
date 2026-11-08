@@ -229,6 +229,15 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
     },
   })
 
+  // Commit a seek-bar drag once, whichever end event arrives first.
+  const endBarScrub = (e: React.SyntheticEvent<HTMLInputElement>) => {
+    const to = Number(e.currentTarget.value)
+    setScrub(null)
+    // No drag and no tap-to-jump (e.g. blur after a seek already committed): nothing to do.
+    if (scrub === null && Math.abs(to - p.currentTime) < 0.5) return
+    p.seekTo(to)
+  }
+
   const close = () => setMenu(null)
   const pick = (fn: () => void) => () => {
     fn()
@@ -697,14 +706,14 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
                   setScrub(Number(e.target.value))
                   armHide()
                 }}
-                onPointerUp={(e) => {
-                  p.seekTo(Number((e.target as HTMLInputElement).value))
-                  setScrub(null)
-                }}
-                onKeyUp={(e) => {
-                  p.seekTo(Number((e.target as HTMLInputElement).value))
-                  setScrub(null)
-                }}
+                // iOS often ends a range drag with touchend/pointercancel and no
+                // pointerup, which left the preview stuck on screen: end on all of them.
+                onPointerUp={endBarScrub}
+                onPointerCancel={endBarScrub}
+                onTouchEnd={endBarScrub}
+                onTouchCancel={endBarScrub}
+                onKeyUp={endBarScrub}
+                onBlur={endBarScrub}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               />
               <div

@@ -30,6 +30,8 @@ interface DownloadButtonProps {
   className?: string
   /** Optional text shown under the icon (phone action tile) */
   label?: string
+  /** Episode is already on the device: show it as done instead of offering a download. */
+  downloaded?: boolean
 }
 
 const EMPTY_SUBTITLES: Subtitle[] = []
@@ -43,6 +45,7 @@ export function DownloadButton({
   subtitles = EMPTY_SUBTITLES,
   className = '',
   label,
+  downloaded = false,
 }: DownloadButtonProps) {
   const defaultDownloadQuality = useSettingsStore((state) => state.defaultDownloadQuality)
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
@@ -149,18 +152,24 @@ export function DownloadButton({
       <button
         type="button"
         onClick={() => setShowOptions(!showOptions)}
-        disabled={!!downloading || dashOnly}
-        className={`w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-        title={dashOnly ? 'Downloads are not available for DASH streams' : 'Download Episode'}
+        disabled={!!downloading || dashOnly || downloaded}
+        className={`w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors disabled:cursor-not-allowed ${downloaded ? '' : 'disabled:opacity-50'} ${className}`}
+        title={
+          downloaded
+            ? 'Downloaded'
+            : dashOnly
+              ? 'Downloads are not available for DASH streams'
+              : 'Download Episode'
+        }
       >
         {downloading ? (
           <Loader2 size={20} className="animate-spin" />
-        ) : completed ? (
+        ) : completed || downloaded ? (
           <Check size={20} className="text-green-400" />
         ) : (
           <Download size={20} />
         )}
-        {label}
+        {label && downloaded ? 'Downloaded' : label}
       </button>
 
       {/* Download Options Menu */}

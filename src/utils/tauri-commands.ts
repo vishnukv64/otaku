@@ -6,6 +6,24 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
+
+/**
+ * `invoke` for commands whose backend state is registered late in startup (download
+ * manager, video server come after DB migrations and the sync engine). Until then Tauri
+ * rejects with "state not managed"; callers took that as "not downloaded" and streamed
+ * a downloaded episode. Retry that one error for a while; anything else throws at once.
+ */
+export async function invokeWhenReady<T>(cmd: string, args?: Record<string, unknown>, timeoutMs = 20_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      return await invoke<T>(cmd, args)
+    } catch (err) {
+      if (!/state not managed/i.test(String(err)) || Date.now() > deadline) throw err
+      await new Promise((r) => setTimeout(r, 250))
+    }
+  }
+}
 import type {
   ExtensionMetadata,
   SearchResult,
@@ -634,7 +652,7 @@ export async function resumeDownload(downloadId: string): Promise<void> {
  * @param episodeNumber - Episode number
  */
 export async function isEpisodeDownloaded(mediaId: string, episodeNumber: number): Promise<boolean> {
-  return await invoke('is_episode_downloaded', { mediaId, episodeNumber })
+  return await invokeWhenReady('is_episode_downloaded', { mediaId, episodeNumber })
 }
 
 /**
@@ -643,7 +661,7 @@ export async function isEpisodeDownloaded(mediaId: string, episodeNumber: number
  * @param episodeNumber - Episode number
  */
 export async function getEpisodeFilePath(mediaId: string, episodeNumber: number): Promise<string | null> {
-  return await invoke('get_episode_file_path', { mediaId, episodeNumber })
+  return await invokeWhenReady('get_episode_file_path', { mediaId, episodeNumber })
 }
 
 /**
@@ -1454,7 +1472,7 @@ export interface VideoServerUrls {
  * The video server handles large videos properly with true HTTP Range support
  */
 export async function getVideoServerInfo(): Promise<VideoServerUrls> {
-  return await invoke('get_video_server_info')
+  return await invokeWhenReady('get_video_server_info')
 }
 
 /**

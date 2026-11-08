@@ -899,6 +899,10 @@ function WatchPage() {
                 animeTitle={details.title}
                 episodeNumber={currentEpisode.number}
                 label="Download"
+                downloaded={
+                  downloaded.has(currentEpisode.number) ||
+                  sources.sources.some((s) => s.server === 'Local')
+                }
                 className="!h-auto !min-h-[56px] !w-full flex-col gap-1 !rounded-xl bg-white/10 text-xs active:bg-white/20"
               />
             ) : (
