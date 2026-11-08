@@ -758,7 +758,8 @@ function WatchPage() {
     setLoading(true)
     updateSettings({ streamingProvider: alternateProvider })
   }
-  const providerSwitchButton = (
+  // Hentai is pinned to hstream in 18+ mode, so switching would do nothing: no button.
+  const providerSwitchButton = streamingProvider !== selectedProvider ? null : (
     <button
       onClick={switchProvider}
       className="mt-4 rounded-md bg-[#e50914] px-4 py-2 text-sm font-semibold text-white hover:bg-[#f21b2a]"

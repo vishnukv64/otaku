@@ -2163,16 +2163,19 @@ function MediaDetailModalDesktop({
                         >
                           Find on {downloadProviderLabel}
                         </button>
-                        <button
-                          onClick={() =>
-                            updateSettings({
-                              streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
-                            })
-                          }
-                          className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium"
-                        >
-                          Try another provider
-                        </button>
+                        {/* Hentai is pinned to hstream in 18+ mode: switching would do nothing. */}
+                        {streamingProvider === selectedProvider && (
+                          <button
+                            onClick={() =>
+                              updateSettings({
+                                streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium"
+                          >
+                            Try another provider
+                          </button>
+                        )}
                       </div>
                     )}
                     {details && downloadExtId && (
@@ -2185,10 +2188,10 @@ function MediaDetailModalDesktop({
                         extId={downloadExtId}
                         providerLabel={downloadProviderLabel}
                         onPicked={() => setMatchKey((k) => k + 1)}
-                        onTryAnother={() =>
-                          updateSettings({
-                            streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
-                          })
+                        onTryAnother={
+                          streamingProvider === selectedProvider
+                            ? () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
+                            : undefined
                         }
                       />
                     )}

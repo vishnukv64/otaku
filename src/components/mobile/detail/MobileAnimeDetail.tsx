@@ -213,8 +213,11 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const [pickedTitle, setPickedTitle] = useState<string | null>(null)
   const [matchKey, setMatchKey] = useState(0)
   const providerLabel = streamingProviderLabel(streamingProvider)
-  const tryAnotherProvider = () =>
-    updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
+  // Hentai is pinned to hstream in 18+ mode, so switching would do nothing: no button.
+  const providerPinned = streamingProvider !== selectedProvider
+  const tryAnotherProvider = providerPinned
+    ? undefined
+    : () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
   const providerResolving = !!details && !bridgeFailed && (!extId || !providerMediaId)
 
   // download picker
@@ -1026,12 +1029,14 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
                 Find on {providerLabel}
               </button>
             )}
-            <button
-              className="min-h-11 shrink-0 font-semibold underline"
-              onClick={tryAnotherProvider}
-            >
-              Try another provider
-            </button>
+            {tryAnotherProvider && (
+              <button
+                className="min-h-11 shrink-0 font-semibold underline"
+                onClick={tryAnotherProvider}
+              >
+                Try another provider
+              </button>
+            )}
           </div>
         </div>
       )}
