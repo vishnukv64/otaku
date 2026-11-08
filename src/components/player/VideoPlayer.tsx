@@ -667,7 +667,8 @@ export function VideoPlayer({
           } catch (dashError) {
             if (cancelled) return
             console.error('[VideoPlayer] DASH load failed:', dashError)
-            setError('Failed to load DASH stream')
+            const code = (dashError as { code?: number })?.code
+            setError(code ? `Failed to load DASH stream (error ${code})` : 'Failed to load DASH stream')
             setLoading(false)
           }
         } else if (isActuallyHls && Hls.isSupported()) {

@@ -18,3 +18,31 @@ describe('dash proxy URIs', () => {
     expect(upstreamUri(server, mpd)).toBe(mpd)
   })
 })
+
+describe('attachDash ordering', () => {
+  it('waits for the previous player to finish tearing down before attaching a new one', async () => {
+    const { vi } = await import('vitest')
+    const events: string[] = []
+    let n = 0
+    vi.doMock('shaka-player', () => ({
+      default: {
+        polyfill: { installAll: () => {} },
+        Player: class {
+          id = ++n
+          attach = async () => { events.push(`attach${this.id}`) }
+          load = async () => {}
+          getNetworkingEngine = () => ({ registerRequestFilter: () => {}, registerResponseFilter: () => {} })
+          destroy = () => new Promise<void>((r) => setTimeout(() => { events.push(`destroyed${this.id}`); r() }, 20))
+        },
+      },
+    }))
+    vi.resetModules()
+    const { attachDash } = await import('./dashPlayer')
+    const video = {} as HTMLVideoElement
+    const first = await attachDash(video, mpd, { videoServer: server })
+    void first.destroy() // callers don't await
+    await attachDash(video, mpd, { videoServer: server })
+    expect(events).toEqual(['attach1', 'destroyed1', 'attach2'])
+    vi.doUnmock('shaka-player')
+  })
+})

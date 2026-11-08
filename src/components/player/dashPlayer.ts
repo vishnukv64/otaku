@@ -26,15 +26,26 @@ export function upstreamUri(videoServer: VideoServerLike, url: string): string {
   return new URL(url).searchParams.get('url') ?? url
 }
 
+// Teardown still running per <video>. Callers fire destroy() without awaiting it; a
+// new player attached meanwhile gets its MediaSource reset by the old one's detach and
+// fails to load (switching show/episode → "Failed to load DASH stream").
+const teardowns = new WeakMap<HTMLVideoElement, Promise<void>>()
+
 export async function attachDash(
   video: HTMLVideoElement,
   url: string,
   opts: { videoServer: VideoServerLike; referrer?: string; startTime?: number }
 ): Promise<DashHandle> {
+  await teardowns.get(video)
   const shaka = (await import('shaka-player')).default
   shaka.polyfill.installAll()
   const player = new shaka.Player()
-  const handle: DashHandle = { destroy: () => player.destroy() }
+  const destroy = () => {
+    const done = player.destroy().catch(() => {})
+    teardowns.set(video, done)
+    return done
+  }
+  const handle: DashHandle = { destroy }
   await player.attach(video)
   const net = player.getNetworkingEngine()
   net?.registerRequestFilter((_type, request) => {
@@ -49,7 +60,7 @@ export async function attachDash(
   try {
     await player.load(url, opts.startTime && opts.startTime > 0 ? opts.startTime : null)
   } catch (err) {
-    await player.destroy()
+    await destroy()
     throw err
   }
   return handle
