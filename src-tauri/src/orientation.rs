@@ -70,6 +70,9 @@ mod ios {
     }
 
     pub unsafe fn apply(mask: usize, request: Option<usize>) {
+        // Store first: if the window isn't up yet (app start), the swizzle installed
+        // on a later call still reads the right mask.
+        MASK.store(mask, Ordering::Relaxed);
         let scene = first_scene();
         if scene.is_null() {
             return;
@@ -86,7 +89,6 @@ mod ios {
             );
             class_replaceMethod(cls, sel!(supportedInterfaceOrientations), imp, c"Q@:".as_ptr());
         });
-        MASK.store(mask, Ordering::Relaxed);
 
         // iOS 16+: re-read the mask, then rotate if asked.
         let responds: bool =

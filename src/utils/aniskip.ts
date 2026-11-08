@@ -39,9 +39,17 @@ export function fetchSkipTimes(malId: string, episode: number, episodeLength: nu
     hit = fetch(
       `https://api.aniskip.com/v2/skip-times/${encodeURIComponent(malId)}/${episode}?${types}&episodeLength=${Math.round(episodeLength)}`,
     )
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        // 404 = AniSkip has no times for this episode (cache that); other failures retry next time.
+        if (r.status === 404) return null
+        if (!r.ok) throw new Error(`aniskip ${r.status}`)
+        return r.json()
+      })
       .then(mapSkipResults)
-      .catch(() => [])
+      .catch(() => {
+        cache.delete(key)
+        return []
+      })
     cache.set(key, hit)
   }
   return hit

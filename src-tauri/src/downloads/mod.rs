@@ -635,6 +635,8 @@ impl DownloadManager {
     }
 
     /// Separate audio rendition (EXT-X-MEDIA TYPE=AUDIO with URI); DEFAULT=YES wins, else first.
+    // ponytail: ignores the variant's AUDIO group-id (KAA masters have one group);
+    // match GROUP-ID to the chosen variant if a provider ever ships several.
     fn parse_hls_audio_uri(text: &str, base_url: &str) -> Option<String> {
         let mut first = None;
         for line in text.lines().map(str::trim).filter(|l| l.starts_with("#EXT-X-MEDIA")) {

@@ -169,7 +169,7 @@ export function EpisodeList({
                         )}
                         {episode.duration && (
                           <p className="text-xs text-[var(--color-text-muted)]">
-                            {Math.round(episode.duration / 60)} min
+                            {Math.max(1, Math.round(episode.duration / 60))} min
                           </p>
                         )}
                       </div>
