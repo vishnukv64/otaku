@@ -270,6 +270,17 @@ async fn serve_absolute_path(
 
     if is_obfuscated {
         content_type = sniff_obfuscated_file_type(&file_path).await;
+    } else if content_type == "application/octet-stream" {
+        // HLS downloads keep the CDN's segment names, and some CDNs disguise TS as
+        // images (KAA: segment_00000.jpg). Native HLS (AVFoundation, used when hls.js
+        // hands off on iOS) stalls on those unless they are typed video/mp2t.
+        let mut head = [0u8; 1];
+        if let Ok(mut f) = tokio::fs::File::open(&file_path).await {
+            use tokio::io::AsyncReadExt;
+            if f.read_exact(&mut head).await.is_ok() {
+                content_type = plain_segment_type(&head).unwrap_or(content_type);
+            }
+        }
     }
 
     if file_path.extension()
@@ -771,6 +782,11 @@ fn normalize_hls_segment(bytes: Vec<u8>) -> Vec<u8> {
     }
 }
 
+/// Content type for an unencrypted local file whose extension says nothing useful.
+fn plain_segment_type(header: &[u8]) -> Option<&'static str> {
+    (header.first() == Some(&0x47)).then_some("video/mp2t")
+}
+
 fn sniff_decrypted_video_type(header: &[u8]) -> &'static str {
     if header.first() == Some(&0x47) {
         return "video/mp2t";
@@ -807,6 +823,13 @@ async fn sniff_obfuscated_file_type(file_path: &std::path::Path) -> &'static str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_ts_segment_named_jpg_is_typed_mp2t() {
+        assert_eq!(super::plain_segment_type(&[0x47, 0x40]), Some("video/mp2t"));
+        assert_eq!(super::plain_segment_type(&[0xff, 0xd8]), None); // real JPEG
+        assert_eq!(super::plain_segment_type(&[]), None);
+    }
+
     use super::*;
 
     #[test]

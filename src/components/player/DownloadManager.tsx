@@ -635,8 +635,13 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
     return true
   }
 
+  // Phone (mock): in-flight and failed anime rows sit in flat "Active"/"Failed" sections;
+  // show groups hold only finished episodes.
+  const mobileAnime = mobile && mediaType === 'anime'
+  const flatActive = mobileAnime ? downloads.filter(d => ['downloading', 'paused', 'queued'].includes(d.status) && statusFilter(d.status)) : []
+  const flatFailed = mobileAnime ? downloads.filter(d => d.status === 'failed' && statusFilter(d.status)) : []
   const filteredAnimeGroups = (mobile && mediaType === 'manga' ? [] : groupedDownloads)
-    .map(g => ({ ...g, downloads: g.downloads.filter(d => statusFilter(d.status)) }))
+    .map(g => ({ ...g, downloads: g.downloads.filter(d => statusFilter(d.status) && !(mobileAnime && d.status !== 'completed')) }))
     .filter(g => g.downloads.length > 0)
 
   const filteredMangaGroups = (mobile && mediaType === 'anime' ? [] : groupedChapterDownloads)
@@ -682,7 +687,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
 
       {/* Storage Overview */}
       {totalStorage > 0 && (
-        <div className="p-4 sm:p-[18px_22px] bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] mb-5">
+        <div className={`p-4 sm:p-[18px_22px] border border-[var(--color-glass-border)] ${mobile ? 'bg-[var(--color-bg-secondary)] rounded-[var(--radius-xl)] mb-3.5' : 'bg-[var(--color-glass-bg)] rounded-[var(--radius-lg)] mb-5'}`}>
           <div className="flex items-baseline justify-between mb-2.5">
             <div className="font-mono text-[0.95rem] font-semibold">
               {formatBytes(totalStorage)} <span className="text-[var(--color-text-muted)] font-normal text-[0.85rem]">used</span>
@@ -720,7 +725,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
       )}
 
       {/* Stats Bar */}
-      <div className="flex items-center gap-x-4 gap-y-2 max-sm:gap-x-3 flex-wrap px-4 sm:px-5 py-3.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] mb-5">
+      <div className={`${mobile ? 'hidden' : 'flex'} items-center gap-x-4 gap-y-2 flex-wrap px-4 sm:px-5 py-3.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] mb-5`}>
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-[0.9rem] font-semibold">{totalCount}</span>
           <span className="text-[0.7rem] text-[var(--color-text-muted)]">Total</span>
@@ -774,7 +779,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 max-sm:overflow-x-auto max-sm:-mx-4 max-sm:px-4 max-sm:[&>button]:min-h-[44px] max-sm:[&>button]:whitespace-nowrap max-sm:[&>button]:shrink-0 scrollbar-hide">
+        <div className="flex items-center gap-2 max-sm:flex-wrap max-sm:[&>button]:min-h-[44px] max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center max-sm:[&>button]:whitespace-nowrap">
           {completedCount > 0 && (
             <button onClick={handleClearCompleted} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-glass-bg)] border border-[var(--color-glass-border)] hover:bg-white/10 rounded-lg transition-colors text-sm">
               <Trash2 size={14} /> Clear completed
@@ -816,6 +821,30 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Phone: flat Active / Failed sections (mock) */}
+          {([['Active', flatActive, `${activeCount} downloading · ${queuedCount} queued · ${pausedCount} paused`], ['Failed', flatFailed, `${flatFailed.length} failed`]] as const).map(([label, items, sub]) =>
+            items.length > 0 && (
+              <div key={label} className="border border-[var(--color-glass-border)] rounded-[var(--radius-lg)] overflow-hidden">
+                <div className="px-3 py-3 bg-white/[0.04]">
+                  <b className="block text-[0.95rem]">{label}</b>
+                  <small className="text-[0.8rem] text-[var(--color-text-muted)]">{sub}</small>
+                </div>
+                {items.map((download) => (
+                  <DownloadItem
+                    key={download.id}
+                    download={download}
+                    onCancel={handleCancel}
+                    onDelete={handleDelete}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onPlay={handlePlayEpisode}
+                    extractQuality={extractQuality}
+                    formatBytes={formatBytes}
+                  />
+                ))}
+              </div>
+            ))}
+
           {/* Anime groups */}
           {filteredAnimeGroups.map((group) => {
             const isCollapsed = collapsedGroups.has(group.mediaId)
@@ -990,7 +1019,7 @@ export function DownloadPageContent({ onNavigateAway }: DownloadPageContentProps
             )
           })}
 
-          {filteredAnimeGroups.length === 0 && filteredMangaGroups.length === 0 && (
+          {filteredAnimeGroups.length === 0 && filteredMangaGroups.length === 0 && flatActive.length === 0 && flatFailed.length === 0 && (
             <div className="text-center py-12 text-[var(--color-text-muted)]">
               {activeTab === 'completed' && completedCount === 0
                 ? 'Nothing finished yet. Completed downloads will show up here.'

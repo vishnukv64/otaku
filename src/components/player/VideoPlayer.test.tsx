@@ -188,6 +188,34 @@ describe('VideoPlayer HLS error handling', () => {
     expect(await screen.findByText('English')).toBeInTheDocument()
   })
 
+  it('defaults to Japanese audio with English subtitles when the dub locale comes first', async () => {
+    render(
+      <VideoPlayer
+        sources={[{
+          url: 'https://media.example.test/en/master.m3u8',
+          quality: 'Auto',
+          type: 'hls',
+          server: 'Primary',
+          audio_locale: 'en-US',
+        }, {
+          url: 'https://media.example.test/ja/master.m3u8',
+          quality: 'Auto',
+          type: 'hls',
+          server: 'Primary',
+          audio_locale: 'ja-JP',
+          subtitles: [{
+            url: 'https://subs.example.test/en.vtt',
+            label: 'English',
+            language: 'en-US',
+          }],
+        }]}
+      />
+    )
+
+    expect(await screen.findByText('Japanese (Sub)')).toBeInTheDocument()
+    expect(await screen.findByText('English')).toBeInTheDocument()
+  })
+
   it('resets a manual dub choice to sub for the next episode', async () => {
     const sources = [{
       url: 'https://media.example.test/sub/master.m3u8',

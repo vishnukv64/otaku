@@ -519,7 +519,10 @@ pub async fn delete_chapter_download(
         // Delete folder
         let folder_path = PathBuf::from(&download.folder_path);
         if folder_path.exists() {
-            fs::remove_dir_all(&folder_path).await?;
+            if let Err(e) = fs::remove_dir_all(&folder_path).await {
+                // Never strand the DB row on an undeletable folder.
+                log::warn!("Could not delete chapter folder {}: {}", download.folder_path, e);
+            }
         }
     }
 

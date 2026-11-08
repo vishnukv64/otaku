@@ -97,6 +97,16 @@ function createPlayableHlsUrl(
   return createHlsProxyUrl(videoServer, m3u8Url, referrer)
 }
 
+/** Default audio: Japanese with subtitles (sub, or a Japanese locale), else the first offered. */
+export function defaultAudioMode(modes: AudioMode[]): AudioMode | undefined {
+  return (
+    modes.find((m) => m === 'sub') ??
+    modes.find((m) => m === 'ja-JP') ??
+    modes.find((m) => m.toLowerCase().startsWith('ja')) ??
+    modes[0]
+  )
+}
+
 function sourceAudioMode(source: VideoSource): AudioMode | null {
   if (source.audio_locale) return source.audio_locale
   if (!source.audio_type) return null
@@ -361,15 +371,17 @@ export function VideoPlayer({
   )
 
   useEffect(() => {
-    const defaultMode = audioModes.includes('sub') ? 'sub' : audioModes.includes('ja-JP') ? 'ja-JP' : audioModes[0]
+    const defaultMode = defaultAudioMode(audioModes)
     if (defaultMode) setSelectedAudioMode(defaultMode)
     // Reset to the preferred audio mode only when the episode/source set changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, availableSourceSetKey])
 
   useEffect(() => {
+    // Same default, not audioModes[0]: both effects run in one commit, and the first
+    // mode (e.g. KAA's en-US) used to overwrite the Japanese default set just above.
     if (audioModes.length > 0 && !audioModes.includes(selectedAudioMode)) {
-      setSelectedAudioMode(audioModes[0]!)
+      setSelectedAudioMode(defaultAudioMode(audioModes)!)
     }
   }, [audioModes, selectedAudioMode])
 

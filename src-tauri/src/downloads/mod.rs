@@ -1703,7 +1703,7 @@ impl DownloadManager {
     /// Remove completed/failed download from list
     pub async fn remove_download(&self, download_id: &str) -> Result<()> {
         // Delete from database
-        self.delete_from_database(download_id).await.ok();
+        self.delete_from_database(download_id).await?;
 
         let mut downloads = self.downloads.write().await;
         downloads.remove(download_id);
@@ -1746,94 +1746,35 @@ impl DownloadManager {
             .sum()
     }
 
+    /// Remove every download with `status` from memory AND the database.
+    /// The DB is filtered by status directly so rows missing from the
+    /// in-memory map (or failing individually) cannot survive a clear.
+    async fn clear_by_status(&self, status: DownloadStatus, db_status: &str) -> Result<()> {
+        if let Some(pool) = &self.db_pool {
+            sqlx::query("DELETE FROM downloads WHERE status = ?")
+                .bind(db_status)
+                .execute(pool.as_ref())
+                .await
+                .context("Failed to clear downloads from database")?;
+        }
+        let mut downloads = self.downloads.write().await;
+        downloads.retain(|_, d| d.status != status);
+        Ok(())
+    }
+
     /// Clear completed downloads from list (doesn't delete files)
     pub async fn clear_completed(&self) -> Result<()> {
-        // Get IDs of completed downloads
-        let completed_ids: Vec<String> = {
-            let downloads = self.downloads.read().await;
-            downloads
-                .iter()
-                .filter(|(_, d)| d.status == DownloadStatus::Completed)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        // Delete from database
-        if let Some(pool) = &self.db_pool {
-            for id in &completed_ids {
-                sqlx::query("DELETE FROM downloads WHERE id = ?")
-                    .bind(id)
-                    .execute(pool.as_ref())
-                    .await
-                    .ok();
-            }
-        }
-
-        // Remove from memory
-        let mut downloads = self.downloads.write().await;
-        downloads.retain(|_, d| d.status != DownloadStatus::Completed);
-        log::debug!("Cleared {} completed downloads from list", completed_ids.len());
-        Ok(())
+        self.clear_by_status(DownloadStatus::Completed, "completed").await
     }
 
     /// Clear failed downloads from list
     pub async fn clear_failed(&self) -> Result<()> {
-        // Get IDs of failed downloads
-        let failed_ids: Vec<String> = {
-            let downloads = self.downloads.read().await;
-            downloads
-                .iter()
-                .filter(|(_, d)| d.status == DownloadStatus::Failed)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        // Delete from database
-        if let Some(pool) = &self.db_pool {
-            for id in &failed_ids {
-                sqlx::query("DELETE FROM downloads WHERE id = ?")
-                    .bind(id)
-                    .execute(pool.as_ref())
-                    .await
-                    .ok();
-            }
-        }
-
-        // Remove from memory
-        let mut downloads = self.downloads.write().await;
-        downloads.retain(|_, d| d.status != DownloadStatus::Failed);
-        log::debug!("Cleared {} failed downloads from list", failed_ids.len());
-        Ok(())
+        self.clear_by_status(DownloadStatus::Failed, "failed").await
     }
 
     /// Clear cancelled downloads from list
     pub async fn clear_cancelled(&self) -> Result<()> {
-        // Get IDs of cancelled downloads
-        let cancelled_ids: Vec<String> = {
-            let downloads = self.downloads.read().await;
-            downloads
-                .iter()
-                .filter(|(_, d)| d.status == DownloadStatus::Cancelled)
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        // Delete from database
-        if let Some(pool) = &self.db_pool {
-            for id in &cancelled_ids {
-                sqlx::query("DELETE FROM downloads WHERE id = ?")
-                    .bind(id)
-                    .execute(pool.as_ref())
-                    .await
-                    .ok();
-            }
-        }
-
-        // Remove from memory
-        let mut downloads = self.downloads.write().await;
-        downloads.retain(|_, d| d.status != DownloadStatus::Cancelled);
-        log::debug!("Cleared {} cancelled downloads from list", cancelled_ids.len());
-        Ok(())
+        self.clear_by_status(DownloadStatus::Cancelled, "cancelled").await
     }
 
     /// Delete a downloaded file and remove from list
@@ -1853,7 +1794,8 @@ impl DownloadManager {
                     log::debug!("Download file already missing: {}", path);
                 }
                 Err(e) => {
-                    return Err(e).with_context(|| format!("Failed to delete file: {}", path));
+                    // Never let an undeletable/odd path (directory, perms) strand the row.
+                    log::warn!("Could not delete download file {}: {}", path, e);
                 }
             }
             Self::remove_subtitle_sidecars(&path).await;
@@ -2048,6 +1990,33 @@ mod tests {
         .expect("create downloads");
 
         pool
+    }
+
+    #[tokio::test]
+    async fn remove_and_clear_delete_db_rows_even_when_file_missing_or_not_in_memory() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let missing = temp_dir.path().join("gone.otaku").to_string_lossy().to_string();
+        let pool = setup_downloads_pool().await;
+        for (id, ep, status) in [("d1", "e1", "failed"), ("d2", "e2", "failed")] {
+            sqlx::query("INSERT INTO downloads (id, media_id, episode_id, file_path, status) VALUES (?, 'm', ?, ?, ?)")
+                .bind(id).bind(ep).bind(&missing).bind(status)
+                .execute(&pool).await.expect("insert");
+        }
+        let manager = DownloadManager::new(temp_dir.path().to_path_buf())
+            .with_database(Arc::new(pool.clone()));
+        manager.load_from_database().await.expect("load");
+
+        manager.delete_download("d1").await.expect("delete with missing file");
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM downloads WHERE id = 'd1'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0);
+
+        // d2 dropped from memory only: clear_failed must still purge the DB row.
+        manager.downloads.write().await.remove("d2");
+        manager.clear_failed().await.expect("clear failed");
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM downloads")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0);
     }
 
     #[tokio::test]
