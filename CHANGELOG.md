@@ -5,6 +5,25 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-11-08
+
+### Added
+- **KickAssAnime provider** (default): search, episodes with thumbnails, titles, synopses and durations, multi-audio (Japanese, English, Spanish), seek-bar previews, and downloads that include the separate audio track.
+- **AniList fallback** for everything that used Jikan (schedule, details, search, browse, seasons, top, genres, home rows, manga) while Jikan is down.
+- **Phone redesign** built from approved mocks: 5-tab bar and You hub, full-screen detail pages, bottom-sheet pickers, player gestures (double-tap skip, brightness and volume, swipe up for episodes and down for the mini player), rotate button with portrait-only outside the player, PiP and AirPlay, and a redesigned reader, Downloads page and settings.
+- **Pair & sync** between iPhone and Mac by QR code over the Praxis relay and the local network: watch and read progress, library and tags sync both ways, including history from before pairing.
+- **Skip Intro / Skip Outro** from AniSkip intervals.
+- **Find on provider** picker for shows the title matcher can't place automatically; the pick is remembered per show.
+- **18+ mode** (off by default, age-confirmed) with the hstream.moe provider and DASH playback.
+- English titles in every list and search.
+
+### Fixed
+- Downloaded episodes now play from local storage instead of streaming. Route params were numbers, stale loads overwrote the local source, and iOS container moves made saved paths look missing.
+- Clearing failed or finished downloads works even when the files are already gone.
+- Title matching resolves any exact match on Japanese, romaji, English or alternative titles.
+- Japanese audio with English subtitles is the default; subtitles on older KickAssAnime episodes are found again.
+- iOS 27: the app adopts the UIScene lifecycle (Tauri 2.12), which fixes a crash at launch.
+
 ## [1.6.2] - 2026-07-26
 
 ### Fixed
