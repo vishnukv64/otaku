@@ -3,7 +3,7 @@
  * banner, dates. Jikan/AniList data wins; callers use these only to fill gaps.
  */
 import { useEffect, useState } from 'react'
-import type { MediaDetails } from '@/types/extension'
+import type { Episode, MediaDetails } from '@/types/extension'
 import { getAnimeDetails } from '@/utils/tauri-commands'
 
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
@@ -98,4 +98,26 @@ export function useProviderExtras(extId?: string | null, providerMediaId?: strin
     }
   }, [key, extId, providerMediaId])
   return loaded?.key === key ? loaded.data : null
+}
+
+const GENERIC_TITLE = /^(ep(isode)?\.?\s*)?\d+(\.\d+)?$/i
+
+/**
+ * Fill MAL/AniList episodes with the streaming provider's per-episode data, by number:
+ * stills, real titles (when ours is just "Episode N") and runtimes. Ours wins otherwise.
+ */
+export function withProviderEpisodes(base: Episode[], provider?: Episode[] | null): Episode[] {
+  if (!provider?.length) return base
+  const byNumber = new Map(provider.map((e) => [e.number, e]))
+  return base.map((e) => {
+    const p = byNumber.get(e.number)
+    if (!p) return e
+    const generic = !e.title || GENERIC_TITLE.test(e.title.trim())
+    return {
+      ...e,
+      title: generic && p.title && !GENERIC_TITLE.test(p.title.trim()) ? p.title : e.title,
+      thumbnail: e.thumbnail || p.thumbnail,
+      duration: e.duration ?? p.duration,
+    }
+  })
 }

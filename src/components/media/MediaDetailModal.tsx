@@ -8,8 +8,15 @@
  * - Action buttons (Watch, Add to List)
  */
 
-import { audioSummary, countdownFromBroadcast, formatBroadcast, formatDateRange, useProviderExtras } from '@/utils/providerExtras'
-import { useEffect, useState, useRef } from 'react'
+import {
+  audioSummary,
+  countdownFromBroadcast,
+  formatBroadcast,
+  formatDateRange,
+  useProviderExtras,
+  withProviderEpisodes,
+} from '@/utils/providerExtras'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   X,
@@ -291,6 +298,8 @@ function MediaDetailModalDesktop({
   const [downloadProviderMediaId, setDownloadProviderMediaId] = useState<string | null>(null)
   const kaa = useProviderExtras(downloadExtId, downloadProviderMediaId)
   const kaaCountdown = kaa?.broadcast ? countdownFromBroadcast(kaa.broadcast) : null
+  // Grid view: provider stills and real titles over MAL's bare "Episode N".
+  const gridEpisodes = useMemo(() => withProviderEpisodes(details?.episodes ?? [], kaa?.episodes), [details, kaa])
   const kaaFacts = (
     [
       ['Audio', audioSummary(kaa?.audio_locales)],
@@ -2295,7 +2304,7 @@ function MediaDetailModalDesktop({
                     )}
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                      {details.episodes
+                      {gridEpisodes
                         .slice(
                           episodePage * EPISODES_PER_PAGE,
                           (episodePage + 1) * EPISODES_PER_PAGE

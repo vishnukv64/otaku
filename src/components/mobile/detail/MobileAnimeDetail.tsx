@@ -2,7 +2,14 @@
  * Phone anime detail (mock: design/files/detail.html).
  * Same props and data logic as MediaDetailModal; rendered as a pushed full screen.
  */
-import { audioSummary, countdownFromBroadcast, formatBroadcast, formatDateRange, useProviderExtras } from '@/utils/providerExtras'
+import {
+  audioSummary,
+  countdownFromBroadcast,
+  formatBroadcast,
+  formatDateRange,
+  useProviderExtras,
+  withProviderEpisodes,
+} from '@/utils/providerExtras'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -506,7 +513,7 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
     }
   }, [tab, isOpen, details, media.id])
 
-  const episodes = useMemo(() => details?.episodes ?? [], [details])
+  const episodes = useMemo(() => withProviderEpisodes(details?.episodes ?? [], kaa?.episodes), [details, kaa])
   const lastEp = useMemo(() => episodes.reduce((m, e) => Math.max(m, e.number), 0), [episodes])
   const ranges = useMemo(() => chunkRanges(episodes.length, RANGE_SIZE), [episodes.length])
   const range = ranges[Math.min(rangeIdx, Math.max(0, ranges.length - 1))]
