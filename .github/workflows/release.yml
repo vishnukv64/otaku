@@ -367,7 +367,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: pnpm exec tauri android build --apk true --target aarch64
+        run: pnpm exec tauri android build --apk --target aarch64
 
       - name: Upload APK to release
         uses: actions/github-script@v7
