@@ -110,10 +110,46 @@ impl VideoServer {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         log::debug!("Video server starting on port {}", self.port);
 
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-        axum::serve(listener, app).await?;
+        // iOS reclaims an app's listening sockets while it is suspended (locked or
+        // backgrounded). axum keeps accepting on the dead socket, so every player
+        // request then fails (shaka 1002, hls.js network errors) until a relaunch.
+        // Rebind the same port (the frontend cached it) as soon as it stops answering.
+        let mut listener = tokio::net::TcpListener::bind(addr).await?;
+        loop {
+            tokio::select! {
+                result = axum::serve(listener, app.clone()) => result?,
+                _ = wait_until_unreachable(addr) => {
+                    log::warn!("Video server port {} stopped answering; rebinding", addr.port());
+                }
+            }
+            listener = loop {
+                match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => break l,
+                    Err(e) => {
+                        log::warn!("Video server rebind failed: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            };
+        }
+    }
+}
 
-        Ok(())
+/// Resolves once `addr` refuses connections twice in a row (checked every 2s).
+async fn wait_until_unreachable(addr: SocketAddr) {
+    let mut misses = 0;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let ok = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        .is_ok_and(|r| r.is_ok());
+        misses = if ok { 0 } else { misses + 1 };
+        if misses >= 2 {
+            return;
+        }
     }
 }
 
@@ -823,6 +859,21 @@ async fn sniff_obfuscated_file_type(file_path: &std::path::Path) -> &'static str
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn detects_a_port_that_stopped_answering() {
+        use std::time::Duration;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Still listening: never reported.
+        let alive = tokio::time::timeout(Duration::from_secs(5), super::wait_until_unreachable(addr)).await;
+        assert!(alive.is_err());
+        // Listener gone (what iOS does to a suspended app): reported within two checks.
+        drop(listener);
+        tokio::time::timeout(Duration::from_secs(6), super::wait_until_unreachable(addr))
+            .await
+            .expect("dead port not detected");
+    }
+
     #[test]
     fn plain_ts_segment_named_jpg_is_typed_mp2t() {
         assert_eq!(super::plain_segment_type(&[0x47, 0x40]), Some("video/mp2t"));
