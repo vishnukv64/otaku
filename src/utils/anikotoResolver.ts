@@ -169,6 +169,30 @@ function tokenScore(a: string, b: string): number {
   return union > 0 ? intersection / union : 0
 }
 
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    let diag = row[0]
+    row[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const up = row[j]
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1))
+      diag = up
+    }
+  }
+  return row[b.length]
+}
+
+const digitsOf = (value: string) => (value.match(/\d+/g) || []).join(' ')
+
+// Same long title spelled slightly differently ("Russia"/"Tsuyu", "Zanmai"/"Sanmai",
+// "ロシア"/"露"). Short titles and differing numbers (sequels) never count.
+function nearlySameTitle(a: string, b: string): boolean {
+  const longer = Math.max(a.length, b.length)
+  if (Math.min(a.length, b.length) < 20 || digitsOf(a) !== digitsOf(b)) return false
+  return 1 - editDistance(a, b) / longer >= 0.88
+}
+
 function bestTitleScore(targets: string[], candidates: string[]): number {
   let best = 0
 
@@ -181,6 +205,7 @@ function bestTitleScore(targets: string[], candidates: string[]): number {
       if (normalizedTarget === normalizedCandidate) best = Math.max(best, 120)
       if (compactTitle(target) === compactTitle(candidate)) best = Math.max(best, 115)
       if (stripSeason(target) === stripSeason(candidate)) best = Math.max(best, 90)
+      if (nearlySameTitle(normalizedTarget, normalizedCandidate)) best = Math.max(best, 85)
 
       if (normalizedTarget.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedTarget)) {
         const shorter = Math.min(normalizedTarget.length, normalizedCandidate.length)
@@ -303,5 +328,30 @@ export async function resolveAnikotoSlug(
   // from "no match".
   if (!anySucceeded && lastError) throw lastError
 
+  const best = pickBestAnikotoMatch(details, [...byId.values()])
+  if (best) return best
+
+  // Full titles found nothing usable: provider search is substring-based, so a
+  // differently spelled title only shows up for its opening words.
+  for (const query of buildPrefixQueries(details)) {
+    try {
+      const result = await search(query)
+      for (const item of result.results || []) {
+        if (item.id && !byId.has(item.id)) byId.set(item.id, { ...item, query })
+      }
+    } catch {
+      continue
+    }
+  }
   return pickBestAnikotoMatch(details, [...byId.values()])
+}
+
+/** First two words of each romaji/English title, for providers that miss on full titles. */
+export function buildPrefixQueries(details: MediaDetails): string[] {
+  return dedupe(
+    [details.title, details.english_name].map((t) => {
+      const words = normalizeTitle(t || '').split(' ')
+      return words.length > 2 && words.slice(0, 2).join(' ').length >= 8 ? words.slice(0, 2).join(' ') : ''
+    }),
+  )
 }

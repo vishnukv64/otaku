@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { MediaDetails, SearchResult } from '@/types/extension'
-import { buildAnikotoSearchQueries, pickBestAnikotoMatch, scoreAnikotoCandidate } from './anikotoResolver'
+import {
+  buildAnikotoSearchQueries,
+  pickBestAnikotoMatch,
+  resolveAnikotoSlug,
+  scoreAnikotoCandidate,
+} from './anikotoResolver'
 
 function details(overrides: Partial<MediaDetails>): MediaDetails {
   return {
@@ -142,6 +147,43 @@ describe('Anikoto resolver', () => {
         { title: 'Mugen Ressha-hen', english_name: undefined, type: 'Movie', year: 2020 },
         [result({ id: 'tv', title: 'Mugen Ressha-hen', media_type: 'tv', year: 2021 })],
       )).toBeUndefined()
+    })
+  })
+
+  describe('near-identical long titles', () => {
+    const muttsuri = details({
+      title: 'Muttsuri Dosukebe Russia Gibo Shimai no Honshitsu Minuite Sex Zanmai',
+      english_name: undefined,
+      native_name: 'むっつりドスケベロシア義母姉妹の本質見抜いてセックス三昧',
+      type: 'OVA',
+      episode_count: 2,
+    })
+    const hstream = result({
+      id: 'muttsuri-dosukebe-tsuyu-gibo-shimai-no-honshitsu-minuite-sex-sanmai',
+      title: 'Muttsuri Dosukebe Tsuyu Gibo Shimai no Honshitsu Minuite Sex Sanmai',
+      media_type: 'OVA',
+      available_episodes: 2,
+    })
+
+    it('matches a provider spelling a word or two differently', () => {
+      expect(pickBestAnikotoMatch(muttsuri, [hstream])?.id).toBe(hstream.id)
+    })
+
+    it('never matches a numbered sequel or an unrelated title that way', () => {
+      expect(pickBestAnikotoMatch(muttsuri, [{ ...hstream, title: hstream.title + ' 2' }])).toBeNull()
+      expect(pickBestAnikotoMatch(details({ title: 'Kanojo Okarishimasu', english_name: undefined }), [
+        result({ id: 'x', title: 'Kanojo mo Kanojo', media_type: 'TV', available_episodes: 12 }),
+      ])).toBeNull()
+    })
+
+    it('falls back to the opening words when full-title searches find nothing', async () => {
+      const queries: string[] = []
+      const search = async (q: string) => {
+        queries.push(q)
+        return { results: q === 'muttsuri dosukebe' ? [hstream] : [], has_next_page: false }
+      }
+      expect((await resolveAnikotoSlug(muttsuri, search))?.id).toBe(hstream.id)
+      expect(queries[queries.length - 1]).toBe('muttsuri dosukebe')
     })
   })
 })

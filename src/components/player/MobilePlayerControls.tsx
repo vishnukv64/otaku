@@ -368,6 +368,12 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
       <RotateCw size={22} />
     </button>
   )
+  // Back from landscape returns to the portrait player first; only portrait back leaves the page.
+  const goBack = () => {
+    if (isAndroid() && p.isFullscreen) p.toggleFullscreen()
+    else if (!isAndroid() && p.landscape) void invoke('set_orientation', { mode: 'portrait' }).catch(() => {})
+    else p.onBack?.()
+  }
   const togglePip = () => {
     const v = p.videoRef.current as WebkitVideo | null
     if (!v) return
@@ -602,7 +608,7 @@ export function MobilePlayerControls(p: MobilePlayerControlsProps) {
             type="button"
             aria-label="Back"
             className={iconBtn}
-            onClick={shown ? p.onBack : undefined}
+            onClick={shown ? goBack : undefined}
           >
             <ArrowLeft size={22} />
           </button>
