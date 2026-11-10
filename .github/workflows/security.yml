@@ -84,9 +84,13 @@ jobs:
           # Ignore known transitive dependency issues we can't control:
           # - RUSTSEC-2023-0071: rsa timing sidechannel (Tauri's TLS stack)
           # - RUSTSEC-2024-0429: glib unsoundness (Tauri's GTK bindings)
+          # - RUSTSEC-2026-0459: bundled SQLite WAL page-size bug (libsqlite3-sys < 0.39 via sqlx).
+          #   No sqlx release allows libsqlite3-sys >= 0.39 yet (sqlx-sqlite 0.9.0 caps it < 0.38),
+          #   and the app only opens its own database. Drop this once sqlx allows the fix.
           cargo audit \
             --ignore RUSTSEC-2023-0071 \
             --ignore RUSTSEC-2024-0429 \
+            --ignore RUSTSEC-2026-0459 \
             || {
               echo ""
               echo "⚠️  New vulnerabilities found in Rust dependencies!"
