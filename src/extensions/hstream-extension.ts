@@ -74,10 +74,11 @@ const extensionObject = {
     return out;
   },
 
-  // Episode page URL; a series search first if no search has run in this runtime.
+  // Episode page URL. A fresh runtime learns the section from the unfiltered listing
+  // (an empty search): searching the slug's words misses titles like "Junyuu-chuu".
   pageUrl: function(slug, number) {
-    if (!extensionObject.section) extensionObject.searchPage(slug.replace(/-/g, ' '), 1);
-    if (!extensionObject.section) throw new Error('hstream: no search results for ' + slug);
+    if (!extensionObject.section) extensionObject.searchPage('', 1);
+    if (!extensionObject.section) throw new Error('hstream: could not read the episode page path');
     return extensionObject.baseUrl + '/' + extensionObject.section + '/' + slug + '-' + number;
   },
 

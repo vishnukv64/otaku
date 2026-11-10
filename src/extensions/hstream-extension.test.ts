@@ -89,7 +89,7 @@ describe('hstream extension', () => {
     const site = fakeSite()
     loadExtension(site).getSources('overflow::1')
     expect(site.calls.slice(0, 2)).toEqual([
-      'GET https://hstream.moe/search?search=overflow',
+      'GET https://hstream.moe/search?search=',
       'GET https://hstream.moe/watch/overflow-1',
     ])
   })
