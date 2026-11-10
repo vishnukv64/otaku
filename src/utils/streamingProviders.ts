@@ -1,5 +1,6 @@
 import { HSTREAM_EXTENSION } from '@/extensions/hstream-extension'
 import { createAnikotoExtension } from '@/extensions/anikoto-extension'
+import { HAHO_EXTENSION } from '@/extensions/haho-extension'
 import { KAA_EXTENSION } from '@/extensions/kaa-extension'
 import type { StreamingProviderMode } from '@/store/settingsStore'
 
@@ -31,6 +32,12 @@ export function providerForMedia(
 ): StreamingProviderMode {
   return extendedCatalog && media?.restricted === true ? 'hstream' : selected
 }
+
+/**
+ * Automatic fallback for restricted titles hstream has no match for. Not a
+ * StreamingProviderMode: never user-picked, never listed in the picker.
+ */
+export const FALLBACK_PROVIDER = { label: 'haho.moe', extension: HAHO_EXTENSION }
 
 /** Next provider in the list, for the "Try another provider" button. */
 export function nextStreamingProvider(
