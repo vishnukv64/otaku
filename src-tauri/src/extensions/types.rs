@@ -183,6 +183,10 @@ pub struct MediaDetails {
     pub end_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<Broadcast>,
+    /// Restricted title (MAL rating "Rx", or AniList's equivalent flag). With the
+    /// extended catalog enabled, these stream from the extended-catalog provider.
+    #[serde(default)]
+    pub restricted: bool,
 }
 
 /// Weekly broadcast slot; `time` is UTC HH:mm.

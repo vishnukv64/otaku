@@ -401,13 +401,30 @@ function SettingsScreen() {
                 <SettingDropdown
                   title="Streaming Provider"
                   value={settings.streamingProvider}
-                  options={streamingProviders(settings.adultMode)}
+                  options={streamingProviders(settings.extendedCatalog)}
                   onChange={(value) =>
                     settings.updateSettings({
                       streamingProvider: value as typeof settings.streamingProvider,
                     })
                   }
                 />
+              </SettingRow>
+              <SettingRow
+                label="Extended catalog"
+                description="Adds hstream.moe for titles the regular providers don't carry"
+              >
+                {settings.extendedCatalog ? (
+                  <SettingToggle
+                    value
+                    onChange={() => settings.updateSettings({ extendedCatalog: false })}
+                  />
+                ) : (
+                  <DangerButton
+                    onClick={() => settings.updateSettings({ extendedCatalog: true })}
+                    label="Enable"
+                    confirmMessage="The extended catalog is intended for viewers of legal age. Confirm this applies to you and that viewing it is legal where you live."
+                  />
+                )}
               </SettingRow>
               <SettingRow
                 label="Anikoto API Base URL"
@@ -679,26 +696,6 @@ function SettingsScreen() {
                   label="Reset to Defaults"
                   confirmMessage="This will reset all your settings to their default values. Your data and library will not be affected. Continue?"
                 />
-              </SettingRow>
-            </SettingSection>
-
-            <SettingSection title="Content" description="Adult content is hidden unless you opt in">
-              <SettingRow
-                label="18+ Providers"
-                description="Show adult streaming providers (hstream.moe) in the provider picker"
-              >
-                {settings.adultMode ? (
-                  <SettingToggle
-                    value
-                    onChange={() => settings.updateSettings({ adultMode: false })}
-                  />
-                ) : (
-                  <DangerButton
-                    onClick={() => settings.updateSettings({ adultMode: true })}
-                    label="Enable"
-                    confirmMessage="This enables adult (18+) content providers. Confirm that you are 18 or older and that viewing such content is legal where you live."
-                  />
-                )}
               </SettingRow>
             </SettingSection>
 

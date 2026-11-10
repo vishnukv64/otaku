@@ -1,10 +1,11 @@
-// hstream.moe extension (18+, opt-in via the adultMode setting). Server-rendered
+// hstream.moe extension (opt-in via the extendedCatalog setting). Server-rendered
 // site: search and episode lists are scraped from HTML; the stream comes from a
 // session-bound POST /player/api (XSRF cookie flow) and is DASH only
 // (<domain>/<stream_url>/<720|1080>/manifest.mpd, fMP4 segments, no Referer check).
 //
-// Ids: series = slug, episode = "{slug}::{n}" (page /hentai/{slug}-{n}), the same
-// shape KAA/Anikoto use so watch.tsx resolves it with the shared title resolver.
+// Ids: series = slug, episode = "{slug}::{n}", the same shape KAA/Anikoto use so
+// watch.tsx resolves it with the shared title resolver. Episode pages live at
+// /<section>/{slug}-{n}; the section is read from search results, not hardcoded.
 
 export const HSTREAM_EXTENSION = String.raw`
 const extensionObject = {
@@ -53,20 +54,32 @@ const extensionObject = {
     return !path ? null : path.indexOf('http') === 0 ? path : extensionObject.baseUrl + path;
   },
 
+  // Path segment episode pages live under; learned from the first search result.
+  section: null,
+
   // One entry per episode page found in a search result page: {slug, number, title, thumb}.
   parseSearch: function(html) {
-    const re = /href="https:\/\/hstream\.moe\/hentai\/([a-z0-9-]+?)-(\d+)"[\s\S]{0,1500}?src="([^"]+)"[\s\S]{0,60}?alt="([^"]*)"/g;
+    const re = /href="https:\/\/hstream\.moe\/([a-z]+)\/([a-z0-9-]+?)-(\d+)"[\s\S]{0,1500}?src="([^"]+)"[\s\S]{0,60}?alt="([^"]*)"/g;
     const out = [];
     let m;
     while ((m = re.exec(html)) !== null) {
+      extensionObject.section = extensionObject.section || m[1];
       out.push({
-        slug: m[1],
-        number: Number(m[2]),
-        title: extensionObject.decode(m[4]).replace(/\s+-\s+\d+\s*$/, ''),
-        thumb: extensionObject.abs(m[3])
+        slug: m[2],
+        number: Number(m[3]),
+        title: extensionObject.decode(m[5]).replace(/\s+-\s+\d+\s*$/, ''),
+        thumb: extensionObject.abs(m[4])
       });
     }
     return out;
+  },
+
+  // Episode page URL. A fresh runtime learns the section from the unfiltered listing
+  // (an empty search): searching the slug's words misses titles like "Junyuu-chuu".
+  pageUrl: function(slug, number) {
+    if (!extensionObject.section) extensionObject.searchPage('', 1);
+    if (!extensionObject.section) throw new Error('hstream: could not read the episode page path');
+    return extensionObject.baseUrl + '/' + extensionObject.section + '/' + slug + '-' + number;
   },
 
   searchPage: function(query, page) {
@@ -113,12 +126,12 @@ const extensionObject = {
   },
 
   meta: function(slug, number) {
-    const html = extensionObject.request(extensionObject.baseUrl + '/hentai/' + slug + '-' + number).body;
+    const html = extensionObject.request(extensionObject.pageUrl(slug, number)).body;
     const og = function(name) {
       const m = html.match(new RegExp('property="og:' + name + '" content="([^"]*)"'));
       return m ? extensionObject.decode(m[1]) : null;
     };
-    return { description: og('description'), image: og('image'), uncensored: /uncensored/i.test(og('title') || '') };
+    return { description: og('description'), image: og('image') };
   },
 
   getDetails: (id) => {
@@ -149,7 +162,7 @@ const extensionObject = {
       type: 'OVA',
       season: null,
       episode_duration: null,
-      age_rating: 'R+ (18+)',
+      age_rating: 'Rx',
       audio_locales: ['ja-JP'],
       banner_url: meta.image || null,
       start_date: null,
@@ -164,7 +177,7 @@ const extensionObject = {
 
   // Episode page (session + XSRF cookies, e_id) -> POST /player/api.
   player: function(slug, number) {
-    const pageUrl = extensionObject.baseUrl + '/hentai/' + slug + '-' + number;
+    const pageUrl = extensionObject.pageUrl(slug, number);
     const page = extensionObject.request(pageUrl);
     const id = page.body.match(/id="e_id"[^>]*value="(\d+)"/) || page.body.match(/value="(\d+)"[^>]*id="e_id"/);
     if (!id) throw new Error('hstream: episode id not found on ' + pageUrl);

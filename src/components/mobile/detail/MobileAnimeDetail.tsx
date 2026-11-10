@@ -154,15 +154,15 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const { isOnline } = useNetworkStatus()
   const downloadLocation = useSettingsStore((s) => s.downloadLocation)
   const selectedProvider = useSettingsStore((s) => s.streamingProvider)
-  const adultMode = useSettingsStore((s) => s.adultMode)
+  const extendedCatalog = useSettingsStore((s) => s.extendedCatalog)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
   const anikotoSiteBaseUrl = useSettingsStore((s) => s.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((s) => s.anikotoYotochanBaseUrl)
 
   const [details, setDetails] = useState<MediaDetails | null>(null)
-  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
-  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
+  // Restricted titles go to hstream when the extended catalog is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, extendedCatalog, details)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -213,11 +213,11 @@ export function MobileAnimeDetail({ media, extensionId, isOpen, onClose, onMedia
   const [pickedTitle, setPickedTitle] = useState<string | null>(null)
   const [matchKey, setMatchKey] = useState(0)
   const providerLabel = streamingProviderLabel(streamingProvider)
-  // Hentai is pinned to hstream in 18+ mode, so switching would do nothing: no button.
+  // Restricted titles are pinned to hstream, so switching would do nothing: no button.
   const providerPinned = streamingProvider !== selectedProvider
   const tryAnotherProvider = providerPinned
     ? undefined
-    : () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
+    : () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, extendedCatalog) })
   const providerResolving = !!details && !bridgeFailed && (!extId || !providerMediaId)
 
   // download picker

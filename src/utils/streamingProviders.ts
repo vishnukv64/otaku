@@ -3,45 +3,41 @@ import { createAnikotoExtension } from '@/extensions/anikoto-extension'
 import { KAA_EXTENSION } from '@/extensions/kaa-extension'
 import type { StreamingProviderMode } from '@/store/settingsStore'
 
-const ALL_PROVIDERS: { value: StreamingProviderMode; label: string; adult?: boolean }[] = [
+const ALL_PROVIDERS: { value: StreamingProviderMode; label: string; extended?: boolean }[] = [
   { value: 'kaa', label: 'KickAssAnime' },
   { value: 'allanime', label: 'AllAnime' },
   { value: 'anikoto', label: 'Anikoto' },
-  { value: 'hstream', label: 'hstream.moe (18+)', adult: true },
+  { value: 'hstream', label: 'hstream.moe', extended: true },
 ]
 
-/** Providers the picker offers; 18+ ones exist only while adultMode is on. */
-export function streamingProviders(adultMode: boolean) {
-  return ALL_PROVIDERS.filter((p) => adultMode || !p.adult)
+/** Providers the picker offers; extended-catalog ones only while that setting is on. */
+export function streamingProviders(extendedCatalog: boolean) {
+  return ALL_PROVIDERS.filter((p) => extendedCatalog || !p.extended)
 }
 
 export function streamingProviderLabel(provider: StreamingProviderMode): string {
   return ALL_PROVIDERS.find((p) => p.value === provider)?.label ?? provider
 }
 
-/** Hentai: the genre tag Jikan and AniList both use for explicit titles. */
-export function isHentai(media: { genres?: string[] | null } | null | undefined): boolean {
-  return !!media?.genres?.some((g) => g.toLowerCase() === 'hentai')
-}
-
 /**
- * Provider to use for this show: with 18+ mode on, hentai always streams from hstream
- * (the regular providers carry none of it); everything else uses the user's pick.
+ * Provider to use for this show: with the extended catalog on, restricted titles
+ * always stream from hstream (the regular providers carry none of them);
+ * everything else uses the user's pick.
  */
 export function providerForMedia(
   selected: StreamingProviderMode,
-  adultMode: boolean,
-  media: { genres?: string[] | null } | null | undefined
+  extendedCatalog: boolean,
+  media: { restricted?: boolean } | null | undefined
 ): StreamingProviderMode {
-  return adultMode && isHentai(media) ? 'hstream' : selected
+  return extendedCatalog && media?.restricted === true ? 'hstream' : selected
 }
 
 /** Next provider in the list, for the "Try another provider" button. */
 export function nextStreamingProvider(
   provider: StreamingProviderMode,
-  adultMode: boolean
+  extendedCatalog: boolean
 ): StreamingProviderMode {
-  const list = streamingProviders(adultMode)
+  const list = streamingProviders(extendedCatalog)
   const i = list.findIndex((p) => p.value === provider)
   return list[(i + 1) % list.length].value
 }

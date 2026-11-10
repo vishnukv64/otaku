@@ -220,13 +220,13 @@ function MediaDetailModalDesktop({
   const customDownloadLocation = useSettingsStore((state) => state.downloadLocation)
   const selectedProvider = useSettingsStore((state) => state.streamingProvider)
   const anikotoApiBaseUrl = useSettingsStore((state) => state.anikotoApiBaseUrl)
-  const adultMode = useSettingsStore((state) => state.adultMode)
+  const extendedCatalog = useSettingsStore((state) => state.extendedCatalog)
   const updateSettings = useSettingsStore((state) => state.updateSettings)
   const anikotoSiteBaseUrl = useSettingsStore((state) => state.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((state) => state.anikotoYotochanBaseUrl)
   const [details, setDetails] = useState<MediaDetails | null>(null)
-  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
-  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
+  // Restricted titles go to hstream when the extended catalog is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, extendedCatalog, details)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inLibrary, setInLibrary] = useState(false)
@@ -2163,12 +2163,12 @@ function MediaDetailModalDesktop({
                         >
                           Find on {downloadProviderLabel}
                         </button>
-                        {/* Hentai is pinned to hstream in 18+ mode: switching would do nothing. */}
+                        {/* Restricted titles are pinned to hstream: switching would do nothing. */}
                         {streamingProvider === selectedProvider && (
                           <button
                             onClick={() =>
                               updateSettings({
-                                streamingProvider: nextStreamingProvider(streamingProvider, adultMode),
+                                streamingProvider: nextStreamingProvider(streamingProvider, extendedCatalog),
                               })
                             }
                             className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium"
@@ -2190,7 +2190,7 @@ function MediaDetailModalDesktop({
                         onPicked={() => setMatchKey((k) => k + 1)}
                         onTryAnother={
                           streamingProvider === selectedProvider
-                            ? () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, adultMode) })
+                            ? () => updateSettings({ streamingProvider: nextStreamingProvider(streamingProvider, extendedCatalog) })
                             : undefined
                         }
                       />

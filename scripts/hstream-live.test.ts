@@ -37,4 +37,11 @@ describe.skipIf(!process.env.HSTREAM_LIVE)('hstream live', () => {
     expect(code(base + 'chunks/init-stream0.webp', ['-r', '0-15'])).toMatch(/^20[06]$/)
     expect(code(base + 'chunks/chunk-stream0-00001.webp', ['-r', '0-15'])).toMatch(/^20[06]$/)
   }, 60000)
+
+  // A fresh runtime (no prior search) must still find the episode page, also for
+  // slugs whose words don't search back to the show (hyphenated "Junyuu-chuu").
+  it.each(['ane-wa-yanmama-junyuu-chuu::1', 'overflow::1'])('getSources on a fresh runtime: %s', (id) => {
+    const { sources } = loadExtension(liveFetch).getSources(id)
+    expect(sources.map((s: { resolution: number }) => s.resolution)).toEqual([1080, 720])
+  }, 60000)
 })
