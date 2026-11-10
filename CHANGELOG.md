@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pair & sync** between iPhone and Mac by QR code over the Praxis relay and the local network: watch and read progress, library and tags sync both ways, including history from before pairing.
 - **Skip Intro / Skip Outro** from AniSkip intervals.
 - **Find on provider** picker for shows the title matcher can't place automatically; the pick is remembered per show.
-- **18+ mode** (off by default, age-confirmed) with the hstream.moe provider and DASH playback.
+- **Extended catalog** (off by default, confirmation required) with the hstream.moe provider and DASH playback.
 - English titles in every list and search.
 
 ### Fixed

@@ -17,11 +17,11 @@ function loadExtension(fetchImpl: Fetch) {
 
 const card = (slug: string, n: number) => `
   <a
-    href="https://hstream.moe/hentai/${slug}-${n}"
+    href="https://hstream.moe/watch/${slug}-${n}"
     class="block"
   >
     <img
-      src="/images/hentai/${slug}/gallery-ep-${n}-0-thumbnail.webp"
+      src="/images/watch/${slug}/gallery-ep-${n}-0-thumbnail.webp"
       alt="Over &amp; Flow - ${n}"
       loading="lazy"
     />
@@ -36,7 +36,7 @@ function fakeSite(): Fetch & { calls: string[] } {
   const fn = ((url, options) => {
     calls.push(`${options.method} ${url}`)
     if (url.includes('/search?')) return reply(searchHtml(false))
-    if (url.endsWith('/hentai/overflow-1')) {
+    if (url.endsWith('/watch/overflow-1')) {
       return reply(
         '<meta property="og:description" content="A &quot;story&quot;" /><meta property="og:image" content="https://x/i.webp" /><input id="e_id" type="hidden" value="79" />',
         ['XSRF-TOKEN=abc%3D%3D; path=/; samesite=lax', 'hstream_session=sess1; path=/; httponly']
@@ -47,7 +47,7 @@ function fakeSite(): Fetch & { calls: string[] } {
       expect(JSON.parse(options.body!)).toEqual({ episode_id: '79' })
       expect(options.headers!['X-XSRF-TOKEN']).toBe('abc==')
       expect(options.headers!['Cookie']).toBe('XSRF-TOKEN=abc%3D%3D; hstream_session=sess1')
-      expect(options.headers!['Referer']).toBe('https://hstream.moe/hentai/overflow-1')
+      expect(options.headers!['Referer']).toBe('https://hstream.moe/watch/overflow-1')
       return reply(JSON.stringify({ stream_url: '2021/Overflow/E01', stream_domains: ['https://dead.test', 'https://cdn.test/'], extra_subtitles: [] }))
     }
     if (new URL(url).host === 'dead.test') return JSON.stringify({ status: 503, body: '' })
@@ -65,7 +65,7 @@ describe('hstream extension', () => {
       ['overflow', 'Over & Flow', 2],
       ['other-show', 'Over & Flow', 1],
     ])
-    expect(res.results[0].cover_url).toBe('https://hstream.moe/images/hentai/overflow/gallery-ep-2-0-thumbnail.webp')
+    expect(res.results[0].cover_url).toBe('https://hstream.moe/images/watch/overflow/gallery-ep-2-0-thumbnail.webp')
     expect(res.has_next_page).toBe(false)
   })
 
@@ -83,6 +83,15 @@ describe('hstream extension', () => {
     ])
     expect(sources[0].url).toBe('https://cdn.test/2021/Overflow/E01/1080/manifest.mpd')
     expect(sources[0].referrer).toBe('https://hstream.moe/')
+  })
+
+  it('reads the episode-page section from search results instead of hardcoding it', () => {
+    const site = fakeSite()
+    loadExtension(site).getSources('overflow::1')
+    expect(site.calls.slice(0, 2)).toEqual([
+      'GET https://hstream.moe/search?search=overflow',
+      'GET https://hstream.moe/watch/overflow-1',
+    ])
   })
 
   it('getSources returns empty on a malformed id or failure', () => {

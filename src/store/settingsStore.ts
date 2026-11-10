@@ -37,8 +37,8 @@ interface SettingsData {
 
   // Content
   nsfwFilter: boolean
-  /** Opt-in 18+ providers (hstream). Off by default; enabled after an age confirmation. */
-  adultMode: boolean
+  /** Opt-in extended catalog (the hstream provider). Off by default; enabled after a confirmation. */
+  extendedCatalog: boolean
 
   // Downloads
   downloadLocation: string
@@ -78,7 +78,7 @@ const defaultSettings: SettingsData = {
 
   // Content
   nsfwFilter: false,
-  adultMode: false,
+  extendedCatalog: false,
 
   // Downloads
   downloadLocation: '',
@@ -117,7 +117,7 @@ const extractSettingsData = (state: SettingsState): SettingsData => ({
   gridDensity: state.gridDensity,
   showContinueWatching: state.showContinueWatching,
   nsfwFilter: state.nsfwFilter,
-  adultMode: state.adultMode,
+  extendedCatalog: state.extendedCatalog,
   downloadLocation: state.downloadLocation,
   defaultDownloadQuality: state.defaultDownloadQuality,
   maxConcurrentDownloads: state.maxConcurrentDownloads,
@@ -140,9 +140,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   // Update multiple settings at once
   updateSettings: (rawSettings) => {
-    // Turning adult mode off also drops an 18+ provider selection.
+    // Turning the extended catalog off also drops an extended-catalog provider selection.
     const newSettings =
-      rawSettings.adultMode === false && get().streamingProvider === 'hstream'
+      rawSettings.extendedCatalog === false && get().streamingProvider === 'hstream'
         ? { ...rawSettings, streamingProvider: defaultSettings.streamingProvider }
         : rawSettings
     set((state) => ({ ...state, ...newSettings }))
@@ -178,7 +178,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           !providerOutdated &&
           parsed.streamingProvider &&
           STREAMING_PROVIDER_MODES.includes(parsed.streamingProvider) &&
-          (parsed.streamingProvider !== 'hstream' || parsed.adultMode === true)
+          (parsed.streamingProvider !== 'hstream' || parsed.extendedCatalog === true)
             ? parsed.streamingProvider
             : defaultSettings.streamingProvider
         // Merge with defaults to handle new settings added in updates

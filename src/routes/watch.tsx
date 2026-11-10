@@ -133,9 +133,9 @@ function WatchPage() {
   const pipData = usePipStore((s) => s.data)
   const clearPipExpandTime = usePipStore((s) => s.clearExpandTime)
   const selectedProvider = useSettingsStore((s) => s.streamingProvider)
-  const adultMode = useSettingsStore((s) => s.adultMode)
-  // Hentai goes to hstream when 18+ mode is on; everything else uses the user's pick.
-  const streamingProvider = providerForMedia(selectedProvider, adultMode, details)
+  const extendedCatalog = useSettingsStore((s) => s.extendedCatalog)
+  // Restricted titles go to hstream when the extended catalog is on; everything else uses the user's pick.
+  const streamingProvider = providerForMedia(selectedProvider, extendedCatalog, details)
   const anikotoApiBaseUrl = useSettingsStore((s) => s.anikotoApiBaseUrl)
   const anikotoSiteBaseUrl = useSettingsStore((s) => s.anikotoSiteBaseUrl)
   const anikotoYotochanBaseUrl = useSettingsStore((s) => s.anikotoYotochanBaseUrl)
@@ -284,7 +284,7 @@ function WatchPage() {
 
       setDetails(result)
       // `details` state is not updated yet in this closure: decide from the fresh result.
-      const streamingProvider = providerForMedia(selectedProvider, adultMode, result)
+      const streamingProvider = providerForMedia(selectedProvider, extendedCatalog, result)
       setAllanimeExtId(null)
       setAllanimeId(null)
       setAnikotoExtId(null)
@@ -429,7 +429,7 @@ function WatchPage() {
     malId,
     initialEpisodeId,
     selectedProvider,
-    adultMode,
+    extendedCatalog,
     anikotoApiBaseUrl,
     anikotoSiteBaseUrl,
     anikotoYotochanBaseUrl,
@@ -778,7 +778,7 @@ function WatchPage() {
   const updatePlayerSettings = usePlayerStore((s) => s.updateSettings)
   const currentIdx = details?.episodes.findIndex((e) => e.id === currentEpisodeId) ?? -1
   const nextEpisode = currentIdx >= 0 ? details?.episodes[currentIdx + 1] : undefined
-  const alternateProvider = nextStreamingProvider(streamingProvider, adultMode)
+  const alternateProvider = nextStreamingProvider(streamingProvider, extendedCatalog)
   const alternateProviderLabel = streamingProviderLabel(alternateProvider)
   const switchProvider = () => {
     setError(null)
@@ -786,7 +786,7 @@ function WatchPage() {
     setLoading(true)
     updateSettings({ streamingProvider: alternateProvider })
   }
-  // Hentai is pinned to hstream in 18+ mode, so switching would do nothing: no button.
+  // Restricted titles are pinned to hstream, so switching would do nothing: no button.
   const providerSwitchButton = streamingProvider !== selectedProvider ? null : (
     <button
       onClick={switchProvider}

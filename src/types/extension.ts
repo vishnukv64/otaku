@@ -116,6 +116,8 @@ export interface MediaDetails {
   end_date?: string
   /** Weekly broadcast slot; time is UTC HH:mm. */
   broadcast?: { day: string; time: string }
+  /** Restricted title (MAL rating Rx or AniList's flag); see providerForMedia. */
+  restricted?: boolean
   /** MAL rank */
   rank?: number
   /** MAL popularity rank */

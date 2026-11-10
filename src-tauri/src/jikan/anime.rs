@@ -212,6 +212,7 @@ fn jikan_anime_to_media_details(anime: &JikanAnime, episodes: Vec<Episode>, last
         aired_start,
         last_update_end: compute_last_update_end(anime, &last_aired),
         broadcast_interval: compute_broadcast_interval(anime, &last_aired),
+        restricted: anime.rating.as_deref().is_some_and(|r| r.starts_with("Rx")),
         age_rating: None,
         audio_locales: None,
         banner_url: None,
@@ -896,6 +897,7 @@ const ANILIST_DETAILS_QUERY: &str = r#"query ($idMal: Int) {
     trailer { id site }
     description(asHtml: false)
     genres
+    isAdult
     status
     seasonYear
     season
@@ -982,6 +984,7 @@ fn anilist_media_to_details(mal_id: i64, media: &serde_json::Value) -> Option<Me
             })
         }),
         broadcast_interval: last_update_end.as_ref().map(|_| (WEEK_SECS * 1000) as u64),
+        restricted: media.get("isAdult").and_then(|v| v.as_bool()).unwrap_or(false),
         age_rating: None,
         audio_locales: None,
         banner_url: None,

@@ -146,7 +146,7 @@ function titleVariants(details: MediaDetails): string[] {
   ])
 }
 
-// Provider-side labels such as "(Uncensored)" or "(Dub)" are not part of the title.
+// Provider-side labels such as "(Dub)" or "(Sub)" are not part of the title.
 function withoutTrailingLabel(value: string | null | undefined): string | undefined {
   return value?.replace(/\s*\([^()]*\)\s*$/, '')
 }
