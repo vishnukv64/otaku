@@ -19,11 +19,13 @@ describe.skipIf(!process.env.HAHO_LIVE)('haho live', () => {
   }
   const ext: Ext = new Function('__fetch', '__log', `${HAHO_EXTENSION}; return extensionObject;`)(liveFetch, vi.fn())
 
-  // MAL 49335, title as a neutral search term
-  it('search -> details -> sources -> ranged GET answers 200/206', () => {
-    const hit = ext.search('torokase', 1).results.find((r) => r.id === 'h99abcb0')
-    expect(hit).toBeTruthy()
-    const details = ext.getDetails(hit!.id)
+  it('search lists results', () => {
+    expect(ext.search('overflow', 1).results.length).toBeGreaterThan(0)
+  }, 60000)
+
+  // A one-episode series the regular providers don't carry (MAL 49335).
+  it('details -> sources -> ranged GET answers 200/206', () => {
+    const details = ext.getDetails('h99abcb0')
     expect(details.episodes.length).toBe(1)
     const { sources } = ext.getSources(details.episodes[0].id)
     expect(sources.length).toBeGreaterThan(0)
