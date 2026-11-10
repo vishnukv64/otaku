@@ -61,6 +61,7 @@ import { resolveProviderSlug } from '@/utils/providerMatch'
 import {
   nextStreamingProvider,
   slugProviderExtension,
+  FALLBACK_PROVIDER,
   streamingProviderLabel,
   providerForMedia,
 } from '@/utils/streamingProviders'
@@ -112,6 +113,8 @@ function WatchPage() {
   const [anikotoExtId, setAnikotoExtId] = useState<string | null>(null)
   const [anikotoSlug, setAnikotoSlug] = useState<string | null>(null)
   const [anikotoResolveError, setAnikotoResolveError] = useState<string | null>(null)
+  /** True when hstream had no match and the fallback provider supplied the slug. */
+  const [usingFallback, setUsingFallback] = useState(false)
   const [providersResolved, setProvidersResolved] = useState(false)
   // Provider (KAA) stills, real titles and runtimes over MAL's bare "Episode N",
   // matched by episode number; the same merge the detail pages use.
@@ -290,6 +293,7 @@ function WatchPage() {
       setAnikotoExtId(null)
       setAnikotoSlug(null)
       setAnikotoResolveError(null)
+      setUsingFallback(false)
       setProvidersResolved(false)
 
       try {
@@ -336,38 +340,52 @@ function WatchPage() {
           anikotoYotochanBaseUrl,
         })
         const providerName = streamingProviderLabel(streamingProvider)
-        if (slugExtension) {
+        /** Resolve the show on one slug provider; returns an error message or null on success. */
+        const resolveOn = async (extension: string, name: string): Promise<string | null> => {
           try {
-            const metadata = await loadExtension(slugExtension)
+            const metadata = await loadExtension(extension)
             setAnikotoExtId(metadata.id)
             const match = await resolveProviderSlug(metadata.id, malId, result, (query) =>
               searchAnime(metadata.id, query, 1)
             )
             const queries = buildAnikotoSearchQueries(result)
             if (match?.id) {
-              console.log(`[Watch] Resolved ${providerName} slug:`, {
+              console.log(`[Watch] Resolved ${name} slug:`, {
                 query: match.query,
                 slug: match.id,
                 title: match.title,
                 score: match.score,
               })
               setAnikotoSlug(match.id)
-              setAnikotoResolveError(null)
-            } else if (queries.length > 0) {
-              setAnikotoResolveError(`No ${providerName} match found for: ${queries.join(', ')}`)
-              console.warn(`[Watch] Could not resolve ${providerName} slug from queries:`, queries)
-            } else if (!queries.length) {
-              setAnikotoResolveError(
-                `No ${providerName} search query available for ${result.title}`
-              )
-              console.warn(`[Watch] No ${providerName} search queries for:`, result.title)
+              return null
             }
+            if (queries.length > 0) {
+              console.warn(`[Watch] Could not resolve ${name} slug from queries:`, queries)
+              return `No ${name} match found for: ${queries.join(', ')}`
+            }
+            console.warn(`[Watch] No ${name} search queries for:`, result.title)
+            return `No ${name} search query available for ${result.title}`
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : typeof err === 'string' ? err : String(err)
-            setAnikotoResolveError(`${providerName} search failed: ${msg}`)
-            console.warn(`[Watch] Failed to resolve ${providerName} slug:`, err)
+            console.warn(`[Watch] Failed to resolve ${name} slug:`, err)
+            return `${name} search failed: ${msg}`
           }
+        }
+        if (slugExtension) {
+          let failure = await resolveOn(slugExtension, providerName)
+          // Restricted titles hstream does not carry: try the fallback provider.
+          if (failure && streamingProvider === 'hstream') {
+            const fallbackFailure = await resolveOn(
+              FALLBACK_PROVIDER.extension,
+              FALLBACK_PROVIDER.label
+            )
+            if (!fallbackFailure) {
+              setUsingFallback(true)
+              failure = null
+            }
+          }
+          setAnikotoResolveError(failure)
         }
       } finally {
         setProvidersResolved(true)
@@ -881,7 +899,7 @@ function WatchPage() {
                 className="mt-3 flex min-h-[48px] w-full items-center justify-between rounded-xl bg-white/10 px-4 text-left text-sm text-white"
               >
                 <span className="truncate">
-                  {streamingProviderLabel(streamingProvider)}
+                  {usingFallback ? FALLBACK_PROVIDER.label : streamingProviderLabel(streamingProvider)}
                   {sources?.sources[0]
                     ? ` · ${[sources.sources[0].server, sources.sources[0].audio_type && audioModeLabel(sources.sources[0].audio_locale ?? sources.sources[0].audio_type), sources.sources[0].type.toUpperCase()].filter(Boolean).join(' · ')}`
                     : ''}
