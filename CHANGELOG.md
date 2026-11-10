@@ -5,6 +5,21 @@ All notable changes to Otaku will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-11-10
+
+### Added
+- Fallback provider: with **Extended catalog** on, titles hstream.moe doesn't carry now play from haho.moe automatically (480p MP4).
+
+### Changed
+- The opt-in provider setting is now **Extended catalog** under Settings → Playback, next to Streaming Provider. Devices that had it on need to switch it on again.
+
+### Fixed
+- Title matching: long titles a provider spells slightly differently (one or two words, or a different kanji) now match, with a prefix-search fallback.
+- Phone player: Back in landscape returns to the portrait player instead of leaving the page.
+- iOS: the local video server rebinds after the phone locks, so streams no longer fail with DASH error 1002 until a relaunch.
+- Back from the player or reader reopens the show's detail screen, whichever page opened it (Home, search, Library, Schedule, Continue Watching).
+- Release builds: the Android job passes `--apk` as a flag (Tauri 2.12).
+
 ## [1.6.4] - 2026-11-08
 
 ### Fixed
