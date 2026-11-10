@@ -28,7 +28,6 @@ import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
-import { consumePendingReturn } from '@/utils/return-media'
 import {
   loadBundledMangaExtensions,
   resolveJikanToMangakakalot,
@@ -73,17 +72,6 @@ function MangaScreen() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [selectedManga, setSelectedManga] = useState<SelectedManga | null>(null)
-
-  // Restore modal state when returning from read page
-  useEffect(() => {
-    const manga = consumePendingReturn('manga')
-    if (manga) {
-      setSelectedManga({
-        manga,
-        extensionId: manga._returnExtensionId || '',
-      })
-    }
-  }, [])
 
   // Sidebar state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)

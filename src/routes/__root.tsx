@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createRootRoute, Outlet, Link } from '@tanstack/react-router'
+import { createRootRoute, Outlet, Link, useRouter } from '@tanstack/react-router'
 import { Toaster } from 'react-hot-toast'
 import { AppShell } from '@/components/layout/AppShell'
 import { MediaStatusProvider } from '@/contexts/MediaStatusContext'
@@ -17,6 +17,9 @@ import { checkMigrationNeeded } from '@/utils/tauri-commands'
 import { OfflineGuard } from '@/components/layout/OfflineGuard'
 import { Home, Search, ArrowLeft } from 'lucide-react'
 import { isMobile } from '@/utils/platform'
+import { MediaDetailModal } from '@/components/media/MediaDetailModal'
+import { MangaDetailModal } from '@/components/media/MangaDetailModal'
+import { consumePendingReturn, type PendingReturnMedia } from '@/utils/return-media'
 
 import { NotFound } from '@/components/mobile/NotFound'
 
@@ -64,6 +67,45 @@ function NotFoundPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Reopens the detail screen a user left for /watch or /read once they come back,
+ * whichever page or overlay (Home, Anime, search, Library, ...) had opened it.
+ */
+function ReturnDetailHost() {
+  const router = useRouter()
+  const [open, setOpen] = useState<{ type: 'anime' | 'manga'; media: PendingReturnMedia } | null>(null)
+
+  useEffect(
+    () =>
+      router.subscribe('onResolved', ({ toLocation }) => {
+        if (toLocation.pathname === '/watch' || toLocation.pathname === '/read') return
+        const anime = consumePendingReturn('anime')
+        const manga = anime ? null : consumePendingReturn('manga')
+        if (anime || manga) setOpen({ type: anime ? 'anime' : 'manga', media: (anime || manga)! })
+      }),
+    [router]
+  )
+
+  if (!open) return null
+  if (open.type === 'manga') {
+    return (
+      <MangaDetailModal
+        manga={open.media}
+        extensionId={open.media._returnExtensionId || ''}
+        onClose={() => setOpen(null)}
+      />
+    )
+  }
+  return (
+    <MediaDetailModal
+      media={open.media}
+      isOpen
+      onClose={() => setOpen(null)}
+      onMediaChange={(media) => setOpen({ type: 'anime', media })}
+    />
   )
 }
 
@@ -143,6 +185,7 @@ function RootComponent() {
         </OfflineGuard>
       </AppShell>
       <MiniPlayer />
+      <ReturnDetailHost />
       <Toaster
         position={isMobile() ? "top-center" : "bottom-right"}
         toastOptions={{

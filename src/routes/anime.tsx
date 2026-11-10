@@ -32,7 +32,6 @@ import { useJikanQuery, CACHE_TTL } from '@/hooks/useJikanQuery'
 import type { SearchResult } from '@/types/extension'
 import { useSettingsStore } from '@/store/settingsStore'
 import { filterNsfwContent } from '@/utils/nsfw-filter'
-import { consumePendingReturn } from '@/utils/return-media'
 import { getDefaultMediaSortDirection, sortMediaResults } from '@/utils/mediaSort'
 
 // Debounce delay for instant search (ms)
@@ -85,12 +84,6 @@ function AnimeScreen() {
   const [allanimeExtId, setAllanimeExtId] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null)
-
-  // Restore modal state when returning from watch page
-  useEffect(() => {
-    const media = consumePendingReturn('anime')
-    if (media) setSelectedMedia(media)
-  }, [])
 
   // Browse tab infinite scroll state (pages 2+)
   const [browseExtraItems, setBrowseExtraItems] = useState<SearchResult[]>([])
